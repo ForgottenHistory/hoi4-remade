@@ -54,5 +54,10 @@
     sea_region: { texture: "gfx/map/borders/sea_region.png", width: 1.5, minScreenWidth: 5, tile: 0.4, color: [1, 1, 1, 1], order: 6 },
     impassable: { texture: "gfx/map/borders/impassable.png", width: 2.5, minScreenWidth: 8, tile: 0.2, color: [1, 1, 1, 1], fade: [2.0, 3.5], order: 8 },
     country:    { texture: "gfx/map/borders/country.png",    width: 1.5, minScreenWidth: 5, tile: 0.4, color: [1, 1, 1, 1], order: 10 },
-  }
+  },
+
+  // Rivers (map/rivers.png, width level 1..9 per pixel from HOI4 rivers.bmp). Texture baked by the
+  // converter from HOI4 RiverSurface textures: water in the middle, banks at the edges.
+  // Width = width + widthPerLevel * level map px; minScreenWidth floors the widest-to-narrowest set.
+  rivers: { texture: "gfx/map/rivers/river.png", width: 0.35, widthPerLevel: 0.12, minScreenWidth: 1, tile: 0.15, color: [1, 1, 1, 1], fade: [1.5, 2.5] },
 }

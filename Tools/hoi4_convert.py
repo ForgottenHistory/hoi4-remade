@@ -430,6 +430,56 @@ def write_regions(hoi4: Path, out: Path, provinces, province_state, impassable_s
     print(f"Regions: {len(states)} states, {len(regions)} strategic regions, {len(impassable_states)} impassable")
 
 
+def convert_rivers(hoi4: Path, out: Path, gfx: Path):
+    """map/rivers.png: river width level per pixel (R=G=B, 0 = no river, 1..9 narrow..wide),
+    from HOI4 rivers.bmp (palette 3..11 = widths; 0/1/2 = source/join/split markers, which take
+    their neighbours' width). Plus gfx/map/rivers/river.png, a strip texture baked from HOI4's
+    RiverSurface textures: U along the river, V across; water in the middle half, banks outside."""
+    a = np.asarray(Image.open(hoi4 / "map" / "rivers.bmp")).astype(np.int16)
+    level = np.where((a >= 3) & (a <= 11), a - 2, 0).astype(np.uint8)
+    markers = np.argwhere((a <= 2) & (level == 0))
+    H, W = a.shape
+    for _ in range(3):
+        for y, x in markers:
+            if level[y, x]:
+                continue
+            nb = level[max(y - 1, 0):y + 2, max(x - 1, 0):x + 2]
+            if nb.max():
+                level[y, x] = nb.max()
+    level[(a <= 2) & (level == 0)] = 1
+    Image.fromarray(np.repeat(level[..., None], 3, axis=2), "RGB").save(out / "map" / "rivers.png", compress_level=1)
+
+    # Water color: HOI4 colormap_water averaged under river pixels, at WATER_COLOR_LIGHTNESS-ish brightness
+    cw = Image.open(hoi4 / "map" / "terrain" / "colormap_water_0.dds").convert("RGB").resize((W, H), Image.BILINEAR)
+    water = np.asarray(cw).astype(np.float32)[level > 0].mean(axis=0) / 255.0
+    water = np.clip(water * 0.9 + 0.08, 0, 1)
+
+    diffuse = np.asarray(Image.open(hoi4 / "map" / "terrain" / "RiverSurface_diffuse_0.dds").convert("RGB")).astype(np.float32) / 255.0
+    masks = np.asarray(Image.open(hoi4 / "map" / "terrain" / "RiverSurface_masks.dds").convert("RGBA")).astype(np.float32) / 255.0
+    dh, dw = diffuse.shape[:2]
+    mh = masks.shape[0]
+    TW, TH = dw, 64
+    tex = np.zeros((TH, TW, 4), np.float32)
+    for row in range(TH):
+        v = (row + 0.5) / TH
+        t = abs(v - 0.5) * 2.0                    # 0 center .. 1 edge
+        if t <= 0.5:
+            tex[row, :, :3] = water
+            tex[row, :, 3] = 1.0
+            continue
+        sv = (t - 0.5) * 2.0                       # 0 inner bank .. 1 edge (HOI4 v*4-3 on the folded strip)
+        mrow = masks[min(int(sv * mh), mh - 1)].mean(axis=0)
+        bank = mrow[2]                             # b: water -> bank
+        alpha = mrow[0]                            # r: fades out at the very edge
+        drow = diffuse[min(int((1.0 - sv) * dh), dh - 1)]
+        tex[row, :, :3] = water * (1 - bank) + drow * bank
+        tex[row, :, 3] = alpha
+    rivers_gfx = gfx / "rivers"
+    rivers_gfx.mkdir(parents=True, exist_ok=True)
+    Image.fromarray((np.clip(tex, 0, 1) * 255).astype(np.uint8), "RGBA").save(rivers_gfx / "river.png")
+    print(f"Rivers: {int((level > 0).sum())} river pixels, water color {np.round(water, 3).tolist()}")
+
+
 BORDER_TEXTURES = ["country", "state", "province", "sea", "sea_region", "impassable"]
 
 
@@ -475,6 +525,8 @@ def convert_gfx(hoi4: Path, out: Path, water_px):
 
     # World normal at native (half) resolution; sampled bilinearly by the shader
     Image.open(hoi4 / "map" / "world_normal.bmp").convert("RGB").save(gfx / "world_normal.png", compress_level=1)
+
+    convert_rivers(hoi4, out, gfx)
 
     # Border strip textures (U along the border, V across). Only the full-size _0 version:
     # _1/_2 are the same profile at lower resolution, which mipmapping already covers.

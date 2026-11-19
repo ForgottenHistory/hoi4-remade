@@ -119,3 +119,6 @@ InitTestScene*.unity*
 # Python caches
 __pycache__/
 *.pyc
+
+# Local editor addons (not part of the project)
+/Packages/com.mibdev.fullscreen-editor/
