@@ -74,4 +74,23 @@
     maxScale: 2.5,
     fade: [1.5, 2.5],
   },
+
+  // Haze and drifting clouds (Archon MapAtmosphereRenderer). Zoom ranges are [full at or below,
+  // gone at or above] in screen px per map px (small = zoomed out); distances in map px.
+  atmosphere: {
+    hazeColor: [0.36, 0.42, 0.52],
+    hazeMax: 0.3,
+    hazeZoom: [0.3, 1.5],
+    cloudColor: [0.95, 0.95, 0.97],
+    cloudShade: [0.6, 0.64, 0.72],
+    cloudCoverage: 0.42,     // 0 clear .. 1 overcast
+    cloudSoftness: 0.22,
+    cloudOpacity: 0.8,
+    cloudScale: 1400,        // noise tile size: bigger = bigger cloud banks
+    cloudWind: [5, 1.5],     // map px per second
+    cloudZoom: [0.35, 0.9],
+    cloudHeight: 60,         // parallax height above the map
+    shadowStrength: 0.35,
+    shadowOffset: [-40, 30],
+  },
 }
