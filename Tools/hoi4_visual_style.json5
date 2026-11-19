@@ -28,5 +28,17 @@
     _Hoi4WaterReflection:         [0.25, 0.32, 0.4, 1.0],
     _Hoi4WaterReflectionStrength: { value: 0.0, type: "float" },
     _Hoi4WaterDarken:             { value: 0.2, type: "float" },
+  },
+
+  // Mesh border classes (Archon MeshGeometry borders). HOI4 border.shader: strips are
+  // BORDER_WIDTH (1.5) map px wide, the texture sets the visible line (U along tiled by
+  // BORDER_TILE 0.4, V across). color [1,1,1,1] = use the texture's own colors.
+  // minScreenWidth keeps the strip readable when zoomed out; fade = [hidden, visible] in
+  // screen px per map px (HOI4 fades province borders out with camera distance).
+  borders: {
+    province: { texture: "gfx/map/borders/province.png", width: 1.5, minScreenWidth: 8, tile: 0.4, color: [1, 1, 1, 1], fade: [0.6, 1.2], order: 0 },
+    sea:      { texture: "gfx/map/borders/sea.png",      width: 1.5, minScreenWidth: 8, tile: 0.4, color: [1, 1, 1, 1], fade: [0.6, 1.2], order: 1 },
+    coast:    { visible: false },
+    country:  { texture: "gfx/map/borders/country.png",  width: 1.5, minScreenWidth: 5, tile: 0.4, color: [1, 1, 1, 1], order: 10 },
   }
 }

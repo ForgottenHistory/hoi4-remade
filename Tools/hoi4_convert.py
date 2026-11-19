@@ -395,6 +395,9 @@ GFX_TEXTURES = [
 ]
 
 
+BORDER_TEXTURES = ["country", "state", "province", "sea", "sea_region", "impassable"]
+
+
 def graphical_terrain_slots(hoi4: Path):
     """terrain.bmp palette index -> atlas tile (0-15) from common/terrain/00_terrain.txt 'terrain' block."""
     root = parse_pdx(read_text(hoi4 / "common" / "terrain" / "00_terrain.txt"))
@@ -437,6 +440,13 @@ def convert_gfx(hoi4: Path, out: Path, water_px):
 
     # World normal at native (half) resolution; sampled bilinearly by the shader
     Image.open(hoi4 / "map" / "world_normal.bmp").convert("RGB").save(gfx / "world_normal.png", compress_level=1)
+
+    # Border strip textures (U along the border, V across). Only the full-size _0 version:
+    # _1/_2 are the same profile at lower resolution, which mipmapping already covers.
+    borders = gfx / "borders"
+    borders.mkdir(parents=True, exist_ok=True)
+    for kind in BORDER_TEXTURES:
+        Image.open(hoi4 / "map" / "terrain" / f"border_{kind}_0.dds").convert("RGBA").save(borders / f"{kind}.png")
 
 
 if __name__ == "__main__":
