@@ -420,6 +420,7 @@ GFX_TEXTURES = [
     ("colormap_rgb_cityemissivemask_a.dds", "colormap.png"),  # land tint, a city lights mask
     ("colormap_water_0.dds", "colormap_water.png"),  # sea tint
     ("underwater_terrain_0.dds", "underwater.png"),  # tiled sea floor
+    ("citylights_rgb_snowmask_a_0.dds", "citylights.png"),  # tiled city lights (rgb), a snow mask
 ]
 
 

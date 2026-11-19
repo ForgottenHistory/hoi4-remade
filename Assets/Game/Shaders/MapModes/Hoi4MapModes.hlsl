@@ -9,7 +9,13 @@
 #define HOI4_MAP_MODES_INCLUDED
 
 #include "Assets/Archon-Engine/Shaders/Includes/MapModeCommon.hlsl"
+#include "Assets/Archon-Engine/Shaders/Includes/DayNight.hlsl"
 #include "Hoi4Terrain.hlsl"
+
+// City lights at night (HOI4: citylights texture tiled over the map, masked by colormap alpha)
+TEXTURE2D(_Hoi4CityLights);
+float _Hoi4CityLightsIntensity;  // HOI4 CITY_LIGHTS_INTENSITY 5.5
+float _Hoi4CityLightsTiling;     // repeats per map pixel, HOI4 CITY_LIGHTS_TILING 0.09103
 
 // Country color with bilinear blending between the 4 neighbour pixels' owners (soft 1px edges)
 float4 Hoi4CountryColor(float2 uv)
@@ -117,6 +123,26 @@ float4 ArchonOcean(ArchonMapContext ctx)
 #define ARCHON_OVERRIDE_LIGHTING
 float4 ArchonLighting(float4 color, ArchonMapContext ctx)
 {
+    return color;
+}
+
+// Night: city lights glow on the dark side, then the engine night look (HOI4 order)
+#define ARCHON_OVERRIDE_NIGHT
+float4 ArchonNight(float4 color, ArchonMapContext ctx)
+{
+    float night = ArchonNightFactor(ctx.uv);
+    if (night <= 0.0) return color;
+
+    float mask = SAMPLE_TEXTURE2D(_Hoi4Colormap, sampler_trilinear_clamp, ctx.uv).a;
+    if (mask > 0.0 && _Hoi4CityLightsIntensity > 0.0)
+    {
+        uint w, h;
+        _ProvinceOwnerTexture.GetDimensions(w, h);
+        float2 mapPx = float2(ctx.uv.x * w, (1.0 - ctx.uv.y) * h);
+        float3 lights = SAMPLE_TEXTURE2D(_Hoi4CityLights, sampler_trilinear_repeat, mapPx * _Hoi4CityLightsTiling).rgb;
+        color.rgb += lights * _Hoi4CityLightsIntensity * mask * night;
+    }
+    color.rgb = ArchonApplyNight(color.rgb, ctx.uv, 1.0);
     return color;
 }
 

@@ -12,6 +12,7 @@
     _Hoi4ColormapWater: { texture: "gfx/map/colormap_water.png", filter: "bilinear", wrap: "clamp" },
     _Hoi4Underwater:    { texture: "gfx/map/underwater.png",     filter: "trilinear", wrap: "repeat" },
     _Hoi4WorldNormal:   { texture: "gfx/map/world_normal.png",   filter: "bilinear", wrap: "clamp", linear: true, mipmaps: false },
+    _Hoi4CityLights:    { texture: "gfx/map/citylights.png",     filter: "trilinear", wrap: "repeat" },
 
     // --- tuning (HOI4 constants.fxh values where they exist) ---
     _Hoi4TileFrequency:    { value: 128, type: "float" },
@@ -32,6 +33,10 @@
     _Hoi4WaterFloorRelief:        { value: 0.3, type: "float" },  // bathymetry relief on the sea floor
     _Hoi4WaterSurfaceColor:       [0.17, 0.23, 0.33, 1.0],         // HOI4's calm blue-grey sea
     _Hoi4WaterSurfaceOpacity:     { value: 0.55, type: "float" },
+
+    // City lights at night (masked by colormap alpha)
+    _Hoi4CityLightsIntensity: { value: 5.5, type: "float" },     // HOI4 CITY_LIGHTS_INTENSITY
+    _Hoi4CityLightsTiling:    { value: 0.09103, type: "float" }, // HOI4 CITY_LIGHTS_TILING (repeats per map px)
 
     // Gradient borders (political mode): [band thickness map px, edge blend, interior blend, rim darkening]
     _Hoi4Gradient:         { value: [10, 0.8, 0.25, 0.35], type: "vector" },
@@ -92,5 +97,20 @@
     cloudHeight: 60,         // parallax height above the map
     shadowStrength: 0.35,
     shadowOffset: [-40, 30],
+  },
+
+  // Day/night from game time. Toggle in game with toggleKey (Unity KeyCode name, "none" to disable).
+  dayNight: {
+    enabled: true,
+    toggleKey: "N",
+    opacity: 0.85,           // HOI4 NIGHT_OPACITY
+    darkness: 0.5,           // HOI4 NIGHT_DARKNESS
+    desaturation: 0.8,
+    tint: [0.2, 0.7, 1.2],
+    feather: 0.06,           // dusk band width
+    greenwichX: 2793,        // HOI4 GMT_OFFSET (map px of longitude 0)
+    latitudeRange: [0.17, 0.93], // HOI4 SOUTH/NORTH_POLE_OFFSET
+    seasons: true,           // sun tilts with the date (long winter nights up north)
+    fadeSeconds: 0.4,
   },
 }
