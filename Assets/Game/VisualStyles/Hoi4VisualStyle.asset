@@ -1,0 +1,86 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a9910efd2cc5a7149a6e1453eb73a6ca, type: 3}
+  m_Name: Hoi4VisualStyle
+  m_EditorClassIdentifier: 
+  styleName: HOI4
+  description: HOI4 terrain atlas look (converted map data)
+  borders:
+    renderingMode: 3
+    customRendererId: 
+    countryBorderColor: {r: 0, g: 0, b: 0, a: 1}
+    countryBorderStrength: 1
+    provinceBorderColor: {r: 0.33962262, g: 0.33962262, b: 0.33962262, a: 1}
+    provinceBorderStrength: 1
+    enableBordersOnStartup: 1
+    borderMode: 3
+    pixelPerfectCountryThickness: 3
+    pixelPerfectProvinceThickness: 0
+    pixelPerfectAntiAliasing: 1.516
+    edgeWidth: 0.5
+    gradientWidth: 2
+    edgeSmoothness: 0.2
+    edgeColorMultiplier: 0.7
+    gradientColorMultiplier: 0.85
+    edgeAlpha: 1
+    gradientAlphaInside: 0.5
+    gradientAlphaOutside: 0.3
+  mapModes:
+    oceanColor: {r: 0.098, g: 0.157, b: 0.439, a: 1}
+    unownedLandColor: {r: 0.8, g: 0.7, b: 0.5, a: 1}
+    showTerrainForUnowned: 1
+    terrainBrightness: 1
+    terrainSaturation: 1
+    detailTiling: 1
+    detailStrength: 1
+    normalMapStrength: 2
+    normalMapAmbient: 0.5
+    normalMapHighlight: 1.5
+  mapMaterial: {fileID: 2100000, guid: a9fd97c8266b4e0da8760ea1edd8ea6f, type: 2}
+  advancedEffects:
+    overlayTexture: {fileID: 0}
+    overlayStrength: 0
+    countryColorSaturation: 1
+  fogOfWar:
+    customRendererId: 
+    enabled: 0
+    unexploredColor: {r: 0.05, g: 0.05, b: 0.05, a: 1}
+    exploredTint: {r: 0.5, g: 0.5, b: 0.5, a: 1}
+    exploredDesaturation: 0.032
+    noiseColor: {r: 0.3, g: 0.3, b: 0.4, a: 1}
+    noiseScale: 20
+    noiseStrength: 0.626
+    noiseSpeed: 2
+  tessellation:
+    enabled: 1
+    heightScale: 5
+    tessellationFactor: 32
+    tessellationMinDistance: 10
+    tessellationMaxDistance: 1000
+  highlights:
+    customRendererId: 
+    selectionColor: {r: 1, g: 0.84, b: 0, a: 0.4}
+    hoverColor: {r: 1, g: 1, b: 1, a: 0.3}
+    defaultMode: 0
+    borderThickness: 2
+    opacityMultiplier: 1
+  terrainBlend:
+    customRendererId: 
+    sampleRadius: 2
+    blendSharpness: 1
+  mapModeColorizer:
+    customColorizerId: 
+    discreteBands: 0
+    showValueLabels: 0
+    noDataColor: {r: 0.25, g: 0.25, b: 0.25, a: 1}
+  customShaderParameters: []
+  styleDataFile: map/visual_style.json5

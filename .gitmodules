@@ -1,0 +1,3 @@
+[submodule "Assets/Archon-Engine"]
+	path = Assets/Archon-Engine
+	url = https://github.com/ForgottenHistory/Archon-Engine.git
