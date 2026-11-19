@@ -15,7 +15,7 @@ MonoBehaviour:
   styleName: HOI4
   description: HOI4 terrain atlas look (converted map data)
   borders:
-    renderingMode: 3
+    renderingMode: 2
     customRendererId: 
     countryBorderColor: {r: 0, g: 0, b: 0, a: 1}
     countryBorderStrength: 1
