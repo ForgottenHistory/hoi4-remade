@@ -49,6 +49,42 @@ float4 Hoi4PaletteColor(uint provinceID)
     return SAMPLE_TEXTURE2D_LOD(_ProvincePaletteTexture, sampler_ProvincePaletteTexture, paletteUV, 0);
 }
 
+// HOI4 "gradient borders": country color is strongest along the country border and fades
+// towards the interior; zooming out fills the whole country. Uses the engine country-border
+// distance field (_DistanceFieldBorderTexture.r, 0-1 over 32 map pixels).
+float4 _Hoi4Gradient;          // x = band thickness (map px), y = edge blend, z = interior blend, w = rim darkening
+float4 _Hoi4GradientFillZoom;  // x..y = map px per screen px where the fill goes from band-only to full
+
+float Hoi4CountryBlend(float2 uv)
+{
+    float thickness = HOI4_OR(_Hoi4Gradient.x, 10.0);
+    float edgeBlend = HOI4_OR(_Hoi4Gradient.y, 0.75);
+    float interiorBlend = _Hoi4Gradient.z;
+
+    float dist = SAMPLE_TEXTURE2D(_DistanceFieldBorderTexture, sampler_DistanceFieldBorderTexture,
+                                  float2(uv.x, 1.0 - uv.y)).r * 32.0;
+
+    // Zoom: map pixels per screen pixel (small = zoomed in)
+    uint w, h;
+    _ProvinceOwnerTexture.GetDimensions(w, h);
+    float mapPxPerScreenPx = length(fwidth(uv * float2(w, h)));
+    float2 fillZoom = _Hoi4GradientFillZoom.y > _Hoi4GradientFillZoom.x ? _Hoi4GradientFillZoom.xy : float2(0.6, 1.6);
+    float fill = smoothstep(fillZoom.x, fillZoom.y, mapPxPerScreenPx);
+
+    // HOI4 gradient_border_distance_to_alpha: band near the border, widening to full fill
+    float band = 1.0 - saturate(dist / thickness);
+    float alpha = 1.0 - saturate((1.0 - band) * (1.0 - fill));
+    return lerp(interiorBlend, edgeBlend, alpha);
+}
+
+// Darkening right at the country border (HOI4 draws a darker outline edge)
+float Hoi4CountryRim(float2 uv)
+{
+    float dist = SAMPLE_TEXTURE2D(_DistanceFieldBorderTexture, sampler_DistanceFieldBorderTexture,
+                                  float2(uv.x, 1.0 - uv.y)).r * 32.0;
+    return saturate(_Hoi4Gradient.w) * (1.0 - smoothstep(0.5, 2.0, dist));
+}
+
 float4 RenderMapMode(int mapMode, uint provinceID, float2 uv, float3 positionWS)
 {
     float blend = HOI4_OR(_Hoi4PoliticalBlend, 0.65);
@@ -66,7 +102,8 @@ float4 RenderMapMode(int mapMode, uint provinceID, float2 uv, float3 positionWS)
     // Political (0) and fallback
     float4 country = Hoi4CountryColor(uv);
     country.rgb = lerp(dot(country.rgb, float3(0.299, 0.587, 0.114)).xxx, country.rgb, _CountryColorSaturation);
-    return Hoi4Render(uv, positionWS, float4(country.rgb, country.a * blend));
+    country.rgb *= 1.0 - Hoi4CountryRim(uv) * 0.5;
+    return Hoi4Render(uv, positionWS, float4(country.rgb, country.a * Hoi4CountryBlend(uv)));
 }
 
 // Pixels outside every province (ID 0) still get HOI4 water

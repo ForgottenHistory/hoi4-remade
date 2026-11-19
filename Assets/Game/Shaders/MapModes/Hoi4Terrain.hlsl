@@ -41,6 +41,10 @@ float  _Hoi4WaterLightness;     // HOI4: 0.5
 float4 _Hoi4WaterReflection;    // stand-in for the sky cubemap
 float  _Hoi4WaterReflectionStrength;
 float  _Hoi4WaterDarken;        // HOI4: 0.2
+float  _Hoi4WaterFloorVisibility; // how much lit sea floor shows in shallow water (0-1)
+float  _Hoi4WaterFloorRelief;   // how much bathymetry relief lights the sea floor (0 flat, 1 full)
+float4 _Hoi4WaterSurfaceColor;  // surface color laid over the water
+float  _Hoi4WaterSurfaceOpacity;// surface color strength in deep water (shallow water gets less)
 
 // Unset globals read 0: fall back to HOI4 defaults so the map never renders black
 #define HOI4_OR(v, d) ((v) > 0.0 ? (v) : (d))
@@ -236,9 +240,16 @@ float3 Hoi4Water(float2 uv, float3 positionWS, float3 worldNormal)
     float3 tint = SAMPLE_TEXTURE2D(_Hoi4ColormapWater, sampler_trilinear_clamp, uv).rgb * HOI4_OR(_Hoi4WaterLightness, 0.5);
     float2 floorUV = float2(uv.x, 1.0 - uv.y) * float2(w / 32.0, h / 32.0);
     float3 seaFloor = SAMPLE_TEXTURE2D(_Hoi4Underwater, sampler_trilinear_repeat, floorUV).rgb;
-    seaFloor = Hoi4Light(seaFloor, worldNormal, positionWS, 0, 0);
+    // Flatten the bathymetry relief: HOI4's sea reads as a calm surface, not a lit sea floor
+    float3 floorNormal = normalize(lerp(float3(0, 1, 0), worldNormal, saturate(_Hoi4WaterFloorRelief)));
+    seaFloor = Hoi4Light(seaFloor, floorNormal, positionWS, 0, 0);
 
-    float3 color = lerp(tint, seaFloor, shallow);
+    float floorAmount = shallow * saturate(_Hoi4WaterFloorVisibility);
+    float3 color = lerp(tint, seaFloor, floorAmount);
+
+    // Surface color, strongest over deep water
+    if (_Hoi4WaterSurfaceColor.a > 0)
+        color = lerp(color, _Hoi4WaterSurfaceColor.rgb, saturate(_Hoi4WaterSurfaceOpacity) * (1.0 - floorAmount));
 
     // Surface: fresnel towards the sky color, plus a sun glint on a flat surface
     float3 V = normalize(GetCameraPositionWS() - positionWS);

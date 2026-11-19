@@ -28,6 +28,15 @@
     _Hoi4WaterReflection:         [0.25, 0.32, 0.4, 1.0],
     _Hoi4WaterReflectionStrength: { value: 0.0, type: "float" },
     _Hoi4WaterDarken:             { value: 0.2, type: "float" },
+    _Hoi4WaterFloorVisibility:    { value: 0.35, type: "float" }, // lit sea floor in shallow water
+    _Hoi4WaterFloorRelief:        { value: 0.3, type: "float" },  // bathymetry relief on the sea floor
+    _Hoi4WaterSurfaceColor:       [0.17, 0.23, 0.33, 1.0],         // HOI4's calm blue-grey sea
+    _Hoi4WaterSurfaceOpacity:     { value: 0.55, type: "float" },
+
+    // Gradient borders (political mode): [band thickness map px, edge blend, interior blend, rim darkening]
+    _Hoi4Gradient:         { value: [10, 0.8, 0.25, 0.35], type: "vector" },
+    // Map px per screen px where the color goes from border band only (zoomed in) to full fill (zoomed out)
+    _Hoi4GradientFillZoom: { value: [0.5, 1.5, 0, 0], type: "vector" },
   },
 
   // Mesh border classes (Archon MeshGeometry borders). HOI4 border.shader: strips are
@@ -35,10 +44,15 @@
   // BORDER_TILE 0.4, V across). color [1,1,1,1] = use the texture's own colors.
   // minScreenWidth keeps the strip readable when zoomed out; fade = [hidden, visible] in
   // screen px per map px (HOI4 fades province borders out with camera distance).
+  // Rough guide: ~1 = Europe on screen, ~3+ = a few countries, ~6+ = close in.
+  // Classes come from the GAME classifier (Assets/Game/Scripts/Map/Hoi4BorderClassifier.cs).
   borders: {
-    province: { texture: "gfx/map/borders/province.png", width: 1.5, minScreenWidth: 8, tile: 0.4, color: [1, 1, 1, 1], fade: [0.6, 1.2], order: 0 },
-    sea:      { texture: "gfx/map/borders/sea.png",      width: 1.5, minScreenWidth: 8, tile: 0.4, color: [1, 1, 1, 1], fade: [0.6, 1.2], order: 1 },
-    coast:    { visible: false },
-    country:  { texture: "gfx/map/borders/country.png",  width: 1.5, minScreenWidth: 5, tile: 0.4, color: [1, 1, 1, 1], order: 10 },
+    province:   { texture: "gfx/map/borders/province.png",   width: 1.5, minScreenWidth: 8, tile: 0.4, color: [1, 1, 1, 1], fade: [3.0, 5.0], order: 0 },
+    sea:        { texture: "gfx/map/borders/sea.png",        width: 1.5, minScreenWidth: 8, tile: 0.4, color: [1, 1, 1, 1], fade: [3.0, 5.0], order: 1 },
+    coast:      { visible: false },
+    state:      { texture: "gfx/map/borders/state.png",      width: 1.5, minScreenWidth: 6, tile: 0.4, color: [1, 1, 1, 1], fade: [1.5, 2.5], order: 5 },
+    sea_region: { texture: "gfx/map/borders/sea_region.png", width: 1.5, minScreenWidth: 5, tile: 0.4, color: [1, 1, 1, 1], order: 6 },
+    impassable: { texture: "gfx/map/borders/impassable.png", width: 2.5, minScreenWidth: 8, tile: 0.2, color: [1, 1, 1, 1], fade: [2.0, 3.5], order: 8 },
+    country:    { texture: "gfx/map/borders/country.png",    width: 1.5, minScreenWidth: 5, tile: 0.4, color: [1, 1, 1, 1], order: 10 },
   }
 }
