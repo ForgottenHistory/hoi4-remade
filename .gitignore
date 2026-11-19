@@ -115,3 +115,7 @@ InitTestScene*.unity*
 
 # Converted HOI4 data (derived from local game install - do not commit)
 /Hoi4Data/
+
+# Python caches
+__pycache__/
+*.pyc
