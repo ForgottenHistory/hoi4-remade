@@ -60,4 +60,18 @@
   // converter from HOI4 RiverSurface textures: water in the middle, banks at the edges.
   // Width = width + widthPerLevel * level map px; minScreenWidth floors the widest-to-narrowest set.
   rivers: { texture: "gfx/map/rivers/river.png", width: 0.35, widthPerLevel: 0.12, minScreenWidth: 1, tile: 0.15, color: [1, 1, 1, 1], fade: [1.5, 2.5] },
+
+  // Country name labels (Archon MapLabelRenderer). Font size in map px (maxHeight); labels below
+  // minScreenHeight screen px grow up to maxScale times, smaller ones fade out. fade = [visible
+  // below, hidden above] in screen px per map px (HOI4 hides country names at state zoom).
+  labels: {
+    font: "gfx/fonts/Oswald.ttf",
+    color: [0.91, 0.9, 0.95, 1],
+    shadowColor: [0.03, 0.03, 0.07, 0.8],
+    shadowOffset: [0.04, 0.05],
+    shadowSoftness: 0.6,
+    minScreenHeight: 11,
+    maxScale: 2.5,
+    fade: [1.5, 2.5],
+  },
 }

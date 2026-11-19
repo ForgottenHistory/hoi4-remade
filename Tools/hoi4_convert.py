@@ -197,6 +197,7 @@ def convert(hoi4: Path, out: Path):
     state_names = {}      # state id -> display name
     impassable_states = set()
     vp_names = {}         # pid -> name
+    state_top_vp = {}     # state id -> (value, pid) of its biggest victory point (the state's main city)
     for f in sorted((hoi4 / "history" / "states").glob("*.txt")):
         root = parse_pdx(read_text(f))
         st = get(root, "state")
@@ -215,6 +216,12 @@ def convert(hoi4: Path, out: Path):
                 vals = values(vp) if isinstance(vp, list) else []
                 if vals:
                     vp_pid = int(vals[0])
+                    try:
+                        vp_value = float(vals[1]) if len(vals) > 1 else 0.0
+                    except ValueError:
+                        vp_value = 0.0
+                    if sid not in state_top_vp or vp_value > state_top_vp[sid][0]:
+                        state_top_vp[sid] = (vp_value, vp_pid)
                     n = loc.get(f"VICTORY_POINTS_{vp_pid}")
                     if n:
                         vp_names[vp_pid] = n
@@ -241,9 +248,21 @@ def convert(hoi4: Path, out: Path):
     color_override = {k: parse_color(get(v, "color")) for k, _, v in colors_root if isinstance(v, list)}
 
     ruling_party = {}
+    capitals = {}  # tag -> capital province (top victory point of the capital state)
     for f in (hoi4 / "history" / "countries").glob("*.txt"):
         tag = f.name[:3]
         root = parse_pdx(read_text(f))
+        try:
+            cap_state = int(get(root, "capital"))
+        except (TypeError, ValueError):
+            cap_state = None
+        if cap_state is not None:
+            if cap_state in state_top_vp:
+                capitals[tag] = state_top_vp[cap_state][1]
+            else:
+                state_provs = sorted(pid for pid, sid in province_state.items() if sid == cap_state)
+                if state_provs:
+                    capitals[tag] = state_provs[0]
         pol = get(root, "set_politics")
         if isinstance(pol, list):
             ruling_party[tag] = get(pol, "ruling_party")
@@ -307,7 +326,7 @@ def convert(hoi4: Path, out: Path):
         (hist_dir / f"{pid}-Province_{pid}.json5").write_text(
             f"// {province_name(pid)}\n{{\n" + ",\n".join(fields) + "\n}\n", encoding="utf-8")
     (out / "map" / "definition.csv").write_text("\n".join(def_lines) + "\n", encoding="utf-8")
-    write_regions(hoi4, out, provinces, province_state, impassable_states)
+    write_regions(hoi4, out, provinces, province_state, impassable_states, capitals)
     if unmapped_terrain:
         print(f"WARNING: unmapped terrain types (fell back): {sorted(unmapped_terrain)}")
 
@@ -384,6 +403,11 @@ def convert(hoi4: Path, out: Path):
     # HOI4 visual style data for the GAME terrain shader
     shutil.copy2(Path(__file__).with_name("hoi4_visual_style.json5"), out / "map" / "visual_style.json5")
 
+    # Map label font (OFL; see Tools/fonts/OFL.txt)
+    (out / "gfx" / "fonts").mkdir(parents=True, exist_ok=True)
+    for font in Path(__file__).with_name("fonts").glob("*.ttf"):
+        shutil.copy2(font, out / "gfx" / "fonts" / font.name)
+
     print(f"Done -> {out}")
 
 
@@ -399,9 +423,10 @@ GFX_TEXTURES = [
 ]
 
 
-def write_regions(hoi4: Path, out: Path, provinces, province_state, impassable_states):
-    """GAME data: province groupings the engine doesn't model (states, strategic regions).
-    Used by the HOI4 border classifier (state / sea region / impassable borders)."""
+def write_regions(hoi4: Path, out: Path, provinces, province_state, impassable_states, capitals):
+    """GAME data: province groupings the engine doesn't model (states, strategic regions), plus
+    country capitals (province ids). Used by the HOI4 border classifier (state / sea region /
+    impassable borders) and the HOI4 map label source (which piece of a country gets its name)."""
     regions = {}
     for f in sorted((hoi4 / "map" / "strategicregions").glob("*.txt")):
         root = parse_pdx(read_text(f))
@@ -425,9 +450,10 @@ def write_regions(hoi4: Path, out: Path, provinces, province_state, impassable_s
             + block("states", states) + ",\n"
             + block("strategic_regions", regions) + ",\n"
             + f"  impassable_states: [{', '.join(map(str, sorted(impassable_states)))}],\n"
-            + f"  water_provinces: [{', '.join(map(str, water))}]\n}}\n")
+            + f"  water_provinces: [{', '.join(map(str, water))}],\n"
+            + "  capitals: {" + ", ".join(f'"{t}": {p}' for t, p in sorted(capitals.items())) + "}\n}\n")
     (out / "map" / "hoi4_regions.json5").write_text(text, encoding="utf-8")
-    print(f"Regions: {len(states)} states, {len(regions)} strategic regions, {len(impassable_states)} impassable")
+    print(f"Regions: {len(states)} states, {len(regions)} strategic regions, {len(impassable_states)} impassable, {len(capitals)} capitals")
 
 
 def convert_rivers(hoi4: Path, out: Path, gfx: Path):
