@@ -122,3 +122,4 @@ __pycache__/
 
 # Local editor addons (not part of the project)
 /Packages/com.mibdev.fullscreen-editor/
+Packages/packages-lock.json
