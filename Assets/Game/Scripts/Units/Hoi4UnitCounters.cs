@@ -65,6 +65,9 @@ namespace Hoi4.Units
 
         sealed class Stack
         {
+            public readonly List<ushort> Units = new List<ushort>();
+            public bool Selected;
+            public float X0, X1; // horizontal extent in counter pixels relative to the anchor
             public ushort Province, Country;
             public string Tag;
             public int Count;
@@ -80,7 +83,25 @@ namespace Hoi4.Units
         IDisposable[] subscriptions;
         bool dirty;
 
-        Sprite plate, ideologyStrip, barOrg, barStr, digits;
+        Sprite plate, selectedFrame, ideologyStrip, barOrg, barStr, digits;
+        List<Stack> stacks = new List<Stack>();
+        Texture2D heightmap;
+        float heightScale = 10f;
+        Vector4 mapBounds;
+
+        /// <summary>Selected engine unit IDs (owned by the selection controller); counters holding any are framed.</summary>
+        public ISet<ushort> Selection { get; set; }
+
+        public bool IsReady => material != null;
+
+        // Map placement shared with other GAME map overlays (move arrows)
+        public Vector4 MapWorldBounds => mapBounds;
+        public Texture2D Heightmap => heightmap;
+        public float HeightScale => heightScale;
+        public float WorldPerMapPixel => worldPerMapPixel;
+
+        /// <summary>Re-compose counters (selection, organisation or strength changed).</summary>
+        public void MarkDirty() => dirty = true;
         int digitW = 9, digitH = 14;
         readonly Dictionary<string, Sprite> icons = new Dictionary<string, Sprite>();
         readonly Dictionary<string, Sprite> flags = new Dictionary<string, Sprite>();
@@ -146,13 +167,15 @@ namespace Hoi4.Units
 
             material = new Material(shader) { name = "Hoi4UnitCounters" };
             var bounds = mapRenderer.bounds;
-            material.SetVector(BoundsId, new Vector4(bounds.min.x, bounds.min.z, bounds.size.x, bounds.size.z));
+            mapBounds = new Vector4(bounds.min.x, bounds.min.z, bounds.size.x, bounds.size.z);
+            material.SetVector(BoundsId, mapBounds);
+            heightmap = engine.TextureManager.HeightmapTexture;
             worldPerMapPixel = bounds.size.x / Mathf.Max(engine.TextureManager.MapWidth, 1);
             if (engine.TextureManager.HeightmapTexture != null)
                 material.SetTexture(HeightmapId, engine.TextureManager.HeightmapTexture);
             var mapMaterial = mapRenderer.sharedMaterial;
-            material.SetFloat(HeightScaleId, mapMaterial != null && mapMaterial.HasProperty("_HeightScale")
-                ? mapMaterial.GetFloat("_HeightScale") : 10f);
+            heightScale = mapMaterial != null && mapMaterial.HasProperty("_HeightScale") ? mapMaterial.GetFloat("_HeightScale") : 10f;
+            material.SetFloat(HeightScaleId, heightScale);
 
             mesh = new Mesh { name = "Hoi4UnitCounters", indexFormat = IndexFormat.UInt32 };
 
@@ -180,11 +203,64 @@ namespace Hoi4.Units
                 Graphics.DrawMesh(mesh, Matrix4x4.identity, material, 0);
         }
 
+        // --- Picking and map positions ----------------------------------------------------------
+
+        /// <summary>Terrain surface height at a world position (same formula as the map shader).</summary>
+        public float TerrainHeight(Vector3 world)
+        {
+            if (heightmap == null || !heightmap.isReadable) return 0f;
+            float u = (world.x - mapBounds.x) / mapBounds.z;
+            float v = (world.z - mapBounds.y) / mapBounds.w;
+            return (heightmap.GetPixelBilinear(u, 1f - v).r - 0.5f) * heightScale;
+        }
+
+        /// <summary>Province centre on the terrain surface (where its counters stand).</summary>
+        public bool TryGetProvincePoint(ushort province, out Vector3 world)
+        {
+            world = default;
+            if (centers == null || !centers.TryGetProvinceCenter(province, out world)) return false;
+            world.y = TerrainHeight(world) + liftAboveTerrain;
+            return true;
+        }
+
+        /// <summary>
+        /// The units of the counter under a screen position (topmost first), mirroring the
+        /// Hoi4/UnitCounter vertex shader's size and placement. False when none or counters are hidden.
+        /// </summary>
+        public bool TryPick(Vector2 screen, out IReadOnlyList<ushort> units)
+        {
+            units = null;
+            var cam = Camera.main;
+            if (cam == null || stacks.Count == 0) return false;
+            float p11 = Mathf.Abs(cam.projectionMatrix[1, 1]);
+            // Drawn north to south, so the last hit is the one on top
+            for (int i = stacks.Count - 1; i >= 0; i--)
+            {
+                var s = stacks[i];
+                var anchor = s.Anchor;
+                anchor.y = TerrainHeight(anchor) + liftAboveTerrain;
+                Vector3 sp = cam.WorldToScreenPoint(anchor);
+                if (sp.z <= 0f) continue;
+                float worldPerScreenPx = 2f * Mathf.Max(sp.z, 1e-3f) / (p11 * Screen.height);
+                float zoom = worldPerMapPixel / worldPerScreenPx;
+                if (zoom < fadeHiddenZoom) return false; // counters are hidden at this zoom
+                float scale = pixelScale * Mathf.Clamp(zoom / Mathf.Max(fullSizeZoom, 0.01f), Mathf.Clamp01(minSizeFraction), 1f);
+                float x = screen.x - sp.x, y = screen.y - sp.y;
+                if (x >= s.X0 * scale && x <= (s.X0 + CounterW) * scale && y >= (SlotH - CounterH - 1) * scale && y <= SlotH * scale)
+                {
+                    units = s.Units;
+                    return true;
+                }
+            }
+            return false;
+        }
+
         // --- Sprites -------------------------------------------------------------------------
 
         bool LoadSprites()
         {
             plate = LoadSprite("gfx/counters/plate.png");
+            selectedFrame = LoadSprite("gfx/counters/selected.png");
             ideologyStrip = LoadSprite("gfx/counters/ideology.png");
             barOrg = LoadSprite("gfx/counters/bar_org.png");
             barStr = LoadSprite("gfx/counters/bar_str.png");
@@ -269,6 +345,8 @@ namespace Hoi4.Units
                     };
                 }
                 s.Count++;
+                s.Units.Add(id);
+                if (Selection != null && Selection.Contains(id)) s.Selected = true;
                 var d = Hoi4Divisions.Instance != null ? Hoi4Divisions.Instance.Get(id) : null;
                 string type = d?.MainType ?? "infantry";
                 s.Types[type] = s.Types.TryGetValue(type, out int n) ? n + 1 : 1;
@@ -279,7 +357,7 @@ namespace Hoi4.Units
                 }
             }
 
-            var stacks = new List<Stack>();
+            var result = new List<Stack>();
             var perProvince = new Dictionary<ushort, List<Stack>>();
             foreach (var s in byKey.Values)
             {
@@ -287,7 +365,7 @@ namespace Hoi4.Units
                 if (!perProvince.TryGetValue(s.Province, out var list))
                     perProvince[s.Province] = list = new List<Stack>();
                 list.Add(s);
-                stacks.Add(s);
+                result.Add(s);
             }
             foreach (var list in perProvince.Values)
             {
@@ -299,15 +377,15 @@ namespace Hoi4.Units
                 }
             }
             // North first so southern counters draw on top (they are nearer the camera)
-            stacks.Sort((a, b) => b.Anchor.z.CompareTo(a.Anchor.z));
-            return stacks;
+            result.Sort((a, b) => b.Anchor.z.CompareTo(a.Anchor.z));
+            return result;
         }
 
         // --- Build ---------------------------------------------------------------------------
 
         void Rebuild()
         {
-            var stacks = CollectStacks();
+            stacks = CollectStacks();
             int cols = AtlasWidth / SlotW;
             int rows = Mathf.Max(1, (stacks.Count + cols - 1) / cols);
             int atlasHeight = Mathf.NextPowerOfTwo(rows * SlotH);
@@ -345,6 +423,7 @@ namespace Hoi4.Units
                 // Offsets in counter pixels from the anchor (x right, y up), stacks side by side
                 float shift = (s.IndexInProvince - (s.StacksInProvince - 1) * 0.5f) * StackSpacingPx;
                 float x0 = -SlotW * 0.5f + shift, x1 = SlotW * 0.5f + shift;
+                s.X0 = x0; s.X1 = x1;
                 float y0 = 0f, y1 = SlotH; // bottom edge on the anchor (shader stands it up)
 
                 int v = i * 4;
@@ -377,6 +456,8 @@ namespace Hoi4.Units
             // Layout from HOI4 interface/mapicons.gui (unit_counter)
             byte pb = (byte)Mathf.RoundToInt(Mathf.Clamp01(plateBrightness) * 255f);
             Blit(plate, 0, 0, CounterW, CounterH, ox, oy, new Color32(pb, pb, pb, 255));
+            if (s.Selected && selectedFrame != null)
+                Blit(selectedFrame, 0, 0, selectedFrame.Width, selectedFrame.Height, ox, oy);
             string ideology = countryIdeology.TryGetValue(s.Tag ?? "", out var ide) ? ide : "neutrality";
             int frame = ideologyFrame.TryGetValue(ideology, out int f) ? f : 3;
             int ideoW = ideologyStrip.Width / Mathf.Max(ideologyFrame.Count, 1);

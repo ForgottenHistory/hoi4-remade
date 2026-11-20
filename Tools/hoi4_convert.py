@@ -435,6 +435,7 @@ def convert(hoi4: Path, out: Path):
     # 1936 land armies (after the template copy: our unit types replace the template infantry)
     oob_countries, main_types = convert_oob(hoi4, out, {o for o, _ in province_owner.values()}, ruling_party)
     convert_counter_gfx(hoi4, out, {t: c["ideology"] for t, c in oob_countries.items()}, main_types)
+    convert_move_arrow(hoi4, out)
 
     # HOI4 visual style data for the GAME terrain shader
     shutil.copy2(Path(__file__).with_name("hoi4_visual_style.json5"), out / "map" / "visual_style.json5")
@@ -848,6 +849,45 @@ def convert_oob(hoi4: Path, out: Path, existing_tags, ruling_party):
 
 
 COUNTER_IDEOLOGIES = ["democratic", "communism", "fascism", "neutrality"]  # frame order of the ideology sprite
+
+
+def convert_move_arrow(hoi4: Path, out: Path, arrow_name="move_thick"):
+    """HOI4's unit move arrow (gfx/maparrows/maparrows.txt arrowType move_thick): mask and pattern
+    textures as PNGs under gfx/maparrows/ plus its shape parameters in move_arrow.json5.
+    Texture layout: left half = body (tiles along the arrow, uses the middle body_uv_scale of the
+    height), right half = head; mask rgb*a = coverage, pattern = grayscale colour detail."""
+    src = hoi4 / "gfx" / "maparrows"
+    root = parse_pdx(read_text(src / "maparrows.txt"))
+    arrow = next((a for a in get_all(root, "arrowType") if get(a, "name") == arrow_name), None)
+    if arrow is None:
+        print(f"  map arrow {arrow_name} not found")
+        return
+    dst = out / "gfx" / "maparrows"
+    dst.mkdir(parents=True, exist_ok=True)
+    mask = values(get(arrow, "texture_masks"))[0]
+    pattern = values(get(arrow, "texture_patterns"))[0]
+    Image.open(hoi4 / mask).convert("RGBA").save(dst / "move_mask.png")
+    Image.open(hoi4 / pattern).convert("RGBA").save(dst / "move_pattern.png")
+
+    def num(key, default):
+        try:
+            return float(get(arrow, key, default))
+        except (TypeError, ValueError):
+            return default
+    body = [float(v) for v in values(get(arrow, "body_width"))] or [20.5, 6.0]
+    params = {
+        "body_width": body,                         # map pixels at the root and at the head
+        "head_length": num("head_length", 19.5),    # map pixels
+        "body_uv_scale": num("body_uv_scale", 0.4),
+        "fade_in": num("fade_in", 0.2),             # fraction of the length
+        "global_scale_min_size": num("global_scale_min_size", 0.1),
+        "global_scale_max_points": num("global_scale_max_points", 40),
+        "texture_anim_speed": num("texture_anim_speed", 0.1),
+    }
+    (dst / "move_arrow.json5").write_text(
+        f"// Generated from HOI4 gfx/maparrows/maparrows.txt arrowType {arrow_name}\n{json.dumps(params, indent=2)}\n",
+        encoding="utf-8")
+    print(f"Move arrow: {arrow_name} {params['body_width']} head {params['head_length']}")
 
 
 def convert_counter_gfx(hoi4: Path, out: Path, tag_ideology, main_types):
