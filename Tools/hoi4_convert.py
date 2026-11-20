@@ -11,6 +11,7 @@ Usage:
     python Tools/hoi4_convert.py [--hoi4 PATH] [--out PATH]
 """
 import argparse
+import filecmp
 import colorsys
 import os
 import re
@@ -163,6 +164,35 @@ def safe_filename(s):
 # ---------------------------------------------------------------------------
 # Conversion
 # ---------------------------------------------------------------------------
+def clear_output(out: Path):
+    """Delete everything under out, file by file. The Unity editor keeps some files open (the
+    label font), and on Windows those can't be deleted: they are left in place and replaced
+    later only if their content changes (copy_if_changed). A plain rmtree stopped halfway."""
+    locked = []
+    for path in sorted(out.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+        try:
+            if path.is_dir():
+                path.rmdir()
+            else:
+                path.unlink()
+        except PermissionError:
+            locked.append(path)
+        except OSError:
+            pass  # directory still holding a locked file
+    if locked:
+        print(f"Kept {len(locked)} file(s) in use by another program: {', '.join(p.name for p in locked)}")
+
+
+def copy_if_changed(src: Path, dst: Path):
+    """copy2, skipped when dst already has the same content (it may be locked, see clear_output)."""
+    if dst.exists() and filecmp.cmp(src, dst, shallow=False):
+        return
+    try:
+        shutil.copy2(src, dst)
+    except PermissionError:
+        sys.exit(f"{dst} is in use and changed; close the program holding it (Unity?) and run again.")
+
+
 def convert(hoi4: Path, out: Path):
     hmap = hoi4 / "map"
     if not (hmap / "provinces.bmp").exists():
@@ -170,8 +200,8 @@ def convert(hoi4: Path, out: Path):
 
     if out.exists():
         # Preserve nothing: caches (.pixels/.adjacency) are tied to the old images anyway.
-        shutil.rmtree(out)
-    (out / "map").mkdir(parents=True)
+        clear_output(out)
+    (out / "map").mkdir(parents=True, exist_ok=True)
 
     loc = load_localisation(hoi4 / "localisation" / "english")
     print(f"Localisation keys: {len(loc)}")
@@ -406,7 +436,7 @@ def convert(hoi4: Path, out: Path):
     # Map label font (OFL; see Tools/fonts/OFL.txt)
     (out / "gfx" / "fonts").mkdir(parents=True, exist_ok=True)
     for font in Path(__file__).with_name("fonts").glob("*.ttf"):
-        shutil.copy2(font, out / "gfx" / "fonts" / font.name)
+        copy_if_changed(font, out / "gfx" / "fonts" / font.name)
 
     print(f"Done -> {out}")
 
@@ -457,11 +487,13 @@ def write_regions(hoi4: Path, out: Path, provinces, province_state, impassable_s
     print(f"Regions: {len(states)} states, {len(regions)} strategic regions, {len(impassable_states)} impassable, {len(capitals)} capitals")
 
 
-def convert_rivers(hoi4: Path, out: Path, gfx: Path):
+def convert_rivers(hoi4: Path, out: Path, gfx: Path, water_px=None):
     """map/rivers.png: river width level per pixel (R=G=B, 0 = no river, 1..9 narrow..wide),
     from HOI4 rivers.bmp (palette 3..11 = widths; 0/1/2 = source/join/split markers, which take
     their neighbours' width). Plus gfx/map/rivers/river.png, a strip texture baked from HOI4's
-    RiverSurface textures: U along the river, V across; water in the middle half, banks outside."""
+    RiverSurface textures: U along the river, V across; water in the middle half, banks outside.
+    River pixels on sea/lake provinces are dropped: HOI4 draws its water surface over river mouths,
+    our river meshes are drawn on top of everything, so they would show in the water."""
     a = np.asarray(Image.open(hoi4 / "map" / "rivers.bmp")).astype(np.int16)
     level = np.where((a >= 3) & (a <= 11), a - 2, 0).astype(np.uint8)
     markers = np.argwhere((a <= 2) & (level == 0))
@@ -474,6 +506,10 @@ def convert_rivers(hoi4: Path, out: Path, gfx: Path):
             if nb.max():
                 level[y, x] = nb.max()
     level[(a <= 2) & (level == 0)] = 1
+    dropped = 0
+    if water_px is not None and water_px.shape == level.shape:
+        dropped = int(((level > 0) & water_px).sum())
+        level[water_px] = 0
     Image.fromarray(np.repeat(level[..., None], 3, axis=2), "RGB").save(out / "map" / "rivers.png", compress_level=1)
 
     # Water color: HOI4 colormap_water averaged under river pixels, at WATER_COLOR_LIGHTNESS-ish brightness
@@ -504,7 +540,7 @@ def convert_rivers(hoi4: Path, out: Path, gfx: Path):
     rivers_gfx = gfx / "rivers"
     rivers_gfx.mkdir(parents=True, exist_ok=True)
     Image.fromarray((np.clip(tex, 0, 1) * 255).astype(np.uint8), "RGBA").save(rivers_gfx / "river.png")
-    print(f"Rivers: {int((level > 0).sum())} river pixels, water color {np.round(water, 3).tolist()}")
+    print(f"Rivers: {int((level > 0).sum())} river pixels ({dropped} on water dropped), water color {np.round(water, 3).tolist()}")
 
 
 BORDER_TEXTURES = ["country", "state", "province", "sea", "sea_region", "impassable"]
@@ -553,7 +589,7 @@ def convert_gfx(hoi4: Path, out: Path, water_px):
     # World normal at native (half) resolution; sampled bilinearly by the shader
     Image.open(hoi4 / "map" / "world_normal.bmp").convert("RGB").save(gfx / "world_normal.png", compress_level=1)
 
-    convert_rivers(hoi4, out, gfx)
+    convert_rivers(hoi4, out, gfx, water_px)
 
     # Border strip textures (U along the border, V across). Only the full-size _0 version:
     # _1/_2 are the same profile at lower resolution, which mipmapping already covers.

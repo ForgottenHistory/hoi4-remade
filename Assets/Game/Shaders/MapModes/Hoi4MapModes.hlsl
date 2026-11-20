@@ -133,7 +133,11 @@ float4 ArchonNight(float4 color, ArchonMapContext ctx)
     float night = ArchonNightFactor(ctx.uv);
     if (night <= 0.0) return color;
 
+    // HOI4's emissive mask spills into the sea around coastal cities (HOI4 draws water over it);
+    // keep the lights on land
     float mask = SAMPLE_TEXTURE2D(_Hoi4Colormap, sampler_trilinear_clamp, ctx.uv).a;
+    if (mask > 0.0)
+        mask *= Hoi4LandFraction(ctx.uv);
     if (mask > 0.0 && _Hoi4CityLightsIntensity > 0.0)
     {
         uint w, h;

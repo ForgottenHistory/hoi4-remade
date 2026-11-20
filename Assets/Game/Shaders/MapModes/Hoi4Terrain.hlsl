@@ -103,6 +103,31 @@ float3 Hoi4Overlay(float3 color, float3 overlay, float strength)
 // Surface
 // ----------------------------------------------------------------------------
 
+// Land coverage 0..1 at uv: the same bilinear terrain-index weights Hoi4SampleSurface uses for
+// s.land, without sampling the atlas. For effects that must stay off water (city lights: HOI4's
+// emissive mask is soft and spills into the sea, where HOI4's water surface hides it).
+float Hoi4LandFraction(float2 uv)
+{
+    uint w, h;
+    _Hoi4TerrainIndex.GetDimensions(w, h);
+    float2 p = uv * float2(w, h) - 0.5;
+    int2 i0 = (int2)floor(p);
+    float2 f = p - floor(p);
+    int2 maxI = int2(w - 1, h - 1);
+
+    float land = 0;
+    [unroll]
+    for (int k = 0; k < 4; k++)
+    {
+        int2 o = int2(k & 1, k >> 1);
+        uint tile = (uint)(LOAD_TEXTURE2D(_Hoi4TerrainIndex, clamp(i0 + o, int2(0, 0), maxI)).r * 255.0 + 0.5);
+        float weight = (o.x ? f.x : 1 - f.x) * (o.y ? f.y : 1 - f.y);
+        if (tile != HOI4_WATER_TILE)
+            land += weight;
+    }
+    return land;
+}
+
 Hoi4Surface Hoi4SampleSurface(float2 uv)
 {
     Hoi4Surface s;
