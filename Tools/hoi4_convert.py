@@ -433,7 +433,8 @@ def convert(hoi4: Path, out: Path):
             shutil.copy2(src, dst)
 
     # 1936 land armies (after the template copy: our unit types replace the template infantry)
-    convert_oob(hoi4, out, {o for o, _ in province_owner.values()})
+    oob_countries, main_types = convert_oob(hoi4, out, {o for o, _ in province_owner.values()}, ruling_party)
+    convert_counter_gfx(hoi4, out, {t: c["ideology"] for t, c in oob_countries.items()}, main_types)
 
     # HOI4 visual style data for the GAME terrain shader
     shutil.copy2(Path(__file__).with_name("hoi4_visual_style.json5"), out / "map" / "visual_style.json5")
@@ -732,7 +733,7 @@ def load_sub_units(hoi4: Path):
     return subs
 
 
-def convert_oob(hoi4: Path, out: Path, existing_tags):
+def convert_oob(hoi4: Path, out: Path, existing_tags, ruling_party):
     """HOI4 1936 land orders of battle -> history/units/oob_1936.json5 (GAME data: templates,
     divisions with resolved names, regiment stats) plus one engine unit type per division main
     regiment type (units/<type>.json5, the format the StarterKit unit system loads).
@@ -797,7 +798,8 @@ def convert_oob(hoi4: Path, out: Path, existing_tags):
                 used_subs.update(t["regiments"] + t["support"])
                 main_types.add(t["main"])
         if divisions:
-            countries[tag] = {"templates": {k: {kk: vv for kk, vv in v.items() if kk != "names_group"}
+            countries[tag] = {"ideology": ruling_party.get(tag) or "neutrality",
+                              "templates": {k: {kk: vv for kk, vv in v.items() if kk != "names_group"}
                                             for k, v in templates.items()},
                               "divisions": divisions}
 
@@ -811,6 +813,7 @@ def convert_oob(hoi4: Path, out: Path, existing_tags):
     lines += ["  },", "  countries: {"]
     for tag, c in sorted(countries.items()):
         lines.append(f"    {tag}: {{")
+        lines.append(f"      ideology: {j(c['ideology'])},")
         lines.append("      templates: {")
         for tname, t in c["templates"].items():
             lines.append(f"        {j(tname)}: {j(t)},")
@@ -841,6 +844,71 @@ def convert_oob(hoi4: Path, out: Path, existing_tags):
     total = sum(len(c["divisions"]) for c in countries.values())
     print(f"Armies {OOB_START}: {total} divisions in {len(countries)} countries, "
           f"{sum(len(c['templates']) for c in countries.values())} templates, unit types {sorted(main_types)}")
+    return countries, main_types
+
+
+COUNTER_IDEOLOGIES = ["democratic", "communism", "fascism", "neutrality"]  # frame order of the ideology sprite
+
+
+def convert_counter_gfx(hoi4: Path, out: Path, tag_ideology, main_types):
+    """On-map division counter sprites (interface/mapicons.gui unit_counter) as PNGs under
+    gfx/counters/: plate, ideology corner frames, org/strength bars, a type icon per division main
+    type (GFX_unit_<type>_icon_medium_white, pictogram frame), the small flag per country for its
+    ruling ideology, and a digit strip for the stack count."""
+    from PIL import ImageDraw, ImageFont
+    dst = out / "gfx" / "counters"
+    (dst / "icons").mkdir(parents=True, exist_ok=True)
+    (dst / "flags").mkdir(parents=True, exist_ok=True)
+    gi = hoi4 / "gfx" / "interface"
+
+    def frame(im, i, n):
+        w = im.width // n
+        return im.crop((i * w, 0, (i + 1) * w, im.height))
+
+    Image.open(gi / "onmap_unit_counter.dds").convert("RGBA").save(dst / "plate.png")       # 3 frames
+    Image.open(gi / "onmap_unit_counter_selected.dds").convert("RGBA").save(dst / "selected.png")
+    Image.open(gi / "onmap_unit_counter_ideology.dds").convert("RGBA").save(dst / "ideology.png")  # 4 frames
+    for kind in ("org", "str"):
+        bar = Image.open(gi / "mapicons" / f"mapicon_bar_{kind}_sprite.dds").convert("RGBA")
+        bar.rotate(90, expand=True).save(dst / f"bar_{kind}.png")  # 17x3, full end on the left
+
+    icon_files = {}
+    for name, tex in re.findall(r'name\s*=\s*"GFX_unit_(\w+?)_icon_medium_white"\s*textureFile\s*=\s*"([^"]+)"',
+                                read_text(hoi4 / "interface" / "subuniticons.gfx")):
+        icon_files.setdefault(name, tex)
+    for t in sorted(main_types):
+        tex = icon_files.get(t) or icon_files.get("infantry")
+        if tex and (hoi4 / tex).exists():
+            frame(Image.open(hoi4 / tex).convert("RGBA"), 0, 2).save(dst / "icons" / f"{t}.png")
+        else:
+            print(f"  counter icon missing for {t}")
+
+    flags = hoi4 / "gfx" / "flags" / "small"
+    for tag, ideology in sorted(tag_ideology.items()):
+        for cand in (f"{tag}_{ideology}.tga", f"{tag}.tga", f"{tag}_neutrality.tga"):
+            if (flags / cand).exists():
+                Image.open(flags / cand).convert("RGBA").save(dst / "flags" / f"{tag}.png")
+                break
+
+    # Digits 0-9 in fixed 9x14 cells (white, alpha = glyph), drawn by the game in the count box
+    try:
+        font = ImageFont.truetype("arialbd.ttf", 13)
+    except OSError:
+        font = ImageFont.load_default()
+    cw, ch = 9, 14
+    digits = Image.new("RGBA", (cw * 10, ch), (0, 0, 0, 0))
+    d = ImageDraw.Draw(digits)
+    for i in range(10):
+        d.text((i * cw + cw / 2, ch / 2), str(i), font=font, fill=(255, 255, 255, 255), anchor="mm")
+    digits.save(dst / "digits.png")
+    countries_j = ", ".join(f"{t}: {json.dumps(i)}" for t, i in sorted(tag_ideology.items()))
+    (dst / "counters.json5").write_text(
+        "{\n  // Generated: HOI4 division counter sprites (layout from interface/mapicons.gui)\n"
+        f"  ideology_frames: {json.dumps(COUNTER_IDEOLOGIES)},\n"
+        f"  digit_cell: [{cw}, {ch}],\n"
+        f"  countries: {{ {countries_j} }}\n}}\n",
+        encoding="utf-8")
+    print(f"Counters: {len(list((dst / 'icons').glob('*.png')))} icons, {len(list((dst / 'flags').glob('*.png')))} flags")
 
 
 BORDER_TEXTURES = ["country", "state", "province", "sea", "sea_region", "impassable"]
