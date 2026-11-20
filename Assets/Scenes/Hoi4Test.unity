@@ -150,7 +150,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   unitHeight: 2
-  badgeScale: 4
+  badgeScale: 1
   atlasGenerator: {fileID: 431121}
   enablePathLines: 1
   logDebug: 1

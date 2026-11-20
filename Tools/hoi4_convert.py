@@ -12,6 +12,7 @@ Usage:
 """
 import argparse
 import filecmp
+import json
 import colorsys
 import os
 import re
@@ -431,6 +432,9 @@ def convert(hoi4: Path, out: Path):
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
 
+    # 1936 land armies (after the template copy: our unit types replace the template infantry)
+    convert_oob(hoi4, out, {o for o, _ in province_owner.values()})
+
     # HOI4 visual style data for the GAME terrain shader
     shutil.copy2(Path(__file__).with_name("hoi4_visual_style.json5"), out / "map" / "visual_style.json5")
 
@@ -629,6 +633,214 @@ def coast_channels(hoi4: Path, index):
     iy, ix = ndimage.distance_transform_edt(water, return_distances=False, return_indices=True)
     nearest = index[iy, ix]
     return nearest.astype(np.uint8), (field * 255 + 0.5).astype(np.uint8)
+
+
+OOB_START = "1936"
+
+
+def collect_oob_names(items, out, dlc_here=False, dlc_outside=False):
+    """set_oob / oob at the top level of a country history file or inside if/else blocks (not
+    date blocks). Appends (name, is_in_a_has_dlc_branch) pairs. Keywords may be upper case (IF,
+    ELSE_IF); an else/else_if nested inside an if block is that if's alternative, so it takes
+    the DLC status from outside the if (the no-DLC branch of `if has_dlc ... else`)."""
+    for k, _, v in items:
+        key = k.lower()
+        if key in ("oob", "set_oob") and isinstance(v, str):
+            out.append((v, dlc_here))
+        elif key in ("if", "else_if", "else") and isinstance(v, list):
+            limit = get(v, "limit")
+            dlc = isinstance(limit, list) and any(kk.lower() == "has_dlc" for kk, _, _ in limit)
+            if key == "if":
+                collect_oob_names(v, out, dlc_here or dlc, dlc_here)
+            else:
+                collect_oob_names(v, out, dlc_outside or dlc, dlc_outside)
+
+
+def ordinal_en(n):
+    return f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+
+
+def format_division_name(fmt, n):
+    """HOI4 name formats: %d / %s = the number; %dth = English ordinal; other letters after %d
+    (de, ya, e, ...) are language endings and stay as written."""
+    fmt = fmt.replace("%dth", ordinal_en(n))
+    return fmt.replace("%d", str(n)).replace("%s", str(n))
+
+
+def load_division_name_groups(hoi4: Path):
+    """common/units/names_divisions: group -> (fallback format, {number: format})."""
+    groups = {}
+    for f in sorted((hoi4 / "common" / "units" / "names_divisions").glob("*.txt")):
+        for key, _, body in parse_pdx(read_text(f)):
+            if not isinstance(body, list):
+                continue
+            ordered = {}
+            for num, _, names in (get(body, "ordered") or []):
+                if isinstance(names, list) and names and num.isdigit():
+                    first = names[0][0] if isinstance(names[0], tuple) else names[0]
+                    ordered[int(num)] = first
+            groups[key] = (get(body, "fallback_name"), ordered)
+    return groups
+
+
+def load_sub_units(hoi4: Path):
+    """common/units sub_units, with speed (km/h) from their equipment: per archetype the slowest
+    variant (the oldest design, fitting 1936; tank chassis archetypes only carry a base 4) or the
+    archetype's own speed; per sub-unit the fastest of its equipment (motorized needs rifles at
+    4 km/h and trucks at 12, and moves at truck speed)."""
+    archetype_speed = {}
+    variant_speeds = {}
+    for f in sorted((hoi4 / "common" / "units" / "equipment").glob("*.txt")):
+        for _, _, block in parse_pdx(read_text(f)):
+            for name, _, eq in (block if isinstance(block, list) else []):
+                if not isinstance(eq, list) or not get(eq, "maximum_speed"):
+                    continue
+                if get(eq, "is_archetype") == "yes":
+                    archetype_speed[name] = float(get(eq, "maximum_speed"))
+                elif get(eq, "archetype"):
+                    variant_speeds.setdefault(get(eq, "archetype"), []).append(float(get(eq, "maximum_speed")))
+    for name, speeds in variant_speeds.items():
+        archetype_speed[name] = min(speeds)
+    subs = {}
+    for f in sorted((hoi4 / "common" / "units").glob("*.txt")):
+        for key, _, block in parse_pdx(read_text(f)):
+            if key != "sub_units" or not isinstance(block, list):
+                continue
+            for name, _, u in block:
+                if not isinstance(u, list):
+                    continue
+                needs = [k for k, _, _ in (get(u, "need") or [])]
+                speeds = [archetype_speed[n] for n in needs if n in archetype_speed]
+
+                def num(k, d=0.0):
+                    v = get(u, k, d)
+                    try:
+                        return float(v)
+                    except (TypeError, ValueError):
+                        return d
+                subs[name] = {
+                    "abbreviation": get(u, "abbreviation", name[:3].upper()),
+                    "group": get(u, "group", "infantry"),
+                    "icon": get(u, "map_icon_category", "infantry"),
+                    "priority": int(num("priority")),
+                    "combat_width": num("combat_width"),
+                    "max_strength": num("max_strength"),
+                    "max_organisation": num("max_organisation"),
+                    "manpower": int(num("manpower")),
+                    "speed": max(speeds) if speeds else 4.0,
+                }
+    return subs
+
+
+def convert_oob(hoi4: Path, out: Path, existing_tags):
+    """HOI4 1936 land orders of battle -> history/units/oob_1936.json5 (GAME data: templates,
+    divisions with resolved names, regiment stats) plus one engine unit type per division main
+    regiment type (units/<type>.json5, the format the StarterKit unit system loads).
+
+    Uses each country's base-game land OOB (the no-DLC branch; DLC variants only add officers
+    and equipment variants). Naval and air OOBs are not converted. Countries that own no land
+    at the start (releasables) are skipped."""
+    names = load_division_name_groups(hoi4)
+    subs = load_sub_units(hoi4)
+    countries = {}
+    used_subs = set()
+    main_types = set()
+    for f in sorted((hoi4 / "history" / "countries").glob("*.txt")):
+        tag = f.name[:3]
+        if tag not in existing_tags:
+            continue
+        found = []
+        collect_oob_names(parse_pdx(read_text(f)), found)
+        base = [o for o, dlc in found if not dlc and o.startswith(f"{tag}_{OOB_START}")]
+        base += [o for o, _ in found if o == f"{tag}_{OOB_START}"]  # fallback: plain TAG_1936
+        path = hoi4 / "history" / "units" / f"{base[0]}.txt" if base else None
+        if path is None or not path.exists():
+            continue
+        root = parse_pdx(read_text(path))
+
+        templates = {}
+        for t in get_all(root, "division_template"):
+            regs = [k for k, _, _ in (get(t, "regiments") or []) if k in subs]
+            sups = [k for k, _, _ in (get(t, "support") or []) if k in subs]
+            if not regs:
+                continue
+            # HOI4 shows a division by its highest-priority regiment
+            main = max(regs, key=lambda r: subs[r]["priority"])
+            templates[get(t, "name")] = {"regiments": regs, "support": sups, "main": main,
+                                         "names_group": get(t, "division_names_group")}
+
+        divisions = []
+        counters = {}
+        for units in get_all(root, "units"):
+            for d in get_all(units, "division"):
+                tname = get(d, "division_template")
+                t = templates.get(tname)
+                if t is None:
+                    continue
+                name = get(d, "name")
+                dn = get(d, "division_name")
+                if not name and isinstance(dn, list):
+                    n = int(get(dn, "name_order", 0) or 0)
+                    fallback, ordered = names.get(t["names_group"], (None, {}))
+                    fmt = ordered.get(n) or fallback
+                    name = format_division_name(fmt, n) if fmt and n else None
+                if not name:
+                    counters[tname] = counters.get(tname, 0) + 1
+                    name = f"{tname} {counters[tname]}"
+                divisions.append({
+                    "name": name,
+                    "template": tname,
+                    "location": int(get(d, "location", 0)),
+                    "experience": float(get(d, "start_experience_factor", 0) or 0),
+                    "equipment": float(get(d, "start_equipment_factor", 1) or 1),
+                })
+                used_subs.update(t["regiments"] + t["support"])
+                main_types.add(t["main"])
+        if divisions:
+            countries[tag] = {"templates": {k: {kk: vv for kk, vv in v.items() if kk != "names_group"}
+                                            for k, v in templates.items()},
+                              "divisions": divisions}
+
+    def j(v):
+        return json.dumps(v, ensure_ascii=False)
+
+    lines = ["{", f"  // Generated from HOI4 history/units ({OOB_START} land OOBs) and common/units",
+             f'  date: "{OOB_START}.1.1",', "  sub_units: {"]
+    for name in sorted(used_subs):
+        lines.append(f"    {name}: {j(subs[name])},")
+    lines += ["  },", "  countries: {"]
+    for tag, c in sorted(countries.items()):
+        lines.append(f"    {tag}: {{")
+        lines.append("      templates: {")
+        for tname, t in c["templates"].items():
+            lines.append(f"        {j(tname)}: {j(t)},")
+        lines.append("      },")
+        lines.append("      divisions: [")
+        for d in c["divisions"]:
+            lines.append(f"        {j(d)},")
+        lines += ["      ],", "    },"]
+    lines += ["  }", "}", ""]
+    (out / "history" / "units").mkdir(parents=True, exist_ok=True)
+    (out / "history" / "units" / f"oob_{OOB_START}.json5").write_text("\n".join(lines), encoding="utf-8")
+
+    # Engine unit types (StarterKit format), one per division main type. speed = days per province.
+    (out / "units").mkdir(parents=True, exist_ok=True)
+    for f in (out / "units").glob("*.json5"):
+        f.unlink()
+    for name in sorted(main_types):
+        u = subs[name]
+        days = max(1, round(12.0 / max(u["speed"], 1.0)))
+        text = (
+            "{\n  // Generated from HOI4 common/units: a division's main regiment type\n"
+            f'  id: "{name}",\n  name: {j(name.replace("_", " ").title())},\n  category: "land",\n  version: 1,\n'
+            "  cost: { gold: 20 },\n  maintenance: { gold: 1 },\n"
+            f"  stats: {{ speed: {days} }},\n"
+            '  visual: { type: "billboard", icon: "Icons/Infantry", color_source: "country" },\n'
+            f"  hoi4: {{ icon: {j(u['icon'])}, group: {j(u['group'])}, abbreviation: {j(u['abbreviation'])} }}\n}}\n")
+        (out / "units" / f"{name}.json5").write_text(text, encoding="utf-8")
+    total = sum(len(c["divisions"]) for c in countries.values())
+    print(f"Armies {OOB_START}: {total} divisions in {len(countries)} countries, "
+          f"{sum(len(c['templates']) for c in countries.values())} templates, unit types {sorted(main_types)}")
 
 
 BORDER_TEXTURES = ["country", "state", "province", "sea", "sea_region", "impassable"]
