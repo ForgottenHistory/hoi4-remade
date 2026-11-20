@@ -34,6 +34,7 @@ namespace Hoi4.Units
         global::Map.Interaction.ProvinceSelector selector;
         Func<int, Vector2, bool> interceptor;
         Func<Vector2, bool> pointerBlocker;
+        Hoi4MovementRules movementRules;
 
         // Box selection
         public Color boxBorder = new Color(1f, 0.93f, 0.7f, 0.9f);
@@ -83,6 +84,14 @@ namespace Hoi4.Units
                 yield break;
             }
             Hoi4UnitCounters.Instance.Selection = selection;
+
+            // HOI4 movement rules (water, impassable states, access) as the pathfinding default.
+            // After StarterKit's init, which installs its own terrain calculator.
+            while (StarterKit.Initializer.Instance != null && !StarterKit.Initializer.Instance.IsInitialized)
+                yield return null;
+            if (gameState.Pathfinding != null)
+                gameState.Pathfinding.SetDefaultCostCalculator(movementRules = new Hoi4MovementRules(gameState));
+
             interceptor = OnClick;
             selector.AddClickInterceptor(interceptor);
             // No province hover highlight under counters
@@ -228,7 +237,16 @@ namespace Hoi4.Units
                 if (gameState.TryExecuteCommand(command, out string message)) issued++;
                 else ArchonLogger.LogWarning($"Hoi4UnitSelection: move order for unit {id} failed: {message}", "game_units");
             }
-            ArchonLogger.Log($"Hoi4UnitSelection: {issued} divisions ordered to province {target}" + (noPath > 0 ? $", {noPath} without a path" : ""), "game_units");
+            string why = "";
+            if (noPath > 0 && movementRules != null)
+            {
+                ushort owner = gameState.Provinces.GetProvinceOwner(target);
+                why = Hoi4.Map.Hoi4Regions.IsWater(target) ? " (sea)"
+                    : Hoi4.Map.Hoi4Regions.IsImpassable(target) ? " (impassable)"
+                    : !movementRules.HasAccess(country, owner) ? " (no military access)"
+                    : " (unreachable)";
+            }
+            ArchonLogger.Log($"Hoi4UnitSelection: {issued} divisions ordered to province {target}" + (noPath > 0 ? $", {noPath} without a path{why}" : ""), "game_units");
             Changed?.Invoke();
             return issued;
         }
