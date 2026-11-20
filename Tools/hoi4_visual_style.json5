@@ -59,6 +59,13 @@
     sea_region: { texture: "gfx/map/borders/sea_region.png", width: 1.5, minScreenWidth: 5, tile: 0.4, color: [1, 1, 1, 1], order: 6 },
     impassable: { texture: "gfx/map/borders/impassable.png", width: 2.5, minScreenWidth: 8, tile: 0.2, color: [1, 1, 1, 1], fade: [2.0, 3.5], order: 8 },
     country:    { texture: "gfx/map/borders/country.png",    width: 1.5, minScreenWidth: 5, tile: 0.4, color: [1, 1, 1, 1], order: 10 },
+    // Selection/hover outline (ENGINE highlight classes): the highlighted province's or country's
+    // own smoothed arcs, drawn above every class. color multiplies the highlight color from the
+    // UI (hover vs selection); its alpha is the opacity. alphaOnly: the texture gives only the
+    // line shape (province.png is black). softness: 0 crisp edge, 1 soft glow falloff.
+    // blend: "lighten" = Max blend, overlaps never add up (wide soft strips fold at tight corners).
+    highlight_glow: { visible: true, width: 6.0, minScreenWidth: 16, softness: 1.0, blend: "lighten", color: [1, 1, 1, 0.45] },
+    highlight:      { texture: "gfx/map/borders/province.png", alphaOnly: true, width: 1.5, minScreenWidth: 8, tile: 0.4, color: [1, 1, 1, 1] },
   },
 
   // Rivers (map/rivers.png, width level 1..9 per pixel from HOI4 rivers.bmp). Texture baked by the
