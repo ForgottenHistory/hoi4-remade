@@ -15,6 +15,9 @@ namespace Hoi4.Units
     ///   be selected to inspect them; only the player's divisions take orders.
     /// - Left-click elsewhere on the map: clear the unit selection (the province click goes on).
     /// - Right-click a province with own divisions selected: path and move there.
+    /// - Left-drag on the map: box-select your own divisions (Shift adds). The engine's
+    ///   ProvinceSelector fires left clicks on release here, and not after a drag, so dragging a box
+    ///   doesn't also click the province where it started.
     /// - Escape: clear the selection.
     /// Clicks reach this through the engine ProvinceSelector's click interceptors, so a counter
     /// click doesn't also select the province under it; a pointer blocker stops the province hover
@@ -31,6 +34,12 @@ namespace Hoi4.Units
         global::Map.Interaction.ProvinceSelector selector;
         Func<int, Vector2, bool> interceptor;
         Func<Vector2, bool> pointerBlocker;
+
+        // Box selection
+        public Color boxBorder = new Color(1f, 0.93f, 0.7f, 0.9f);
+        public Color boxFill = new Color(1f, 0.93f, 0.7f, 0.08f);
+        bool boxActive;
+        Vector2 boxStart;
         IDisposable[] subscriptions;
 
         /// <summary>Fires when the selection changes or a selected division moves or gets orders.</summary>
@@ -55,6 +64,7 @@ namespace Hoi4.Units
             if (Instance == this) Instance = null;
             if (selector != null && interceptor != null) selector.RemoveClickInterceptor(interceptor);
             if (selector != null && pointerBlocker != null) selector.RemovePointerBlocker(pointerBlocker);
+            if (selector != null) selector.LeftClickOnRelease = false;
             if (subscriptions != null)
                 foreach (var s in subscriptions) s?.Dispose();
         }
@@ -78,6 +88,8 @@ namespace Hoi4.Units
             // No province hover highlight under counters
             pointerBlocker = p => Hoi4UnitCounters.Instance != null && Hoi4UnitCounters.Instance.TryPick(p, out _);
             selector.AddPointerBlocker(pointerBlocker);
+            // HOI4: a click acts on release, a left-drag draws a selection box instead
+            selector.LeftClickOnRelease = true;
 
             subscriptions = new[]
             {
@@ -93,6 +105,56 @@ namespace Hoi4.Units
             if (gameState == null) return;
             if (Input.GetKeyDown(KeyCode.Escape) && selection.Count > 0)
                 Clear();
+            UpdateBox();
+        }
+
+        // --- Box selection ---------------------------------------------------------------------
+
+        void UpdateBox()
+        {
+            if (selector == null) return;
+            if (selector.IsLeftDragging && !boxActive)
+            {
+                boxActive = true;
+                boxStart = selector.LeftPressPosition;
+            }
+            if (!boxActive) return;
+            if (Input.GetMouseButton(0) && !Input.GetMouseButtonUp(0)) return;
+
+            boxActive = false;
+            var box = BoxRect(boxStart, Input.mousePosition);
+            var player = StarterKit.Initializer.Instance?.PlayerState;
+            ushort country = player != null && player.HasPlayerCountry ? player.PlayerCountryId : (ushort)0;
+            if (country == 0 || Hoi4UnitCounters.Instance == null) return;
+
+            // HOI4 box-selects only your own divisions
+            var units = Hoi4UnitCounters.Instance.UnitsInScreenRect(box, country);
+            bool additive = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+            if (!additive) ClearSilently();
+            foreach (var u in units)
+                if (selection.Add(u)) ordered.Add(u);
+            OnSelectionChanged();
+            if (units.Count > 0) selector.ClearSelection();
+        }
+
+        static Rect BoxRect(Vector2 a, Vector2 b) =>
+            Rect.MinMaxRect(Mathf.Min(a.x, b.x), Mathf.Min(a.y, b.y), Mathf.Max(a.x, b.x), Mathf.Max(a.y, b.y));
+
+        void OnGUI()
+        {
+            if (!boxActive || Event.current.type != EventType.Repaint) return;
+            var r = BoxRect(boxStart, Input.mousePosition);
+            var gui = new Rect(r.xMin, Screen.height - r.yMax, r.width, r.height); // GUI: origin top-left
+            var tex = Texture2D.whiteTexture;
+            var old = GUI.color;
+            GUI.color = boxFill;
+            GUI.DrawTexture(gui, tex);
+            GUI.color = boxBorder;
+            GUI.DrawTexture(new Rect(gui.xMin, gui.yMin, gui.width, 1), tex);
+            GUI.DrawTexture(new Rect(gui.xMin, gui.yMax - 1, gui.width, 1), tex);
+            GUI.DrawTexture(new Rect(gui.xMin, gui.yMin, 1, gui.height), tex);
+            GUI.DrawTexture(new Rect(gui.xMax - 1, gui.yMin, 1, gui.height), tex);
+            GUI.color = old;
         }
 
         // --- Input ---------------------------------------------------------------------------

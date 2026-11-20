@@ -236,23 +236,53 @@ namespace Hoi4.Units
             // Drawn north to south, so the last hit is the one on top
             for (int i = stacks.Count - 1; i >= 0; i--)
             {
-                var s = stacks[i];
-                var anchor = s.Anchor;
-                anchor.y = TerrainHeight(anchor) + liftAboveTerrain;
-                Vector3 sp = cam.WorldToScreenPoint(anchor);
-                if (sp.z <= 0f) continue;
-                float worldPerScreenPx = 2f * Mathf.Max(sp.z, 1e-3f) / (p11 * Screen.height);
-                float zoom = worldPerMapPixel / worldPerScreenPx;
-                if (zoom < fadeHiddenZoom) return false; // counters are hidden at this zoom
-                float scale = pixelScale * Mathf.Clamp(zoom / Mathf.Max(fullSizeZoom, 0.01f), Mathf.Clamp01(minSizeFraction), 1f);
-                float x = screen.x - sp.x, y = screen.y - sp.y;
-                if (x >= s.X0 * scale && x <= (s.X0 + CounterW) * scale && y >= (SlotH - CounterH - 1) * scale && y <= SlotH * scale)
+                if (ScreenRect(stacks[i], cam, p11, out var rect, out _) && rect.Contains(screen))
                 {
-                    units = s.Units;
+                    units = stacks[i].Units;
                     return true;
                 }
             }
             return false;
+        }
+
+        /// <summary>
+        /// Units of the given country (0 = any) whose counter overlaps a screen rectangle, or whose
+        /// province centre lies inside it when counters are hidden at this zoom (box selection).
+        /// </summary>
+        public List<ushort> UnitsInScreenRect(Rect box, ushort country)
+        {
+            var result = new List<ushort>();
+            var cam = Camera.main;
+            if (cam == null) return result;
+            float p11 = Mathf.Abs(cam.projectionMatrix[1, 1]);
+            foreach (var s in stacks)
+            {
+                if (country != 0 && s.Country != country) continue;
+                bool visible = ScreenRect(s, cam, p11, out var rect, out var anchor);
+                bool hit = visible ? rect.Overlaps(box) : anchor.z > 0f && box.Contains(new Vector2(anchor.x, anchor.y));
+                if (hit) result.AddRange(s.Units);
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// A counter's screen rectangle (pixels, origin bottom-left), mirroring the Hoi4/UnitCounter
+        /// vertex shader's size and placement. False when it is behind the camera or hidden at this zoom.
+        /// </summary>
+        bool ScreenRect(Stack s, Camera cam, float p11, out Rect rect, out Vector3 anchorScreen)
+        {
+            rect = default;
+            var anchor = s.Anchor;
+            anchor.y = TerrainHeight(anchor) + liftAboveTerrain;
+            anchorScreen = cam.WorldToScreenPoint(anchor);
+            if (anchorScreen.z <= 0f) return false;
+            float worldPerScreenPx = 2f * Mathf.Max(anchorScreen.z, 1e-3f) / (p11 * Screen.height);
+            float zoom = worldPerMapPixel / worldPerScreenPx;
+            if (zoom < fadeHiddenZoom) return false; // counters are hidden at this zoom
+            float scale = pixelScale * Mathf.Clamp(zoom / Mathf.Max(fullSizeZoom, 0.01f), Mathf.Clamp01(minSizeFraction), 1f);
+            rect = new Rect(anchorScreen.x + s.X0 * scale, anchorScreen.y + (SlotH - CounterH - 1) * scale,
+                CounterW * scale, (CounterH + 1) * scale);
+            return true;
         }
 
         // --- Sprites -------------------------------------------------------------------------
