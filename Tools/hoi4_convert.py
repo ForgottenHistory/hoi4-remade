@@ -492,6 +492,7 @@ def convert(hoi4: Path, out: Path):
     # 1936 land armies (after the template copy: our unit types replace the template infantry)
     oob_countries, main_types = convert_oob(hoi4, out, {o for o, _ in province_owner.values()}, ruling_party)
     convert_counter_gfx(hoi4, out, {t: c["ideology"] for t, c in oob_countries.items()}, main_types)
+    convert_unit_panel(hoi4, out, main_types)
     convert_move_arrow(hoi4, out)
     write_country_stats(out, tags, country_stats, owner_manpower)
     convert_topbar(hoi4, out, {t: ruling_party.get(t) or "neutrality" for t in tags})
@@ -1045,6 +1046,66 @@ def convert_topbar(hoi4: Path, out: Path, tag_ideology):
     (dst / "topbar.json5").write_text("// Generated from HOI4 interface/topbar.gui by hoi4_convert.py\n"
                                      + json.dumps(doc, indent=1) + "\n", encoding="utf-8")
     print(f"Top bar: {len(elements)} elements, {len(list((dst / 'flags').glob('*.png')))} flags")
+
+
+# Unit list panel (interface/unitview.gui army_division_list_view) sprites: name -> GFX sprite.
+UNITPANEL_SPRITES = {
+    "header": "GFX_unit_list_header", "btn_delete": "GFX_NV_btn_delete", "btn_close": "GFX_NV_btn_close",
+    "btn_unassign": "GFX_UV_btn_unassign", "consolidate": "GFX_consolidate", "select_half": "GFX_select_half",
+    "hold": "GFX_hold", "mini_bg": "GFX_generic_mini_bg", "convoys": "GFX_topbar_convoys",
+    "entry_bg": "GFX_UV_unit_entry_bg", "unassigned_bg": "GFX_unitlist_unassigned_bg",
+    "unitinfo": "GFX_unitlist_unitinfo_button", "level": "GFX_unit_level", "sort": "GFX_tiling_sort_button_thin",
+    "column": "GFX_division_list_column_button", "close_small": "GFX_NV_btn_close",
+}
+
+
+def convert_unit_panel(hoi4: Path, out: Path, main_types):
+    """Sprites of HOI4's selected-units list (gui layout is hardcoded in Hoi4DivisionPanel.cs) as PNGs
+    under gfx/interface/unitpanel/: the window frame tile, buttons, entry background frames, bars
+    and a medium pictogram per division main type (icons/)."""
+    import hoi4_gui as gui
+    dst = out / "gfx" / "interface" / "unitpanel"
+    (dst / "icons").mkdir(parents=True, exist_ok=True)
+    sprites = gui.load_sprites(hoi4)
+    sizes = {}
+    for name, spr in UNITPANEL_SPRITES.items():
+        frames = gui.sprite_frames(hoi4, sprites, spr)
+        if not frames:
+            print(f"  unit panel: no sprite {spr}")
+            continue
+        for i, fr in enumerate(frames):
+            fr.save(dst / (f"{name}.png" if len(frames) == 1 else f"{name}_{i}.png"))
+        sizes[name] = [frames[0].width, frames[0].height, len(frames)]
+    # window frame: 192x192 tile, 64 px borders (GFX_tiled_window_1b_thin_border)
+    tile = gui.load_image(hoi4, "gfx/interface/tiles/tiled_window_1b_thin_border.dds")
+    tile.save(dst / "window.png")
+    sizes["window"] = [tile.width, tile.height, 1]
+    # progress bars: fill (textureFile1) and background (textureFile2)
+    for name, spr in (("bar_org", "GFX_navieslist_bar_org"), ("bar_str", "GFX_navieslist_bar_str"),
+                      ("bar_prepare", "GFX_unitlist_bar_prepare")):
+        s = sprites.get(spr)
+        for part, rel in (("", s and s["overlay"]), ("_bg", s and s["mask"])):
+            img = gui.load_image(hoi4, rel)
+            if img is not None:
+                img.save(dst / f"{name}{part}.png")
+                sizes[name + part] = [img.width, img.height, 1]
+    icon_files = {}
+    for name, tex in re.findall(r'name\s*=\s*"GFX_unit_(\w+?)_icon_medium"\s*textureFile\s*=\s*"?([^"\s}]+)',
+                                read_text(hoi4 / "interface" / "subuniticons.gfx")):
+        icon_files.setdefault(name, tex)
+    for t in sorted(main_types):
+        tex = icon_files.get(t) or icon_files.get("infantry")
+        img = gui.load_image(hoi4, tex)
+        if img is None:
+            print(f"  unit panel icon missing for {t}")
+            continue
+        img = img.crop((0, 0, img.width // 2, img.height))  # frame 0 of 2
+        img.save(dst / "icons" / f"{t}.png")
+        sizes["icon_" + t] = [img.width, img.height, 1]
+    (dst / "unitpanel.json5").write_text(
+        "// Generated from HOI4 interface/unitview.gui sprites: [w, h, frames]" + chr(10)
+        + json.dumps({"window_border": 64, "sprites": sizes}, indent=1) + chr(10), encoding="utf-8")
+    print(f"Unit panel: {len(sizes)} sprites")
 
 
 def convert_counter_gfx(hoi4: Path, out: Path, tag_ideology, main_types):
