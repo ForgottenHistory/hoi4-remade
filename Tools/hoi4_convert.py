@@ -230,6 +230,7 @@ def convert(hoi4: Path, out: Path):
     impassable_states = set()
     vp_names = {}         # pid -> name
     state_top_vp = {}     # state id -> (value, pid) of its biggest victory point (the state's main city)
+    owner_manpower = {}   # tag -> summed state manpower (HOI4 top bar)
     for f in sorted((hoi4 / "history" / "states").glob("*.txt")):
         root = parse_pdx(read_text(f))
         st = get(root, "state")
@@ -242,6 +243,11 @@ def convert(hoi4: Path, out: Path):
         state_names[sid] = loc.get(name_key, name_key)
         hist = get(st, "history", [])
         owner = get(hist, "owner") if isinstance(hist, list) else None
+        if owner:
+            try:
+                owner_manpower[owner] = owner_manpower.get(owner, 0) + int(float(get(st, "manpower", 0)))
+            except ValueError:
+                pass
         controller = owner
         if isinstance(hist, list):
             for vp in get_all(hist, "victory_points"):
@@ -281,6 +287,47 @@ def convert(hoi4: Path, out: Path):
 
     ruling_party = {}
     capitals = {}  # tag -> capital province (top victory point of the capital state)
+    country_stats = {}  # tag -> {stability, war_support, conscription} (top-level set_*, else the first nested one)
+
+    # Mobilisation laws: law -> conscription factor (common/ideas/_manpower.txt)
+    conscription_of = {}
+    mp_file = hoi4 / "common" / "ideas" / "_manpower.txt"
+    if mp_file.exists():
+        laws = get(get(parse_pdx(read_text(mp_file)), "ideas", []), "mobilization_laws", [])
+        for law, _, body in laws if isinstance(laws, list) else []:
+            if isinstance(body, list):
+                mod = get(body, "modifier")
+                c = get(mod, "conscription") if isinstance(mod, list) else None
+                try:
+                    if law and c is not None:
+                        conscription_of[law] = float(c)
+                except ValueError:
+                    pass
+
+    def country_law(items):
+        # add_ideas at the top level first (the 1936 start), then anywhere
+        for k, _, v in items:
+            if k == "add_ideas":
+                for idea in (values(v) if isinstance(v, list) else [v]):
+                    if idea in conscription_of:
+                        return idea
+        for _, _, v in items:
+            if isinstance(v, list):
+                r = country_law(v)
+                if r:
+                    return r
+        return None
+
+    def first_value(items, key):
+        v = get(items, key)
+        if v is not None and not isinstance(v, list):
+            return v
+        for _, _, sub in items:
+            if isinstance(sub, list):
+                r = first_value(sub, key)
+                if r is not None:
+                    return r
+        return None
     for f in (hoi4 / "history" / "countries").glob("*.txt"):
         tag = f.name[:3]
         root = parse_pdx(read_text(f))
@@ -298,6 +345,16 @@ def convert(hoi4: Path, out: Path):
         pol = get(root, "set_politics")
         if isinstance(pol, list):
             ruling_party[tag] = get(pol, "ruling_party")
+        stats = {}
+        for key, out_key in (("set_stability", "stability"), ("set_war_support", "war_support")):
+            v = first_value(root, key)
+            try:
+                stats[out_key] = round(float(v), 3) if v is not None else 0.5
+            except ValueError:
+                stats[out_key] = 0.5
+        law = country_law(root) or "volunteer_only"
+        stats["conscription"] = conscription_of.get(law, 0.015)
+        country_stats[tag] = stats
 
     (out / "common" / "countries").mkdir(parents=True)
     (out / "common" / "country_tags").mkdir(parents=True)
@@ -436,6 +493,8 @@ def convert(hoi4: Path, out: Path):
     oob_countries, main_types = convert_oob(hoi4, out, {o for o, _ in province_owner.values()}, ruling_party)
     convert_counter_gfx(hoi4, out, {t: c["ideology"] for t, c in oob_countries.items()}, main_types)
     convert_move_arrow(hoi4, out)
+    write_country_stats(out, tags, country_stats, owner_manpower)
+    convert_topbar(hoi4, out, {t: ruling_party.get(t) or "neutrality" for t in tags})
 
     # HOI4 visual style data for the GAME terrain shader
     shutil.copy2(Path(__file__).with_name("hoi4_visual_style.json5"), out / "map" / "visual_style.json5")
@@ -888,6 +947,104 @@ def convert_move_arrow(hoi4: Path, out: Path, arrow_name="move_thick"):
         f"// Generated from HOI4 gfx/maparrows/maparrows.txt arrowType {arrow_name}\n{json.dumps(params, indent=2)}\n",
         encoding="utf-8")
     print(f"Move arrow: {arrow_name} {params['body_width']} head {params['head_length']}")
+
+
+def write_country_stats(out: Path, tags, country_stats, owner_manpower):
+    """common/hoi4_country_stats.json5: per country starting stability, war support (0..1),
+    population (sum of owned states' `manpower`) and conscription (mobilisation law factor), for the
+    GAME top bar. Recruitable manpower = population * conscription."""
+    lines = ["// Generated from HOI4 history/countries (set_stability, set_war_support, mobilisation law)",
+             "// and history/states (state manpower = population, summed per owner)", "{"]
+    for tag in tags:
+        st = country_stats.get(tag, {})
+        lines.append(f"  {tag}: {{ stability: {st.get('stability', 0.5)}, war_support: {st.get('war_support', 0.5)}, "
+                     f"population: {owner_manpower.get(tag, 0)}, conscription: {st.get('conscription', 0.015)} }},")
+    lines.append("}")
+    (out / "common" / "hoi4_country_stats.json5").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+# Top bar elements we show (names from interface/topbar.gui); the rest needs systems we don't have.
+TOPBAR_KEEP = [
+    "background", "armyoverview_buttons_bg", "player_flag",
+    "pol_power_value_bg", "pol_power_icon", "pol_power",
+    "sability_value_bg", "stability_icon", "stability",
+    "war_support_value_bg", "war_support_icon", "war_support",
+    "manpower_value_bg", "manpower_icon", "manpower",
+    "pause_button_date", "button_speeddown", "button_speedup",
+    "button_speedstep1", "button_speedstep2", "button_speedstep3", "button_speedstep4", "button_speedstep5",
+    "DateText", "menu_button", "help_button", "threat_button", "threat_value",
+]
+# Sprite overrides: the extended background has room for DLC menu buttons we don't show
+TOPBAR_SPRITE = {"background": "GFX_topbar_background"}
+
+
+def convert_topbar(hoi4: Path, out: Path, tag_ideology):
+    """HOI4 top bar (interface/topbar.gui) for the GAME UI: the sprites as PNGs and the layout
+    resolved to screen edges, under gfx/interface/topbar/ (topbar.json5), plus the shield flag
+    (GFX_shield_medium) per country in flags/. Prototype: Tools/prototypes/topbar."""
+    import hoi4_gui as gui
+    dst = out / "gfx" / "interface" / "topbar"
+    (dst / "flags").mkdir(parents=True, exist_ok=True)
+    sprites = gui.load_sprites(hoi4)
+    win = gui.window(hoi4, "topbar.gui", "topbar")
+    # Lay out at two widths: elements that move with the width hang off the right screen edge
+    a = gui.layout_window(win, 1920, 1080)
+    b = gui.layout_window(win, 2560, 1080)
+
+    def save(img, name):
+        img.save(dst / name)
+        return name, img.width, img.height
+
+    elements = []
+    for name in TOPBAR_KEEP:
+        if name not in a:
+            print(f"  topbar: {name} not in topbar.gui")
+            continue
+        kind, x, y, block = a[name]
+        right = abs(b[name][1] - x) > 0.5
+        e = {"name": name, "edge": "right" if right else "left",
+             "x": round(x - 1920 if right else x, 1), "y": round(y, 1)}
+        if kind in ("instantTextBoxType", "textBoxType"):
+            e.update(kind="text", w=float(gui.kv(block, "maxWidth") or 0) or 60.0, h=float(gui.kv(block, "maxHeight") or 0),
+                     format=(gui.kv(block, "format") or "left").lower(), font=gui.kv(block, "font") or "")
+        else:
+            spr = TOPBAR_SPRITE.get(name) or gui.kv(block, "spriteType") or gui.kv(block, "quadTextureSprite")
+            e["kind"] = "button" if kind == "buttonType" else "image"
+            if name == "player_flag":
+                e.update(image="flags/{tag}.png", sprite=spr)
+                w = h = 0
+                for tag, ideology in tag_ideology.items():
+                    img = gui.masked_flag(hoi4, sprites, spr, tag, ideology)
+                    if img is not None:
+                        img.save(dst / "flags" / f"{tag}.png")
+                        w, h = img.size
+                e.update(w=w, h=h)
+            else:
+                frames = gui.sprite_frames(hoi4, sprites, spr)
+                if not frames:
+                    print(f"  topbar: no sprite {spr} for {name}")
+                    continue
+                base = name.rstrip("12345") if name.startswith("button_speedstep") else name
+                names = []
+                for i, fr in enumerate(frames):
+                    fn = f"{base}.png" if len(frames) == 1 else f"{base}_{i}.png"
+                    if not (dst / fn).exists() or base == name:
+                        fr.save(dst / fn)
+                    names.append(fn)
+                e.update(image=names[0], frames=names, w=frames[0].width, h=frames[0].height)
+        elements.append(e)
+
+    # Paused date pill: frame 1 of GFX_date_pause_button (striped, pause symbol)
+    paused = gui.sprite_frames(hoi4, sprites, "GFX_date_pause_button")
+    extra = {}
+    if len(paused) > 1:
+        paused[1].save(dst / "pause_button_date_paused.png")
+        extra["paused_image"] = "pause_button_date_paused.png"
+
+    doc = {"reference_width": 1920, "elements": elements, **extra}
+    (dst / "topbar.json5").write_text("// Generated from HOI4 interface/topbar.gui by hoi4_convert.py\n"
+                                     + json.dumps(doc, indent=1) + "\n", encoding="utf-8")
+    print(f"Top bar: {len(elements)} elements, {len(list((dst / 'flags').glob('*.png')))} flags")
 
 
 def convert_counter_gfx(hoi4: Path, out: Path, tag_ideology, main_types):
