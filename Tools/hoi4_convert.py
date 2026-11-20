@@ -16,6 +16,7 @@ import colorsys
 import os
 import re
 import shutil
+import struct
 import sys
 from pathlib import Path
 
@@ -543,6 +544,93 @@ def convert_rivers(hoi4: Path, out: Path, gfx: Path, water_px=None):
     print(f"Rivers: {int((level > 0).sum())} river pixels ({dropped} on water dropped), water color {np.round(water, 3).tolist()}")
 
 
+def read_dds_cubemap(path: Path):
+    """Faces (+X, -X, +Y, -Y, +Z, -Z) of an uncompressed 32-bit DDS cubemap, each HxWx3 RGB float.
+    Pillow only reads the first face, so this walks the file: header, then per face the full mip chain."""
+    b = path.read_bytes()
+    h, w = struct.unpack_from("<II", b, 12)
+    mips = max(struct.unpack_from("<I", b, 28)[0], 1)
+    bits = struct.unpack_from("<I", b, 88)[0]
+    rmask = struct.unpack_from("<I", b, 92)[0]
+    if bits != 32 or not (struct.unpack_from("<I", b, 112)[0] & 0x200):
+        sys.exit(f"{path.name}: expected an uncompressed 32-bit cubemap")
+    order = [2, 1, 0] if rmask == 0xFF0000 else [0, 1, 2]  # BGRA or RGBA
+    faces, off = [], 128
+    for _ in range(6):
+        px = np.frombuffer(b, np.uint8, w * h * 4, off).reshape(h, w, 4)
+        faces.append(px[..., order].astype(np.float32) / 255.0)
+        off += sum(max(w >> m, 1) * max(h >> m, 1) * 4 for m in range(mips))
+    return faces
+
+
+def cubemap_to_latlong(faces, width=512):
+    """Bake a D3D cubemap to a lat-long image (row 0 = straight up, u = 0.5 looking north (+z),
+    u increasing towards east (+x)). Same axes as the map: x east, y up, z north."""
+    height = width // 2
+    lon = ((np.arange(width) + 0.5) / width - 0.5) * 2 * np.pi
+    lat = (0.5 - (np.arange(height) + 0.5) / height) * np.pi
+    lon, lat = np.meshgrid(lon, lat)
+    d = np.stack([np.cos(lat) * np.sin(lon), np.sin(lat), np.cos(lat) * np.cos(lon)], axis=-1)
+    ax = np.abs(d)
+    major = np.argmax(ax, axis=-1)
+    x, y, z = d[..., 0], d[..., 1], d[..., 2]
+    face = np.where(major == 0, np.where(x > 0, 0, 1), np.where(major == 1, np.where(y > 0, 2, 3), np.where(z > 0, 4, 5)))
+    # D3D face coordinates (sc, tc) / |major axis|, t pointing down
+    sc = np.choose(face, [-z, z, x, x, x, -x])
+    tc = np.choose(face, [-y, -y, z, -z, -y, -y])
+    ma = np.choose(major, [ax[..., 0], ax[..., 1], ax[..., 2]])
+    size = faces[0].shape[0]
+    u = np.clip(((sc / ma + 1) * 0.5 * size).astype(int), 0, size - 1)
+    v = np.clip(((tc / ma + 1) * 0.5 * size).astype(int), 0, size - 1)
+    out = np.zeros((height, width, 3), np.float32)
+    for f in range(6):
+        m = face == f
+        out[m] = faces[f][v[m], u[m]]
+    return out
+
+
+def convert_water(hoi4: Path, gfx: Path):
+    """HOI4 pdxwater inputs: LEAN wave maps (lean1/lean2, data), the per-map wave mask
+    (fow_rgb_waterspec_a alpha: 0 = calm/sheltered, higher = open sea), and the sky reflection
+    cubemap baked to lat-long (water_sky.png) because the visual style only loads 2D textures."""
+    t = hoi4 / "map" / "terrain"
+    water = gfx / "water"
+    water.mkdir(parents=True, exist_ok=True)
+    for n in ("lean1", "lean2"):
+        Image.open(t / f"{n}.dds").convert("RGBA").save(water / f"{n}.png")
+    spec = np.asarray(Image.open(t / "fow_rgb_waterspec_a.dds").convert("RGBA"))[..., 3]
+    Image.fromarray(np.repeat(spec[..., None], 3, axis=2), "RGB").save(water / "water_spec.png", compress_level=1)
+    sky = cubemap_to_latlong(read_dds_cubemap(t / "reflection.dds"))
+    Image.fromarray((np.clip(sky, 0, 1) * 255).astype(np.uint8), "RGB").save(water / "water_sky.png")
+    print("Water: LEAN waves, wave mask, sky reflection")
+
+
+COAST_BAND = 2            # map px from the province coast where the heightmap decides the coast
+COAST_HEIGHT_MIN = 8.5    # coast height field range (HOI4 height units, sea level 9.5)
+COAST_HEIGHT_RANGE = 2.0
+
+
+def coast_channels(hoi4: Path, index):
+    """HOI4 has no coastline geometry: its water plane fades out where the 9-tap blurred
+    heightmap reaches sea level, which gives a smooth coast instead of province pixel steps.
+    Returns (nearest land tile per pixel, coast height field) for the terrain index G/B channels.
+    The field is the blurred heightmap mapped to COAST_HEIGHT_MIN..+RANGE, forced to full land
+    or water more than COAST_BAND px from the province coast (so inland depressions below sea
+    level stay land). Nearest land tile lets the smooth coast draw land on sea-province pixels."""
+    from scipy import ndimage
+    water = index == WATER_SLOT
+    hm = np.asarray(Image.open(hoi4 / "map" / "heightmap.bmp").convert("L")).astype(np.float32) * 0.1
+    if hm.shape != index.shape:
+        sys.exit(f"heightmap {hm.shape} != terrain {index.shape}")
+    hm = ndimage.convolve(hm, np.array([[1, 2, 1], [2, 4, 2], [1, 2, 1]], np.float32) / 16, mode="nearest")
+    field = np.clip((hm - COAST_HEIGHT_MIN) / COAST_HEIGHT_RANGE, 0, 1)
+    field[~water & (ndimage.distance_transform_edt(~water) > COAST_BAND)] = 1
+    field[water & (ndimage.distance_transform_edt(water) > COAST_BAND)] = 0
+    iy, ix = ndimage.distance_transform_edt(water, return_distances=False, return_indices=True)
+    nearest = index[iy, ix]
+    return nearest.astype(np.uint8), (field * 255 + 0.5).astype(np.uint8)
+
+
 BORDER_TEXTURES = ["country", "state", "province", "sea", "sea_region", "impassable"]
 
 
@@ -568,7 +656,8 @@ def convert_gfx(hoi4: Path, out: Path, water_px):
     gfx = out / "gfx" / "map"
     gfx.mkdir(parents=True, exist_ok=True)
 
-    # Terrain index: atlas tile per map pixel (R=G=B), WATER_SLOT for sea/lake provinces
+    # Terrain index: R = atlas tile per map pixel, WATER_SLOT for sea/lake provinces;
+    # G = nearest land tile, B = coast height field (see coast_channels)
     slots = graphical_terrain_slots(hoi4)
     lut = np.zeros(256, dtype=np.uint8)
     for pal, tex in slots.items():
@@ -580,7 +669,8 @@ def convert_gfx(hoi4: Path, out: Path, water_px):
     index = lut[np.asarray(terrain_bmp, dtype=np.uint8)]
     if index.shape == water_px.shape:
         index[water_px] = WATER_SLOT
-    Image.fromarray(np.repeat(index[..., None], 3, axis=2), "RGB").save(gfx / "terrain_index.png", compress_level=1)
+    nearest_land, coast = coast_channels(hoi4, index)
+    Image.fromarray(np.dstack([index, nearest_land, coast]), "RGB").save(gfx / "terrain_index.png", compress_level=1)
     print(f"Terrain index: {len(slots)} graphical terrains")
 
     for src, dst in GFX_TEXTURES:
@@ -590,6 +680,7 @@ def convert_gfx(hoi4: Path, out: Path, water_px):
     Image.open(hoi4 / "map" / "world_normal.bmp").convert("RGB").save(gfx / "world_normal.png", compress_level=1)
 
     convert_rivers(hoi4, out, gfx, water_px)
+    convert_water(hoi4, gfx)
 
     # Border strip textures (U along the border, V across). Only the full-size _0 version:
     # _1/_2 are the same profile at lower resolution, which mipmapping already covers.

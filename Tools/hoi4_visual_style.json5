@@ -13,6 +13,10 @@
     _Hoi4Underwater:    { texture: "gfx/map/underwater.png",     filter: "trilinear", wrap: "repeat" },
     _Hoi4WorldNormal:   { texture: "gfx/map/world_normal.png",   filter: "bilinear", wrap: "clamp", linear: true, mipmaps: false },
     _Hoi4CityLights:    { texture: "gfx/map/citylights.png",     filter: "trilinear", wrap: "repeat" },
+    _Hoi4WaterLean1:    { texture: "gfx/map/water/lean1.png",      filter: "trilinear", wrap: "repeat", linear: true },
+    _Hoi4WaterLean2:    { texture: "gfx/map/water/lean2.png",      filter: "trilinear", wrap: "repeat", linear: true },
+    _Hoi4WaterSpec:     { texture: "gfx/map/water/water_spec.png", filter: "bilinear", wrap: "clamp", linear: true },
+    _Hoi4WaterSky:      { texture: "gfx/map/water/water_sky.png",  filter: "bilinear", wrap: "repeat", mipmaps: false },
 
     // --- tuning (HOI4 constants.fxh values where they exist) ---
     _Hoi4TileFrequency:    { value: 128, type: "float" },
@@ -26,13 +30,18 @@
     _Hoi4SpecularStrength: { value: 0.3, type: "float" },
 
     _Hoi4WaterLightness:          { value: 0.5, type: "float" },
-    _Hoi4WaterReflection:         [0.25, 0.32, 0.4, 1.0],
-    _Hoi4WaterReflectionStrength: { value: 0.0, type: "float" },
     _Hoi4WaterDarken:             { value: 0.2, type: "float" },
     _Hoi4WaterFloorVisibility:    { value: 0.35, type: "float" }, // lit sea floor in shallow water
     _Hoi4WaterFloorRelief:        { value: 0.3, type: "float" },  // bathymetry relief on the sea floor
-    _Hoi4WaterSurfaceColor:       [0.17, 0.23, 0.33, 1.0],         // HOI4's calm blue-grey sea
-    _Hoi4WaterSurfaceOpacity:     { value: 0.55, type: "float" },
+    _Hoi4WaterSurfaceColor:       [0.17, 0.23, 0.33, 1.0],         // optional tint over the sea (tuning aid)
+    _Hoi4WaterSurfaceOpacity:     { value: 0.0, type: "float" },   // 0 = off; the sky reflection gives HOI4's blue-grey
+    // pdxwater surface
+    _Hoi4WaterWaveScale:          { value: 0.36, type: "float" },  // wave size: lower = bigger waves
+    _Hoi4WaterWaveSpeed:          { value: 1.0, type: "float" },   // x HOI4 speed
+    _Hoi4WaterWaveMask:           { value: 1.0, type: "float" },   // x HOI4 wave mask (open sea vs calm coasts)
+    _Hoi4WaterFresnelBias:        { value: 0.5, type: "float" },   // sky reflection looking straight down (HOI4 0.5)
+    _Hoi4WaterRefraction:         { value: 1.5, type: "float" },   // sea floor distortion, map px
+    _Hoi4WaterGlint:              { value: 0.6, type: "float" },   // sun glint on the waves
 
     // City lights at night (masked by colormap alpha)
     _Hoi4CityLightsIntensity: { value: 5.5, type: "float" },     // HOI4 CITY_LIGHTS_INTENSITY
@@ -42,6 +51,7 @@
     _Hoi4Gradient:         { value: [10, 0.8, 0.25, 0.35], type: "vector" },
     // Map px per screen px where the color goes from border band only (zoomed in) to full fill (zoomed out)
     _Hoi4GradientFillZoom: { value: [0.5, 1.5, 0, 0], type: "vector" },
+    _Hoi4CountryEdgeSoftness: { value: 1.0, type: "float" }, // 1 = gradient between country colors, 0 = near-sharp line
   },
 
   // Mesh border classes (Archon MeshGeometry borders). HOI4 border.shader: strips are

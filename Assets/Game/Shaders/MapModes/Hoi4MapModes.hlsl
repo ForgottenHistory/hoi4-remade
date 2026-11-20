@@ -17,28 +17,72 @@ TEXTURE2D(_Hoi4CityLights);
 float _Hoi4CityLightsIntensity;  // HOI4 CITY_LIGHTS_INTENSITY 5.5
 float _Hoi4CityLightsTiling;     // repeats per map pixel, HOI4 CITY_LIGHTS_TILING 0.09103
 
-// Country color with bilinear blending between the 4 neighbour pixels' owners (soft 1px edges)
+float _Hoi4CountryEdgeSoftness; // 1 = gradient over ~3-4 map px between countries, 0 = near-sharp line
+
+float4 Hoi4OwnerColor(uint owner)
+{
+    // Unowned contributes no color (alpha 0), so it blends into plain terrain
+    return owner == 0 ? float4(0, 0, 0, 0)
+                      : float4(SAMPLE_TEXTURE2D_LOD(_CountryColorPalette, sampler_CountryColorPalette, GetColorUV(owner), 0).rgb, 1);
+}
+
+// Country color with smooth edges (prototype: Tools/prototypes/country_fill). Each country's
+// share of a 4x4 pixel window (tent weights, ~1.9 px radius) is its blend weight, so the colors
+// mix on smooth curves instead of pixel steps, also where 3-4 countries meet.
+// _Hoi4CountryEdgeSoftness 1 = plain weighted blend (gradient over ~3-4 map px); lower values
+// sharpen the shares (power up to 8) towards a line between countries.
+#define HOI4_COUNTRY_SLOTS 4
 float4 Hoi4CountryColor(float2 uv)
 {
     float2 correctedUV = float2(uv.x, 1.0 - uv.y);
     uint w, h;
     _ProvinceOwnerTexture.GetDimensions(w, h);
-    float2 p = correctedUV * float2(w, h) - 0.5;
-    int2 i0 = (int2)floor(p);
-    float2 f = p - floor(p);
+    float2 q = correctedUV * float2(w, h) - 0.5;   // pixel-center coordinates
+    int2 i0 = (int2)floor(q);
     int2 maxI = int2(w - 1, h - 1);
 
-    float4 c[4];
-    int2 offsets[4] = { int2(0, 0), int2(1, 0), int2(0, 1), int2(1, 1) };
+    // Distinct owners in the window and their summed weights
+    uint owners[HOI4_COUNTRY_SLOTS] = { 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF };
+    float shares[HOI4_COUNTRY_SLOTS] = { 0, 0, 0, 0 };
     [unroll]
-    for (int k = 0; k < 4; k++)
+    for (int oy = -1; oy <= 2; oy++)
     {
-        uint owner = (uint)(LOAD_TEXTURE2D(_ProvinceOwnerTexture, clamp(i0 + offsets[k], int2(0, 0), maxI)).r + 0.5);
-        // Unowned contributes no color (alpha 0), so it blends into plain terrain
-        c[k] = owner == 0 ? float4(0, 0, 0, 0)
-                          : float4(SAMPLE_TEXTURE2D_LOD(_CountryColorPalette, sampler_CountryColorPalette, GetColorUV(owner), 0).rgb, 1);
+        [unroll]
+        for (int ox = -1; ox <= 2; ox++)
+        {
+            int2 pixel = i0 + int2(ox, oy);
+            float2 tent = saturate(1.5 - abs((float2)pixel - q) / 1.25);
+            float weight = tent.x * tent.y;
+            if (weight <= 0) continue;
+            uint owner = (uint)(LOAD_TEXTURE2D(_ProvinceOwnerTexture, clamp(pixel, int2(0, 0), maxI)).r + 0.5);
+
+            bool placed = false;
+            [unroll]
+            for (int k = 0; k < HOI4_COUNTRY_SLOTS; k++)
+            {
+                if (!placed && (owners[k] == owner || owners[k] == 0xFFFFFFFF))
+                {
+                    owners[k] = owner;
+                    shares[k] += weight;
+                    placed = true;
+                }
+            }
+            // A 5th owner in one window is dropped (its weight just renormalizes away)
+        }
     }
-    float4 color = lerp(lerp(c[0], c[1], f.x), lerp(c[2], c[3], f.x), f.y);
+
+    float power = exp2(3.0 * (1.0 - saturate(_Hoi4CountryEdgeSoftness)));
+    float4 color = 0;
+    float total = 0;
+    [unroll]
+    for (int k = 0; k < HOI4_COUNTRY_SLOTS; k++)
+    {
+        if (owners[k] == 0xFFFFFFFF) continue;
+        float share = pow(shares[k], power);
+        color += Hoi4OwnerColor(owners[k]) * share;   // premultiplied: unowned adds alpha 0
+        total += share;
+    }
+    color /= max(total, 1e-6);
     if (color.a > 0) color.rgb /= color.a; // un-premultiply so edges keep the hue
     return color;
 }
