@@ -146,15 +146,7 @@ namespace Hoi4.Units
         void Update()
         {
             if (panel == null) return;
-            // Poll the pointer against the panel rect every frame (enter/leave events are unreliable here)
-            bool over = false;
-            if (panel.resolvedStyle.display != DisplayStyle.None && panel.panel != null)
-            {
-                var mp = (Vector2)Input.mousePosition;
-                mp.y = Screen.height - mp.y;
-                over = panel.worldBound.Contains(RuntimePanelUtils.ScreenToPanel(panel.panel, mp));
-            }
-            global::Map.CameraControllers.BaseCameraController.ScrollCaptured = over;
+            Hoi4UiHover.Report(this, panel); // the wheel scrolls the list, not the map zoom
             if (!dirty) return;
             dirty = false;
             Refresh();
@@ -168,7 +160,6 @@ namespace Hoi4.Units
             if (selection == null || divisions == null || gameState == null || selection.Selected.Count == 0)
             {
                 panel.style.display = DisplayStyle.None;
-                global::Map.CameraControllers.BaseCameraController.ScrollCaptured = false;
                 return;
             }
             panel.style.display = DisplayStyle.Flex;

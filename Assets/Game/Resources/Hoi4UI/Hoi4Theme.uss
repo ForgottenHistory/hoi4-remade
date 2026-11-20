@@ -1,0 +1,30 @@
+/* HOI4 look shared by all HOI4 panels. No HOI4 data in here: sprites are named with --sprite and
+   loaded at runtime from the data directory by Hoi4Sprites. */
+:root {
+    --hoi4-text: rgb(242, 240, 230);
+    --hoi4-gold: rgb(247, 212, 90);
+}
+
+.hoi4-label {
+    position: absolute;
+    color: var(--hoi4-text);
+    font-size: 15px;
+    -unity-text-align: middle-left;
+    white-space: nowrap;
+    overflow: hidden;
+    padding: 0; margin: 0;
+}
+.hoi4-label.center { -unity-text-align: middle-center; }
+.hoi4-label.right { -unity-text-align: middle-right; }
+.hoi4-label.gold { color: var(--hoi4-gold); }
+
+/* sprites: absolutely placed, never pick */
+.spr {
+    position: absolute;
+    -unity-background-scale-mode: stretch-to-fill;
+}
+
+/* HOI4 buttonstate: brighter on hover, darker while pressed */
+.hoi4-button { -unity-background-image-tint-color: rgb(225, 225, 225); }
+.hoi4-button:hover { -unity-background-image-tint-color: rgb(255, 255, 255); }
+.hoi4-button:active { -unity-background-image-tint-color: rgb(170, 170, 170); }

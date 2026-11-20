@@ -1,0 +1,44 @@
+/* HOI4 state view (interface/countrystateview.gui), 468x658, bottom left. Coordinates are HOI4's. */
+.state-panel { position: absolute; left: 0; bottom: 0; width: 468px; height: 658px; }
+
+.state-bg { --sprite: "gfx/interface/stateview/bg.png"; left: 5px; top: 5px; width: 463px; height: 653px; }
+
+.state-title { left: 80px; top: 8px; width: 330px; height: 40px; font-size: 30px; letter-spacing: 4px; }
+.state-close { --sprite: "gfx/interface/stateview/close.png"; left: 428px; top: 8px; width: 26px; height: 26px; }
+
+.owner-label { left: 15px; top: 42px; width: 140px; height: 24px; }
+.claims-label { left: 15px; top: 99px; width: 140px; height: 24px; }
+.owner-flag { position: absolute; left: 35px; top: 63px; width: 52px; height: 38px; }
+.claims-row { position: absolute; left: 35px; top: 118px; width: 110px; height: 40px; flex-direction: row; }
+
+.pop-icon { --sprite: "gfx/interface/stateview/population.png"; left: 24px; top: 157px; width: 32px; height: 33px; }
+.manpower { left: 57px; top: 162px; width: 86px; height: 23px; font-size: 16px; }
+
+.resources { position: absolute; left: 35px; top: 283px; width: 104px; height: 120px; flex-direction: row; flex-wrap: wrap; align-content: flex-start; }
+.resource { width: 52px; height: 30px; }
+.resource-icon { left: 2px; top: 0; width: 27px; height: 27px; }
+.resource-amount { left: 29px; top: 0; width: 22px; height: 28px; font-size: 15px; }
+
+.state-buildings { position: absolute; left: 153px; top: 45px; width: 300px; height: 84px; flex-direction: row; }
+.slots-count { left: 170px; top: 132px; width: 240px; height: 22px; font-size: 16px; }
+.slots-grid { position: absolute; left: 154px; top: 155px; width: 305px; height: 250px; flex-direction: row; flex-wrap: wrap; align-content: flex-start; }
+.slot { width: 61px; height: 50px; }
+.slot-bg { --sprite: "gfx/interface/stateview/slot_bg.png"; left: 0; top: 0; width: 56px; height: 46px; }
+.slot-icon { left: 4px; top: 0; width: 46px; height: 46px; }
+.slot-empty { --sprite: "gfx/interface/stateview/no_building_0.png"; }
+.slot-locked { --sprite: "gfx/interface/stateview/no_building_1.png"; }
+
+.modifiers-label { left: 59px; top: 408px; width: 200px; height: 22px; font-size: 14px; }
+
+.province-flag { position: absolute; left: 12px; top: 467px; width: 26px; height: 19px; }
+.province-header { left: 36px; top: 463px; width: 360px; height: 26px; font-size: 17px; }
+.province-picture { position: absolute; left: 31px; top: 492px; width: 413px; height: 70px; }
+.province-buildings { position: absolute; left: 22px; top: 566px; width: 430px; height: 90px; flex-direction: row; }
+
+
+/* building entry (state and province): 62x84 plate with icon and level */
+.entry { width: 60px; height: 84px; }
+.entry-bg { --sprite: "gfx/interface/stateview/entry_bg.png"; left: 0; top: 0; width: 62px; height: 84px; }
+.entry-icon { left: 8px; top: 5px; width: 46px; height: 46px; }
+.entry-level { left: 0; top: 56px; width: 62px; height: 22px; font-size: 16px; }
+.province-entry { width: 61px; height: 84px; }

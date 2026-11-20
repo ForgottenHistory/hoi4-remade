@@ -1,0 +1,28 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <ui:VisualElement name="state-panel" class="state-panel" picking-mode="Position">
+        <ui:VisualElement class="spr state-bg" picking-mode="Ignore" />
+
+        <ui:Label name="title" class="hoi4-label center state-title" picking-mode="Ignore" />
+        <ui:VisualElement name="close" class="spr hoi4-button state-close" />
+
+        <ui:Label text="State Owner" class="hoi4-label center owner-label" picking-mode="Ignore" />
+        <ui:VisualElement name="owner-flag" class="owner-flag" picking-mode="Ignore" />
+        <ui:Label text="Foreign Claims" class="hoi4-label center claims-label" picking-mode="Ignore" />
+        <ui:VisualElement name="claims" class="claims-row" picking-mode="Ignore" />
+
+        <ui:VisualElement class="spr pop-icon" picking-mode="Ignore" />
+        <ui:Label name="manpower" class="hoi4-label center gold manpower" picking-mode="Ignore" />
+        <ui:VisualElement name="resources" class="resources" picking-mode="Ignore" />
+
+        <ui:VisualElement name="state-buildings" class="state-buildings" picking-mode="Ignore" />
+        <ui:Label name="slots-count" class="hoi4-label slots-count" picking-mode="Ignore" />
+        <ui:VisualElement name="slots" class="slots-grid" picking-mode="Ignore" />
+
+        <ui:Label text="State Modifiers" class="hoi4-label modifiers-label" picking-mode="Ignore" />
+
+        <ui:VisualElement name="province-flag" class="province-flag" picking-mode="Ignore" />
+        <ui:Label name="province-header" class="hoi4-label province-header" picking-mode="Ignore" />
+        <ui:VisualElement name="province-picture" class="province-picture" picking-mode="Ignore" />
+        <ui:VisualElement name="province-buildings" class="province-buildings" picking-mode="Ignore" />
+    </ui:VisualElement>
+</ui:UXML>

@@ -493,6 +493,7 @@ def convert(hoi4: Path, out: Path):
     oob_countries, main_types = convert_oob(hoi4, out, {o for o, _ in province_owner.values()}, ruling_party)
     convert_counter_gfx(hoi4, out, {t: c["ideology"] for t, c in oob_countries.items()}, main_types)
     convert_unit_panel(hoi4, out, main_types)
+    convert_state_view(hoi4, out)
     convert_move_arrow(hoi4, out)
     write_country_stats(out, tags, country_stats, owner_manpower)
     convert_topbar(hoi4, out, {t: ruling_party.get(t) or "neutrality" for t in tags})
@@ -1106,6 +1107,146 @@ def convert_unit_panel(hoi4: Path, out: Path, main_types):
         "// Generated from HOI4 interface/unitview.gui sprites: [w, h, frames]" + chr(10)
         + json.dumps({"window_border": 64, "sprites": sizes}, indent=1) + chr(10), encoding="utf-8")
     print(f"Unit panel: {len(sizes)} sprites")
+
+
+# State view (interface/countrystateview.gui) sprites: name -> GFX sprite
+STATEVIEW_SPRITES = {
+    "bg": "GFX_ww_stateview_bg", "slot_bg": "GFX_build_slot_bg", "no_building": "GFX_no_building",
+    "status_overlay": "GFX_building_status_overlay", "entry_bg": "GFX_ww_building_standing_entry_stateview",
+    "text_bg": "GFX_generic_text_bg_48", "population": "GFX_population_icon",
+    "vp_bg": "GFX_victorypoint_stateview_bg", "close": "GFX_closebutton_small",
+    "buildings": "GFX_buildings_strip", "resources": "GFX_resources_strip",
+    "flag_frame": "GFX_diplo_countrylist_flag_frame", "flag_frame_thin": "GFX_small_flag_frame_thin",
+}
+
+
+def convert_state_view(hoi4: Path, out: Path):
+    """HOI4 state view data and sprites for the GAME state panel (Hoi4StatePanel.cs):
+    map/hoi4_state_data.json5 (building definitions, state categories, per-state owner, cores,
+    manpower, resources, victory points, buildings at the 1936 start) and gfx/interface/stateview/."""
+    import hoi4_gui as gui
+    dst = out / "gfx" / "interface" / "stateview"
+    (dst / "terrain").mkdir(parents=True, exist_ok=True)
+    sprites = gui.load_sprites(hoi4)
+    for name, spr in STATEVIEW_SPRITES.items():
+        frames = gui.sprite_frames(hoi4, sprites, spr)
+        if not frames:
+            print(f"  state view: no sprite {spr}")
+            continue
+        for i, fr in enumerate(frames):
+            fr.save(dst / (f"{name}.png" if len(frames) == 1 else f"{name}_{i}.png"))
+    tdir = hoi4 / "gfx" / "interface" / "terrains"
+    for f in sorted(tdir.glob("terrain_*.dds")):
+        n = f.stem[len("terrain_"):]
+        if any(s in n for s in ("night", "rain", "snow", "storm", "winter")):
+            continue
+        img = gui.load_image(hoi4, f"gfx/interface/terrains/{f.name}")
+        if img is not None:
+            img.save(dst / "terrain" / f"{n.replace('_day', '')}.png")
+
+    # building definitions
+    defs = {}
+    broot = get(parse_pdx(read_text(hoi4 / "common" / "buildings" / "00_buildings.txt")), "buildings", [])
+    for name, _, body in broot:
+        if not isinstance(body, list) or name is None:
+            continue
+        cap = get(body, "level_cap", [])
+        d = {"frame": int(get(body, "icon_frame", 0) or 0), "coastal": get(body, "only_costal") == "yes"}
+        if isinstance(cap, list):
+            d["shared"] = get(cap, "shares_slots") == "yes"
+            if get(cap, "state_max") is not None:
+                d["state_max"] = int(float(get(cap, "state_max")))
+            if get(cap, "province_max") is not None:
+                d["province_max"] = int(float(get(cap, "province_max")))
+        defs[name] = d
+
+    categories = {}
+    for f in sorted((hoi4 / "common" / "state_category").glob("*.txt")):
+        for cat, _, body in get(parse_pdx(read_text(f)), "state_categories", []):
+            if isinstance(body, list):
+                categories[cat] = int(float(get(body, "local_building_slots", 0) or 0))
+
+    def start_ok(key):
+        try:
+            y, m, d = (int(x) for x in key.split("."))
+            return (y, m, d) <= (1936, 1, 1)
+        except ValueError:
+            return False
+
+    def read_buildings(bl, state_b, prov_b):
+        for k, _, v in bl:
+            if k is None:
+                continue
+            if isinstance(v, list):
+                if k.isdigit():
+                    for bk, _, bv in v:
+                        lvl = get(bv, "level") if isinstance(bv, list) else bv
+                        if bk in defs and lvl is not None:
+                            prov_b.setdefault(int(k), {})[bk] = int(float(lvl))
+                elif k in defs:
+                    lvl = get(v, "level")
+                    if lvl is not None:
+                        state_b[k] = int(float(lvl))
+            elif k in defs:
+                try:
+                    state_b[k] = int(float(v))
+                except ValueError:
+                    pass
+
+    states = {}
+    for f in sorted((hoi4 / "history" / "states").glob("*.txt")):
+        st = get(parse_pdx(read_text(f)), "state")
+        if not isinstance(st, list):
+            continue
+        sid = int(get(st, "id", 0))
+        hist = get(st, "history", [])
+        if not isinstance(hist, list):
+            continue
+        e = {"category": get(st, "state_category", "") or "", "manpower": int(float(get(st, "manpower", 0) or 0)),
+             "owner": get(hist, "owner") or "", "cores": [c for c in get_all(hist, "add_core_of") if isinstance(c, str)]}
+        res = get(st, "resources", [])
+        if isinstance(res, list):
+            e["resources"] = {k: int(float(v)) for k, _, v in res if k and isinstance(v, str)}
+        vps = {}
+        for vp in get_all(hist, "victory_points"):
+            vals = values(vp) if isinstance(vp, list) else []
+            if len(vals) >= 2:
+                vps[int(vals[0])] = int(float(vals[1]))
+        if vps:
+            e["vps"] = vps
+        sb, pb = {}, {}
+        for b in get_all(hist, "buildings"):
+            if isinstance(b, list):
+                read_buildings(b, sb, pb)
+        for k, _, v in hist:
+            if k and k[0].isdigit() and "." in k and start_ok(k) and isinstance(v, list):
+                if isinstance(get(v, "owner"), str):
+                    e["owner"] = get(v, "owner")
+                for b in get_all(v, "buildings"):
+                    if isinstance(b, list):
+                        read_buildings(b, sb, pb)
+        if sb:
+            e["buildings"] = sb
+        if pb:
+            e["provincial"] = {str(p): b for p, b in pb.items()}
+        states[sid] = e
+
+    # small shield flags (GFX_flag_small2) for owners and cores
+    (dst / "flags").mkdir(exist_ok=True)
+    tags = {e["owner"] for e in states.values()} | {c for e in states.values() for c in e["cores"]}
+    nflags = 0
+    for tag in sorted(t for t in tags if t):
+        img = gui.masked_flag(hoi4, sprites, "GFX_flag_small2", tag, "neutrality")
+        if img is not None:
+            img.save(dst / "flags" / f"{tag}.png")
+            nflags += 1
+    print(f"  state view flags: {nflags}")
+
+    doc = {"buildings": defs, "categories": categories, "states": states}
+    (out / "map" / "hoi4_state_data.json5").write_text(
+        "// Generated by hoi4_convert.py from history/states, common/buildings, common/state_category" + chr(10)
+        + json.dumps(doc, indent=0) + chr(10), encoding="utf-8")
+    print(f"State view: {len(states)} states, {len(defs)} building types")
 
 
 def convert_counter_gfx(hoi4: Path, out: Path, tag_ideology, main_types):
