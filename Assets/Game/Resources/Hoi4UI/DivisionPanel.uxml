@@ -1,0 +1,24 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <ui:VisualElement name="division-panel" class="division-panel" picking-mode="Position">
+        <ui:VisualElement class="spr dv-header" picking-mode="Ignore" />
+        <ui:VisualElement class="spr hoi4-button dv-delete" />
+        <ui:Label name="header" class="hoi4-label dv-title" picking-mode="Ignore" enable-rich-text="true" />
+        <ui:VisualElement name="select-half" class="spr hoi4-button dv-select-half" />
+        <ui:VisualElement class="spr hoi4-button dv-hold" />
+        <ui:VisualElement name="close" class="spr hoi4-button dv-close" />
+
+        <ui:VisualElement class="spr dv-sort dv-sort-0" picking-mode="Ignore" />
+        <ui:VisualElement class="spr dv-sort dv-sort-1" picking-mode="Ignore" />
+        <ui:VisualElement class="spr dv-sort dv-sort-2" picking-mode="Ignore" />
+        <ui:VisualElement class="spr dv-sort dv-sort-3" picking-mode="Ignore" />
+        <ui:VisualElement class="spr dv-sort dv-sort-4" picking-mode="Ignore" />
+        <ui:VisualElement class="spr dv-sort dv-sort-5" picking-mode="Ignore" />
+
+        <ui:ScrollView name="list" class="dv-list" horizontal-scroller-visibility="Hidden" vertical-scroller-visibility="Auto" />
+
+        <ui:VisualElement name="footer" class="dv-footer" picking-mode="Ignore">
+            <ui:VisualElement class="spr dv-footer-bg" picking-mode="Ignore" />
+            <ui:Label name="note" class="hoi4-label center dv-note" picking-mode="Ignore" />
+        </ui:VisualElement>
+    </ui:VisualElement>
+</ui:UXML>

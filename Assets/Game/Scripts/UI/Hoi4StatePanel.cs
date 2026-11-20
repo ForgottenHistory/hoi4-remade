@@ -11,7 +11,7 @@ namespace Hoi4.UI
     /// <summary>
     /// GAME: HOI4's state view (interface/countrystateview.gui), bottom left. Clicking a land province
     /// selects its state and shows it. This is the View of the UI Presenter pattern: structure is
-    /// Resources/Hoi4UI/StatePanel.uxml, look is StatePanel.uss + Hoi4Theme.uss, display logic is
+    /// Resources/Hoi4UI/StatePanel.uxml, look is StatePanelStyle.uss + Hoi4Theme.uss, display logic is
     /// Hoi4StatePresenter. Sprites are loaded at runtime from the data directory (Hoi4Sprites).
     /// Hidden while divisions are selected (the unit panel takes the space).
     /// </summary>
@@ -43,7 +43,7 @@ namespace Hoi4.UI
 
             var tree = Resources.Load<VisualTreeAsset>("Hoi4UI/StatePanel");
             var theme = Resources.Load<StyleSheet>("Hoi4UI/Hoi4Theme");
-            var style = Resources.Load<StyleSheet>("Hoi4UI/StatePanel");
+            var style = Resources.Load<StyleSheet>("Hoi4UI/StatePanelStyle");
             if (tree == null || theme == null || style == null)
             {
                 ArchonLogger.LogWarning("Hoi4StatePanel: Resources/Hoi4UI/StatePanel.uxml or its stylesheets are missing, panel disabled", "game_ui");
@@ -103,15 +103,28 @@ namespace Hoi4.UI
             if (Hoi4UnitSelection.Instance.Selected.Count > 0) Hide();
         }
 
+        // Lighter than the gold province selection, so the two outlines read apart
+        static readonly Color StateOutline = new Color(1f, 0.93f, 0.74f, 1f);
+
+        static global::Map.Interaction.ProvinceHighlighter Highlighter =>
+            Engine.ArchonEngine.Instance != null ? Engine.ArchonEngine.Instance.ProvinceHighlighter : null;
+
+        static bool HasCountry()
+        {
+            var init = StarterKit.Initializer.Instance;
+            return init != null && init.PlayerState != null && init.PlayerState.HasPlayerCountry;
+        }
+
         void Hide()
         {
             province = 0;
+            Highlighter?.ClearProvinceSet();
             if (panel != null) panel.style.display = DisplayStyle.None;
         }
 
         void OnProvinceClicked(ushort id)
         {
-            if (id == 0 || panel == null) return;
+            if (id == 0 || panel == null || !HasCountry()) return;
             province = id;
             dirty = true;
         }
@@ -120,10 +133,16 @@ namespace Hoi4.UI
         {
             if (panel == null) return;
             Hoi4UiHover.Report(this, panel);
+            if (!HasCountry()) { if (province != 0) Hide(); return; }
+            if (Input.GetKeyDown(KeyCode.Escape) && province != 0) { Hide(); return; }
             if (!dirty) return;
             dirty = false;
             if (province != 0 && Hoi4StatePresenter.Show(panel, gameState, province))
+            {
                 panel.style.display = DisplayStyle.Flex;
+                int stateId = Hoi4Regions.State(province);
+                Highlighter?.HighlightProvinceSet(p => Hoi4Regions.State(p) == stateId, StateOutline);
+            }
             else
                 Hide();
         }

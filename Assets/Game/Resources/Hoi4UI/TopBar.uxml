@@ -1,0 +1,42 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <ui:VisualElement name="topbar" class="topbar" picking-mode="Ignore">
+        <ui:VisualElement class="spr tb-background" picking-mode="Ignore" />
+        <!-- invisible boxes over the opaque parts of the background so clicks there never reach the map -->
+        <ui:VisualElement class="tb-block-top" picking-mode="Position" />
+        <ui:VisualElement class="tb-block-left" picking-mode="Position" />
+        <ui:VisualElement class="spr tb-army-bg" picking-mode="Ignore" />
+
+        <ui:VisualElement name="player-flag" class="hoi4-button tb-flag" picking-mode="Position" />
+
+        <ui:VisualElement class="spr tb-pp-bg" picking-mode="Ignore" />
+        <ui:VisualElement class="spr tb-pp-icon" picking-mode="Ignore" />
+        <ui:Label name="political-power" class="tb-label center tb-pp" picking-mode="Ignore" />
+
+        <ui:VisualElement class="spr tb-stab-bg" picking-mode="Ignore" />
+        <ui:VisualElement class="spr tb-stab-icon" picking-mode="Ignore" />
+        <ui:Label name="stability" class="tb-label right tb-stab" picking-mode="Ignore" />
+
+        <ui:VisualElement class="spr tb-war-bg" picking-mode="Ignore" />
+        <ui:VisualElement class="spr tb-war-icon" picking-mode="Ignore" />
+        <ui:Label name="war-support" class="tb-label right tb-war" picking-mode="Ignore" />
+
+        <ui:VisualElement class="spr tb-man-bg" picking-mode="Ignore" />
+        <ui:VisualElement class="spr tb-man-icon" picking-mode="Ignore" />
+        <ui:Label name="manpower" class="tb-label center tb-man" picking-mode="Ignore" />
+
+        <ui:VisualElement name="pill" class="spr hoi4-button tb-pill" picking-mode="Position" />
+        <ui:VisualElement name="speed-down" class="spr hoi4-button tb-speed-down" picking-mode="Position" />
+        <ui:VisualElement name="speed-up" class="spr hoi4-button tb-speed-up" picking-mode="Position" />
+        <ui:VisualElement name="step-1" class="spr hoi4-button tb-step tb-step-1" picking-mode="Position" />
+        <ui:VisualElement name="step-2" class="spr hoi4-button tb-step tb-step-2" picking-mode="Position" />
+        <ui:VisualElement name="step-3" class="spr hoi4-button tb-step tb-step-3" picking-mode="Position" />
+        <ui:VisualElement name="step-4" class="spr hoi4-button tb-step tb-step-4" picking-mode="Position" />
+        <ui:VisualElement name="step-5" class="spr hoi4-button tb-step tb-step-5" picking-mode="Position" />
+        <ui:Label name="date" class="tb-label right tb-date" picking-mode="Ignore" />
+
+        <ui:VisualElement class="spr hoi4-button tb-menu" picking-mode="Position" />
+        <ui:VisualElement class="spr hoi4-button tb-help" picking-mode="Position" />
+        <ui:VisualElement class="spr hoi4-button tb-threat" picking-mode="Position" />
+        <ui:Label name="threat" class="tb-label center tb-threat-value" text="0%" picking-mode="Ignore" />
+    </ui:VisualElement>
+</ui:UXML>

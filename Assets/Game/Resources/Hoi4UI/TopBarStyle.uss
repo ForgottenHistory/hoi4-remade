@@ -1,0 +1,62 @@
+/* HOI4 top bar (interface/topbar.gui), 90px high, full width. Left items use left, right items use
+   right (HOI4 offsets from the right screen edge, already converted: right = -x - width). */
+.topbar { position: absolute; left: 0; right: 0; top: 0; height: 90px; }
+
+.tb-label {
+    position: absolute;
+    color: rgb(237, 230, 209);
+    font-size: 15px;
+    -unity-font-style: bold;
+    -unity-text-align: middle-left;
+    white-space: nowrap;
+    overflow: hidden;
+    padding: 0; margin: 0;
+    height: 20px;
+}
+.tb-label.center { -unity-text-align: middle-center; }
+.tb-label.right { -unity-text-align: middle-right; }
+
+.tb-background { --sprite: "gfx/interface/topbar/background.png"; left: -4px; top: -1px; width: 2346px; height: 87px; }
+.tb-block-top { position: absolute; left: 0; right: 0; top: 0; height: 34px; }
+.tb-block-left { position: absolute; left: 0; top: 0; width: 700px; height: 82px; }
+.tb-army-bg { --sprite: "gfx/interface/topbar/armyoverview_buttons_bg.png"; right: 0; top: -3px; width: 403px; height: 101px; }
+
+.tb-flag { position: absolute; left: 8px; top: 13px; width: 82px; height: 52px; }
+
+.tb-pp-bg { --sprite: "gfx/interface/topbar/pol_power_value_bg.png"; left: 96px; top: 4px; width: 70px; height: 26px; }
+.tb-pp-icon { --sprite: "gfx/interface/topbar/pol_power_icon.png"; left: 99px; top: 2px; width: 27px; height: 27px; }
+.tb-pp { left: 116px; top: 7px; width: 50px; }
+
+.tb-stab-bg { --sprite: "gfx/interface/topbar/sability_value_bg.png"; left: 169px; top: 4px; width: 70px; height: 26px; }
+.tb-stab-icon { --sprite: "gfx/interface/topbar/stability_icon.png"; left: 170px; top: 4px; width: 27px; height: 24px; }
+.tb-stab { left: 176px; top: 7px; width: 57px; }
+
+.tb-war-bg { --sprite: "gfx/interface/topbar/war_support_value_bg.png"; left: 242px; top: 4px; width: 70px; height: 26px; }
+.tb-war-icon { --sprite: "gfx/interface/topbar/war_support_icon.png"; left: 243px; top: 5px; width: 26px; height: 24px; }
+.tb-war { left: 249px; top: 7px; width: 57px; }
+
+.tb-man-bg { --sprite: "gfx/interface/topbar/manpower_value_bg.png"; left: 315px; top: 4px; width: 96px; height: 26px; }
+.tb-man-icon { --sprite: "gfx/interface/topbar/manpower_icon.png"; left: 317px; top: 2px; width: 27px; height: 27px; }
+.tb-man { left: 348px; top: 7px; width: 57px; }
+
+/* date pill: the label sits on it, right of its play/pause symbol */
+.tb-pill { --sprite: "gfx/interface/topbar/pause_button_date.png"; right: 120px; top: 6px; width: 206px; height: 28px; }
+.tb-pill.paused { --sprite: "gfx/interface/topbar/pause_button_date_paused.png"; }
+.tb-date { right: 154px; top: 10px; width: 150px; padding-left: 26px; font-size: 12px; }
+.tb-speed-down { --sprite: "gfx/interface/topbar/button_speeddown.png"; right: 297px; top: 7px; width: 27px; height: 27px; }
+.tb-speed-up { --sprite: "gfx/interface/topbar/button_speedup.png"; right: 122px; top: 7px; width: 27px; height: 27px; }
+
+/* five speed steps: off, on (green), on while paused (red) */
+.tb-step { --sprite: "gfx/interface/topbar/button_speedstep_0.png"; top: 33px; width: 28px; height: 10px; }
+.tb-step.on { --sprite: "gfx/interface/topbar/button_speedstep_1.png"; }
+.tb-step.on.paused { --sprite: "gfx/interface/topbar/button_speedstep_2.png"; }
+.tb-step-1 { right: 260px; }
+.tb-step-2 { right: 235px; }
+.tb-step-3 { right: 210px; }
+.tb-step-4 { right: 185px; }
+.tb-step-5 { right: 160px; }
+
+.tb-menu { --sprite: "gfx/interface/topbar/menu_button.png"; right: 15px; top: 6px; width: 24px; height: 24px; }
+.tb-help { --sprite: "gfx/interface/topbar/help_button.png"; right: 9px; top: 33px; width: 24px; height: 24px; }
+.tb-threat { --sprite: "gfx/interface/topbar/threat_button_0.png"; right: 51px; top: 19px; width: 49px; height: 49px; }
+.tb-threat-value { right: 47px; top: 73px; width: 55px; }
