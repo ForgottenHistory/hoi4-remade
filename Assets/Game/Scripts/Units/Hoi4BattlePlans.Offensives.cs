@@ -1004,6 +1004,47 @@ namespace Hoi4.Units
             if (spine.Count >= 2) AddRing(spine[spine.Count - 1]);
         }
 
+        /// <summary>Dragging a front line (HOI4): the line as it will be placed in the army's colour, the hover
+        /// preview's dashed line on top, and a ring where the drag started and one at the cursor, both on the line.</summary>
+        void AddLineDragPreview()
+        {
+            ArmySelection(out var army);
+            var color = army != null ? Hoi4Armies.ColorOf(army.Id, 0.95f) : previewColor;
+            foreach (var chain in previewChains) AddRibbon(chain, color, 1f);
+            foreach (var chain in previewChains) AddRibbon(chain, previewColor, 0f); // the hover preview's dashed line
+            var cam = Camera.main;
+            AddRing(WorldToPixel(NearestOn(previewChains, lineDragStartWorld)));
+            if (cam != null && TryCursorWorld(cam, out var cursor))
+                AddRing(WorldToPixel(NearestOn(previewChains, cursor)));
+        }
+
+        bool TryCursorWorld(Camera cam, out Vector3 world)
+        {
+            world = default;
+            var selector = Engine.ArchonEngine.Instance.ProvinceSelector;
+            return selector != null && selector.TryGetMapPointAtScreenPosition(Input.mousePosition, cam, out world, out _);
+        }
+
+        /// <summary>The point on the polylines nearest q (map plane).</summary>
+        static Vector3 NearestOn(List<List<Vector3>> chains, Vector3 q)
+        {
+            var best = q;
+            float bestD = float.MaxValue;
+            var q2 = new Vector2(q.x, q.z);
+            foreach (var pts in chains)
+                for (int i = 0; i < pts.Count; i++)
+                {
+                    var a = new Vector2(pts[i].x, pts[i].z);
+                    var b = i + 1 < pts.Count ? new Vector2(pts[i + 1].x, pts[i + 1].z) : a;
+                    var ab = b - a;
+                    float t = ab.sqrMagnitude > 1e-12f ? Mathf.Clamp01(Vector2.Dot(q2 - a, ab) / ab.sqrMagnitude) : 0f;
+                    var p = a + ab * t;
+                    float d = (p - q2).sqrMagnitude;
+                    if (d < bestD) { bestD = d; best = new Vector3(p.x, 0f, p.y); }
+                }
+            return best;
+        }
+
         void AddRing(Vector2 centre)
         {
             var circle = new List<Vector2>(41);

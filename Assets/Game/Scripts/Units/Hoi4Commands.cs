@@ -177,6 +177,7 @@ namespace Hoi4.Units
         public ushort CountryId;
         public ushort TargetCountry;
         public ushort Province;      // where it was drawn: the line holds the stretch of border nearest it
+        public ushort End;           // dragged: the line covers the stretch only from Province to End (0: all of it)
         public int ArmyId;
         public List<ushort> UnitIds;
 
@@ -186,7 +187,7 @@ namespace Hoi4.Units
             && Hoi4BattlePlans.Instance.HasBorder(CountryId, TargetCountry);
 
         public override void Execute(GameState gameState) =>
-            Hoi4BattlePlans.Instance.CreatePlan(CountryId, ArmyId, TargetCountry, UnitIds, Province);
+            Hoi4BattlePlans.Instance.CreatePlan(CountryId, ArmyId, TargetCountry, UnitIds, Province, End);
 
         public override void Undo(GameState gameState) { }
 
@@ -195,6 +196,7 @@ namespace Hoi4.Units
             w.Write(CountryId);
             w.Write(TargetCountry);
             w.Write(Province);
+            w.Write(End);
             w.Write(ArmyId);
             Hoi4CommandIo.WriteIds(w, UnitIds);
         }
@@ -204,6 +206,7 @@ namespace Hoi4.Units
             CountryId = r.ReadUInt16();
             TargetCountry = r.ReadUInt16();
             Province = r.ReadUInt16();
+            End = r.ReadUInt16();
             ArmyId = r.ReadInt32();
             UnitIds = Hoi4CommandIo.ReadIds(r);
         }

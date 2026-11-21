@@ -30,6 +30,9 @@ namespace Hoi4.Units
         // they were drawn on, like HOI4, so a border split by a third country (Luxembourg between Belgium and
         // Alsace) is two lines. Follows the border as it moves. Null: the whole border (AI plans).
         public HashSet<ushort> Section;
+        // A line dragged over part of a stretch (right-drag): the stretch's other front provinces, which it keeps out
+        // as the border moves (new front provinces next to it join, these never do). Null: it holds whole stretches.
+        public HashSet<ushort> Outside;
         public readonly Dictionary<ushort, ushort> Slot = new Dictionary<ushort, ushort>(); // unit -> the front province it holds
         public readonly Dictionary<(ushort, int), bool> Reach = new Dictionary<(ushort, int), bool>(); // (province, front) reachable by land; cleared with the fronts
         public readonly Dictionary<ushort, int> FrontIndex = new Dictionary<ushort, int>(); // front province -> its front
@@ -128,6 +131,11 @@ namespace Hoi4.Units
 
         // Hover preview
         ushort hoverProvince, hoverCountry;
+        // Right-drag along a border (front line tool): the line from where the press was to the cursor
+        bool lineDrag;
+        ushort lineDragStart, lineDragCountry;
+        Vector3 lineDragStartWorld;
+        Vector2 lineDragPress;               // screen: a release without moving is a plain right click (cancel)
         List<BorderArc> previewArcs;
         List<List<Vector3>> previewChains;
         readonly HashSet<ushort> previewProvinces = new HashSet<ushort>();
@@ -343,6 +351,7 @@ namespace Hoi4.Units
             if (!ready || !HasArmySelection) return;
             if (OffensiveActive) CancelOffensive();
             Active = true;
+            lineDrag = false;
             hoverProvince = 0;
             SetPreview(0);
             Changed?.Invoke();
@@ -352,6 +361,7 @@ namespace Hoi4.Units
         {
             if (!Active) return;
             Active = false;
+            lineDrag = false;
             SetPreview(0);
             Changed?.Invoke();
         }
@@ -408,20 +418,34 @@ namespace Hoi4.Units
             if (OffensiveActive) return OnOffensiveClick(button);
             if (!Active) return false;
             if (button == 0 && previewArcs != null && previewArcs.Count > 0) Place();
-            else if (button == 1) Cancel();
+            else if (button == 1 && previewArcs != null && previewArcs.Count > 0 && !lineDrag)
+            {
+                // Right press on a border: drag the line along it (placed on release)
+                lineDrag = true;
+                lineDragCountry = hoverCountry;
+                lineDragStart = hoverProvince;
+                lineDragPress = Input.mousePosition;
+                var cam = Camera.main;
+                lineDragStartWorld = cam != null && TryCursorWorld(cam, out var w) ? w : Vector3.zero;
+                SetPreview(hoverProvince);
+            }
+            else if (button == 1 && !lineDrag) Cancel();
             return true;
         }
 
         void Place()
         {
+            ushort end = lineDrag ? (hoverProvince != 0 ? hoverProvince : lineDragStart) : (ushort)0;
+            ushort start = lineDrag ? lineDragStart : hoverProvince;
+            lineDrag = false;
             var selected = ArmySelection(out var army);
             if (selected == null) { Cancel(); return; }
             selected.Sort();
             ushort target = hoverCountry;
-            ushort province = hoverProvince; // picks the stretch of the border
             Active = false;
             SetPreview(0);
-            gameState.TryExecuteCommand(new PlaceBattlePlanCommand { CountryId = Player, TargetCountry = target, Province = province, ArmyId = army.Id, UnitIds = selected }, out _);
+            // Province picks the stretch of the border; with End (dragged) the line covers only start to end
+            gameState.TryExecuteCommand(new PlaceBattlePlanCommand { CountryId = Player, TargetCountry = target, Province = start, End = end, ArmyId = army.Id, UnitIds = selected }, out _);
             dirtyMesh = true;
             Changed?.Invoke();
         }
@@ -431,12 +455,12 @@ namespace Hoi4.Units
 
         /// <summary>PlaceBattlePlanCommand: the owner's front line against the country, traced from the
         /// current border, held by these divisions (those already on another plan stay there).</summary>
-        public Hoi4BattlePlan CreatePlan(ushort owner, int armyId, ushort country, List<ushort> unitIds, ushort province = 0)
+        public Hoi4BattlePlan CreatePlan(ushort owner, int armyId, ushort country, List<ushort> unitIds, ushort province = 0, ushort end = 0)
         {
             if (!simReady) return null;
             var plan = new Hoi4BattlePlan { Id = nextId++, Owner = owner, ArmyId = armyId, Country = country };
             var all = FrontsAgainst(owner, country);
-            plan.Section = StretchAt(all, province);
+            plan.Section = end != 0 ? SectionBetween(all, province, end, out plan.Outside) : StretchAt(all, province);
             var fronts = FrontsOf(plan, all);
             if (fronts.Count == 0) return null;
             SetFronts(plan, fronts);
@@ -475,6 +499,17 @@ namespace Hoi4.Units
             {
                 hoverProvince = province;
                 SetPreview(province);
+            }
+            if (lineDrag)
+            {
+                if (!Input.GetMouseButton(1))
+                {
+                    if (((Vector2)Input.mousePosition - lineDragPress).sqrMagnitude < 36f) Cancel();
+                    else if (previewArcs != null && previewArcs.Count > 0) Place();
+                    else { lineDrag = false; SetPreview(hoverProvince); }
+                    return;
+                }
+                dirtyMesh = true; // the end ring follows the cursor
             }
         }
 
@@ -670,6 +705,20 @@ namespace Hoi4.Units
         void FindBorder(ushort province)
         {
             ushort player = Player;
+            if (lineDrag)
+            {
+                if (!simReady) return;
+                var all = FrontsAgainst(player, lineDragCountry);
+                ushort end = province != 0 && !Hoi4Regions.IsWater(province) ? province : lineDragStart;
+                var between = SectionBetween(all, lineDragStart, end, out _);
+                if (between == null) return;
+                var dragArcs = BorderWith(player, lineDragCountry, previewProvinces, between);
+                if (dragArcs.Count == 0) { previewProvinces.Clear(); return; }
+                hoverCountry = lineDragCountry;
+                previewArcs = dragArcs;
+                previewChains = BuildChains(dragArcs, lineDragCountry);
+                return;
+            }
             if (player == 0 || Hoi4Regions.IsWater(province)) return;
             ushort country = Hoi4Occupation.ControllerOf(gameState, province);
             if (country == player)
@@ -896,25 +945,70 @@ namespace Hoi4.Units
             var stretchOf = new Dictionary<ushort, int>();
             for (int s = 0; s < stretches.Count; s++)
                 foreach (int f in stretches[s]) foreach (ushort p in fronts[f]) stretchOf[p] = s;
-            var seen = new HashSet<ushort> { province };
-            var level = new List<ushort> { province };
+            ushort best = Nearest(province, stretchOf.ContainsKey);
+            if (best == 0) return null;
+            var set = new HashSet<ushort>();
+            foreach (int f in stretches[stretchOf[best]]) set.UnionWith(fronts[f]);
+            return set;
+        }
+
+        /// <summary>The province matching the test nearest the start (hops over land, ties: the lower id), 0 none.</summary>
+        ushort Nearest(ushort start, Func<ushort, bool> match)
+        {
+            if (start == 0) return 0;
+            var seen = new HashSet<ushort> { start };
+            var level = new List<ushort> { start };
             while (level.Count > 0)
             {
                 ushort best = 0;
-                foreach (ushort p in level) if (stretchOf.ContainsKey(p) && (best == 0 || p < best)) best = p;
-                if (best != 0)
-                {
-                    var set = new HashSet<ushort>();
-                    foreach (int f in stretches[stretchOf[best]]) set.UnionWith(fronts[f]);
-                    return set;
-                }
+                foreach (ushort p in level) if (match(p) && (best == 0 || p < best)) best = p;
+                if (best != 0) return best;
                 var next = new List<ushort>();
                 foreach (ushort p in level)
                     foreach (ushort n in Neighbours(p))
                         if (seen.Add(n)) next.Add(n);
                 level = next;
             }
-            return null;
+            return 0;
+        }
+
+        /// <summary>
+        /// A dragged line: the front provinces between the one nearest the start and the one nearest the end, on the
+        /// stretch the start is on (an end beyond the stretch stops at its nearest province). Between = on a shortest
+        /// walk along the front provinces (neighbours in the stretch), so a bulge the walk passes is kept. Where the
+        /// walk is broken (a lake on our side) the whole stretch. Outside gets the stretch's other front provinces.
+        /// </summary>
+        HashSet<ushort> SectionBetween(List<List<ushort>> fronts, ushort start, ushort end, out HashSet<ushort> outside)
+        {
+            outside = null;
+            var stretch = StretchAt(fronts, start);
+            if (stretch == null) return null;
+            ushort a = Nearest(start, stretch.Contains), b = Nearest(end, stretch.Contains);
+            var da = WalkDistances(a, stretch);
+            var db = WalkDistances(b, stretch);
+            var section = new HashSet<ushort>();
+            if (da.TryGetValue(b, out int length))
+                foreach (var kv in da)
+                    if (db.TryGetValue(kv.Key, out int d) && kv.Value + d <= length) section.Add(kv.Key);
+            if (section.Count == 0) return stretch;
+            outside = new HashSet<ushort>(stretch);
+            outside.ExceptWith(section);
+            return section;
+        }
+
+        /// <summary>Hops from the start to every province of the set reachable through neighbours within it.</summary>
+        Dictionary<ushort, int> WalkDistances(ushort start, HashSet<ushort> within)
+        {
+            var dist = new Dictionary<ushort, int> { [start] = 0 };
+            var queue = new Queue<ushort>();
+            queue.Enqueue(start);
+            while (queue.Count > 0)
+            {
+                ushort p = queue.Dequeue();
+                foreach (ushort n in Neighbours(p))
+                    if (within.Contains(n) && !dist.ContainsKey(n)) { dist[n] = dist[p] + 1; queue.Enqueue(n); }
+            }
+            return dist;
         }
 
         /// <summary>The fronts a plan holds: all of them for a whole-border plan, else the stretches that keep or
@@ -923,6 +1017,7 @@ namespace Hoi4.Units
         List<List<ushort>> FrontsOf(Hoi4BattlePlan plan, List<List<ushort>> fronts)
         {
             if (plan.Section == null) return fronts;
+            if (plan.Outside != null) return PartialFrontsOf(plan, fronts);
             var kept = new List<List<ushort>>();
             foreach (var stretch in Stretches(fronts))
             {
@@ -943,6 +1038,43 @@ namespace Hoi4.Units
             {
                 plan.Section = new HashSet<ushort>();
                 foreach (var f in kept) plan.Section.UnionWith(f);
+            }
+            return kept;
+        }
+
+        /// <summary>A dragged line follows the border without creeping along it: it keeps its front provinces that are
+        /// still front provinces, and takes new ones next to them (land won ahead, or the line behind land lost)
+        /// unless they were outside it before. Each front keeps its order, filtered.</summary>
+        List<List<ushort>> PartialFrontsOf(Hoi4BattlePlan plan, List<List<ushort>> fronts)
+        {
+            var kept = new List<List<ushort>>();
+            var section = new HashSet<ushort>();
+            var outside = new HashSet<ushort>();
+            foreach (var stretch in Stretches(fronts))
+            {
+                var mine = new List<List<ushort>>();
+                foreach (int f in stretch)
+                {
+                    var list = new List<ushort>();
+                    foreach (ushort p in fronts[f])
+                    {
+                        bool take = plan.Section.Contains(p);
+                        if (!take && !plan.Outside.Contains(p))
+                            foreach (ushort n in Neighbours(p)) if (plan.Section.Contains(n)) { take = true; break; }
+                        if (take) list.Add(p);
+                    }
+                    if (list.Count > 0) mine.Add(list);
+                }
+                if (mine.Count == 0) continue;
+                kept.AddRange(mine);
+                foreach (var l in mine) section.UnionWith(l);
+                foreach (int f in stretch) foreach (ushort p in fronts[f]) outside.Add(p);
+            }
+            if (kept.Count > 0)
+            {
+                outside.ExceptWith(section);
+                plan.Section = section;
+                plan.Outside = outside;
             }
             return kept;
         }
@@ -1241,8 +1373,12 @@ namespace Hoi4.Units
         {
             verts.Clear(); colors.Clear(); uvs.Clear(); styles.Clear(); centers.Clear(); tris.Clear();
             if (Active && previewChains != null)
-                foreach (var chain in previewChains)
-                    AddRibbon(chain, previewColor, 0f);
+            {
+                if (lineDrag) AddLineDragPreview();
+                else
+                    foreach (var chain in previewChains)
+                        AddRibbon(chain, previewColor, 0f);
+            }
             foreach (var plan in plans)
             {
                 if (plan.IsAI) continue; // AI lines are not drawn
