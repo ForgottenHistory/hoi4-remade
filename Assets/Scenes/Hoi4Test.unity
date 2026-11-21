@@ -434,7 +434,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7f5404ecba71f0048bfe52125a146f5d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  hoverHighlightColor: {r: 1, g: 1, b: 1, a: 0.3}
+  hoverHighlightColor: {r: 1, g: 1, b: 1, a: 0}
   selectionHighlightColor: {r: 1, g: 0.84, b: 0, a: 0.5}
 --- !u!1 &1920970331
 GameObject:
