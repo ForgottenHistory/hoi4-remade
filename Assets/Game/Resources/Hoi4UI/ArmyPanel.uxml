@@ -1,0 +1,9 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <ui:VisualElement name="army-bar" class="army-bar" picking-mode="Ignore">
+        <ui:VisualElement name="army-list" class="army-list" picking-mode="Ignore" />
+        <ui:VisualElement class="army-slot" picking-mode="Ignore">
+            <ui:VisualElement name="add-army" class="hoi4-button ac-add" picking-mode="Position" />
+            <ui:VisualElement name="add-frame" class="ac-frame" picking-mode="Ignore" />
+        </ui:VisualElement>
+    </ui:VisualElement>
+</ui:UXML>

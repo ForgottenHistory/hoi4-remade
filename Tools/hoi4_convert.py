@@ -493,6 +493,7 @@ def convert(hoi4: Path, out: Path):
     oob_countries, main_types = convert_oob(hoi4, out, {o for o, _ in province_owner.values()}, ruling_party)
     convert_counter_gfx(hoi4, out, {t: c["ideology"] for t, c in oob_countries.items()}, main_types)
     convert_unit_panel(hoi4, out, main_types)
+    convert_army_cards(hoi4, out)
     convert_state_view(hoi4, out)
     convert_move_arrow(hoi4, out)
     write_country_stats(out, tags, country_stats, owner_manpower)
@@ -1162,6 +1163,41 @@ def convert_unit_panel(hoi4: Path, out: Path, main_types):
         "// Generated from HOI4 interface/unitview.gui sprites: [w, h, frames]" + chr(10)
         + json.dumps({"window_border": 64, "sprites": sizes}, indent=1) + chr(10), encoding="utf-8")
     print(f"Unit panel: {len(sizes)} sprites")
+
+
+def convert_army_cards(hoi4: Path, out: Path):
+    """Sprites of the army cards at the bottom of the screen (interface/leadergroups.gui) as PNGs under
+    gfx/interface/armies/: the card frame states, the 'new army' plus button (and a grey copy for when
+    nothing is selected), the unknown-leader portrait and the disband button."""
+    import hoi4_gui as gui
+    from PIL import Image
+    dst = out / "gfx" / "interface" / "armies"
+    dst.mkdir(parents=True, exist_ok=True)
+    sprites = gui.load_sprites(hoi4)
+    sizes = {}
+
+    def save(name, img):
+        img.save(dst / f"{name}.png")
+        sizes[name] = [img.width, img.height]
+
+    frames = gui.sprite_frames(hoi4, sprites, "GFX_LG_group_frame") or []
+    for i, fr in enumerate(frames):
+        save(f"frame_{i}", fr)
+    add = gui.sprite_frames(hoi4, sprites, "GFX_LG_select_group_btn")
+    if add:
+        save("add", add[0])
+        rgba = add[0].convert("RGBA")
+        r, g, b, a = rgba.split()
+        grey = Image.merge("RGB", (r, g, b)).convert("L").point(lambda v: int(v * 0.8))
+        save("add_grey", Image.merge("RGBA", (grey, grey, grey, a)))
+    for name, spr in (("portrait", "GFX_leader_unknown"), ("disband", "GFX_LG_disband_group_btn")):
+        fr = gui.sprite_frames(hoi4, sprites, spr)
+        if fr:
+            save(name, fr[0])
+    (dst / "armies.json5").write_text(
+        "// Generated from HOI4 interface/leadergroups.gui sprites: [w, h]" + chr(10)
+        + json.dumps(sizes, indent=1) + chr(10), encoding="utf-8")
+    print(f"Army cards: {len(sizes)} sprites")
 
 
 # State view (interface/countrystateview.gui) sprites: name -> GFX sprite

@@ -1,0 +1,12 @@
+/* Army cards along the bottom of the screen (interface/leadergroups.gui leader_groups_portrait_window).
+   Coordinates are HOI4 pixel: a card is the 84x117 group frame with the 61x82 portrait inside it. */
+.army-bar { position: absolute; left: 50%; translate: -50% 0; bottom: 0; flex-direction: row; align-items: flex-end; }
+.army-list { flex-direction: row; align-items: flex-end; }
+.army-slot { width: 84px; height: 117px; flex-shrink: 0; }
+
+.army-card { width: 84px; height: 117px; flex-shrink: 0; }
+.ac-portrait { position: absolute; left: 9px; top: 7px; width: 61px; height: 82px; background-size: 61px 82px; }
+.ac-frame { position: absolute; left: 0; top: 0; width: 84px; height: 117px; }
+.ac-count { position: absolute; left: 0; top: 86px; width: 84px; height: 16px; font-size: 15px; -unity-text-align: middle-center; color: rgb(235, 235, 225); }
+.ac-disband { position: absolute; left: 63px; top: 5px; width: 16px; height: 16px; }
+.ac-add { position: absolute; left: 9px; top: 7px; width: 61px; height: 83px; }
