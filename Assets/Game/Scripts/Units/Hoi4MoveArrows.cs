@@ -30,6 +30,10 @@ namespace Hoi4.Units
         public Color arrowColor = new Color(0.78f, 0.56f, 0.16f, 1f);
         [Tooltip("Colour of the part already travelled toward the next province")]
         public Color progressColor = new Color(1f, 0.95f, 0.78f, 1f);
+        [Tooltip("Arrow colour while the move is an attack on an enemy-held province")]
+        public Color attackColor = new Color(0.78f, 0.12f, 0.1f, 1f);
+        [Tooltip("Travelled part of an attack arrow")]
+        public Color attackProgressColor = new Color(1f, 0.55f, 0.5f, 1f);
         [Tooltip("Fraction of the arrow faded in at the root")]
         [Range(0f, 0.5f)] public float rootFade = 0.04f;
         [Tooltip("Arrow height above the terrain, world units")]
@@ -55,6 +59,8 @@ namespace Hoi4.Units
         static readonly int ParamsId = Shader.PropertyToID("_ArrowParams");
         static readonly int StripeId = Shader.PropertyToID("_StripeStrength");
         static readonly int ProgressColorId = Shader.PropertyToID("_ProgressColor");
+        static readonly int AttackColorId = Shader.PropertyToID("_AttackColor");
+        static readonly int AttackProgressColorId = Shader.PropertyToID("_AttackProgressColor");
 
         GameState gameState;
         Material material;
@@ -123,10 +129,12 @@ namespace Hoi4.Units
                 gameState.EventBus.Subscribe<UnitMovementStartedEvent>(_ => dirty = true),
                 gameState.EventBus.Subscribe<UnitMovementCompletedEvent>(_ => dirty = true),
                 gameState.EventBus.Subscribe<UnitMovementCancelledEvent>(_ => dirty = true),
-                gameState.EventBus.Subscribe<DailyTickEvent>(_ => dirty = true),
+                gameState.EventBus.Subscribe<HourlyTickEvent>(_ => dirty = true),
             };
             dirty = true;
         }
+
+        public void MarkDirty() => dirty = true;
 
         void LateUpdate()
         {
@@ -138,6 +146,8 @@ namespace Hoi4.Units
             }
             material.SetColor(ColorId, arrowColor);
             material.SetColor(ProgressColorId, progressColor);
+            material.SetColor(AttackColorId, attackColor);
+            material.SetColor(AttackProgressColorId, attackProgressColor);
             material.SetVector(ParamsId, new Vector4(bodyUvScale, animSpeed, rootFade, lift));
             material.SetFloat(StripeId, stripeStrength);
             if (mesh.vertexCount > 0)
@@ -186,6 +196,7 @@ namespace Hoi4.Units
 
         void Rebuild()
         {
+            attack = 0f;
             verts.Clear(); uvs.Clear(); infos.Clear(); fills.Clear(); centers.Clear(); tris.Clear();
             var selection = Hoi4UnitSelection.Instance;
             var counters = Hoi4UnitCounters.Instance;
@@ -209,6 +220,7 @@ namespace Hoi4.Units
                 if (points.Count < 2) continue;
                 // Like HOI4: the arrow starts at the division's province and the stretch already
                 // travelled toward the next province fills in
+                attack = Hoi4Combat.Instance != null && Hoi4Combat.Instance.IsAttacking(id) ? 1f : 0f;
                 AddArrow(points, counters.WorldPerMapPixel, progress);
             }
 
@@ -294,13 +306,14 @@ namespace Hoi4.Units
         }
 
         float fill; // travelled fraction of the arrow being built
+        float attack; // 1 when the arrow being built is an attack
 
         void AddPair(Vector3 p, Vector3 dir, float half, float u, float isHead, float along, bool connect)
         {
             var side = new Vector3(-dir.z, 0f, dir.x) * half;
             int v = verts.Count;
-            verts.Add(p - side); uvs.Add(new Vector2(u, 0f)); infos.Add(new Vector2(isHead, along)); fills.Add(new Vector2(fill, 0f));
-            verts.Add(p + side); uvs.Add(new Vector2(u, 1f)); infos.Add(new Vector2(isHead, along)); fills.Add(new Vector2(fill, 0f));
+            verts.Add(p - side); uvs.Add(new Vector2(u, 0f)); infos.Add(new Vector2(isHead, along)); fills.Add(new Vector2(fill, attack));
+            verts.Add(p + side); uvs.Add(new Vector2(u, 1f)); infos.Add(new Vector2(isHead, along)); fills.Add(new Vector2(fill, attack));
             centers.Add(new Vector2(p.x, p.z)); centers.Add(new Vector2(p.x, p.z));
             if (!connect) return;
             tris.Add(v - 2); tris.Add(v); tris.Add(v - 1);

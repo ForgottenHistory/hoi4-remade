@@ -31,6 +31,8 @@ namespace Hoi4.Units
         public float SpeedKmh;         // slowest sub-unit
         public int Manpower;
         public float Experience;
+        public float SoftAttack, HardAttack, Defense, Breakthrough; // sums over sub-units (1936 equipment)
+        public float Hardness, Armor, Piercing;
     }
 
     /// <summary>
@@ -50,6 +52,8 @@ namespace Hoi4.Units
         public IReadOnlyDictionary<ushort, Hoi4Division> All => divisions;
 
         public Hoi4Division Get(ushort unitId) => divisions.TryGetValue(unitId, out var d) ? d : null;
+
+        public void Remove(ushort unitId) => divisions.Remove(unitId);
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Spawn()
@@ -160,12 +164,15 @@ namespace Hoi4.Units
                              (missingTags.Count > 0 ? $", unknown tags: {string.Join(", ", missingTags)}" : ""), "game_units");
         }
 
+        static float Val(JObject s, string key) => s[key] != null ? (float)s[key] : 0f;
+
         static Hoi4Division Build(ushort unitId, string tag, JToken d, string templateName, JObject template, JObject subUnits)
         {
             var regiments = template["regiments"]?.Select(t => (string)t).ToList() ?? new List<string>();
             var support = template["support"]?.Select(t => (string)t).ToList() ?? new List<string>();
 
             float strength = 0, org = 0, width = 0, speed = float.MaxValue;
+            float soft = 0, hard = 0, def = 0, brk = 0, hardness = 0, armorMax = 0, armorSum = 0, pierceMax = 0, pierceSum = 0;
             int manpower = 0, count = 0;
             foreach (string name in regiments.Concat(support))
             {
@@ -174,6 +181,11 @@ namespace Hoi4.Units
                 org += (float)s["max_organisation"];
                 manpower += (int)s["manpower"];
                 speed = Mathf.Min(speed, (float)s["speed"]);
+                soft += Val(s, "soft_attack"); hard += Val(s, "hard_attack");
+                def += Val(s, "defense"); brk += Val(s, "breakthrough");
+                hardness += Val(s, "hardness");
+                armorMax = Mathf.Max(armorMax, Val(s, "armor")); armorSum += Val(s, "armor");
+                pierceMax = Mathf.Max(pierceMax, Val(s, "piercing")); pierceSum += Val(s, "piercing");
                 count++;
             }
             foreach (string name in regiments)
@@ -197,6 +209,10 @@ namespace Hoi4.Units
                 SpeedKmh = speed == float.MaxValue ? 4f : speed,
                 Manpower = manpower,
                 Experience = d["experience"] != null ? (float)d["experience"] : 0f,
+                SoftAttack = soft, HardAttack = hard, Defense = def, Breakthrough = brk,
+                Hardness = count > 0 ? hardness / count : 0,
+                Armor = count > 0 ? 0.3f * armorMax + 0.7f * armorSum / count : 0,
+                Piercing = count > 0 ? 0.4f * pierceMax + 0.6f * pierceSum / count : 0,
             };
             division.Organisation = division.MaxOrganisation;
             return division;

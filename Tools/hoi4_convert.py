@@ -746,6 +746,51 @@ def load_division_name_groups(hoi4: Path):
     return groups
 
 
+COMBAT_STATS = ("soft_attack", "hard_attack", "defense", "breakthrough", "hardness", "armor_value", "ap_attack")
+
+
+def load_equipment_combat(hoi4: Path, year=1936):
+    """{archetype: combat stats} of the newest equipment design available in YEAR (the oldest
+    designs carry no stats of their own and inherit from `parent`, then from the archetype)."""
+    entries = {}
+    for f in sorted((hoi4 / "common" / "units" / "equipment").glob("*.txt")):
+        for _, _, block in parse_pdx(read_text(f)):
+            for name, _, eq in (block if isinstance(block, list) else []):
+                if not isinstance(eq, list):
+                    continue
+                stats = {}
+                for k in COMBAT_STATS:
+                    v = get(eq, k)
+                    try:
+                        stats[k] = float(v)
+                    except (TypeError, ValueError):
+                        pass
+                y = get(eq, "year")
+                entries[name] = {"stats": stats, "archetype": get(eq, "archetype"), "parent": get(eq, "parent"),
+                                 "year": int(y) if y and str(y).isdigit() else 0,
+                                 "is_archetype": get(eq, "is_archetype") == "yes"}
+
+    def resolve(name, depth=0):
+        e = entries.get(name)
+        if e is None or depth > 8:
+            return {}
+        out = {}
+        for link in (e["archetype"], e["parent"]):
+            if link and link != name:
+                out.update(resolve(link, depth + 1))
+        out.update(e["stats"])
+        return out
+
+    best = {}
+    for name, e in entries.items():
+        arch = name if e["is_archetype"] else e["archetype"]
+        if not arch or e["year"] > year:
+            continue
+        if arch not in best or e["year"] >= entries[best[arch]]["year"]:
+            best[arch] = name
+    return {arch: resolve(name) for arch, name in best.items()}
+
+
 def load_sub_units(hoi4: Path):
     """common/units sub_units, with speed (km/h) from their equipment: per archetype the slowest
     variant (the oldest design, fitting 1936; tank chassis archetypes only carry a base 4) or the
@@ -764,6 +809,7 @@ def load_sub_units(hoi4: Path):
                     variant_speeds.setdefault(get(eq, "archetype"), []).append(float(get(eq, "maximum_speed")))
     for name, speeds in variant_speeds.items():
         archetype_speed[name] = min(speeds)
+    combat_eq = load_equipment_combat(hoi4)
     subs = {}
     for f in sorted((hoi4 / "common" / "units").glob("*.txt")):
         for key, _, block in parse_pdx(read_text(f)):
@@ -781,6 +827,8 @@ def load_sub_units(hoi4: Path):
                         return float(v)
                     except (TypeError, ValueError):
                         return d
+                eq = [combat_eq.get(n, {}) for n in needs]
+                stat = lambda k: sum(e.get(k, 0.0) for e in eq) * (1 + num(k))
                 subs[name] = {
                     "abbreviation": get(u, "abbreviation", name[:3].upper()),
                     "group": get(u, "group", "infantry"),
@@ -791,6 +839,13 @@ def load_sub_units(hoi4: Path):
                     "max_organisation": num("max_organisation"),
                     "manpower": int(num("manpower")),
                     "speed": max(speeds) if speeds else 4.0,
+                    "soft_attack": round(stat("soft_attack"), 2),
+                    "hard_attack": round(stat("hard_attack"), 2),
+                    "defense": round(stat("defense"), 2),
+                    "breakthrough": round(stat("breakthrough"), 2),
+                    "hardness": round(max((e.get("hardness", 0.0) for e in eq), default=0.0), 3),
+                    "armor": round(max((e.get("armor_value", 0.0) for e in eq), default=0.0), 1),
+                    "piercing": round(max((e.get("ap_attack", 0.0) for e in eq), default=0.0), 1),
                 }
     return subs
 

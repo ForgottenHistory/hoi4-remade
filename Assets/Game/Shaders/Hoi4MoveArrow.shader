@@ -14,6 +14,8 @@ Shader "Hoi4/MoveArrow"
         _MapWorldBounds ("Map World Bounds (min x, min z, size x, size z)", Vector) = (-5, -5, 10, 10)
         _ArrowColor ("Arrow Color", Color) = (0.78, 0.56, 0.16, 1)
         _ProgressColor ("Travelled Color", Color) = (1, 0.95, 0.78, 1)
+        _AttackColor ("Attack Color", Color) = (0.78, 0.12, 0.1, 1)
+        _AttackProgressColor ("Attack Travelled Color", Color) = (1, 0.55, 0.5, 1)
         _ArrowParams ("Body uv scale, anim speed, root fade, lift", Vector) = (0.4, 0.1, 0.04, 0.05)
         _StripeStrength ("Moving stripe strength", Range(0, 1)) = 0.08
     }
@@ -57,6 +59,8 @@ Shader "Hoi4/MoveArrow"
                 float4 _MapWorldBounds;
                 float4 _ArrowColor;
                 float4 _ProgressColor;
+                float4 _AttackColor;
+                float4 _AttackProgressColor;
                 float4 _ArrowParams;
                 float _StripeStrength;
             CBUFFER_END
@@ -76,6 +80,7 @@ Shader "Hoi4/MoveArrow"
                 float2 uv : TEXCOORD0;
                 float2 info : TEXCOORD1;
                 float fill : TEXCOORD2;
+                float attack : TEXCOORD3;
             };
 
             float TerrainHeight(float3 posWS)
@@ -97,6 +102,7 @@ Shader "Hoi4/MoveArrow"
                 output.uv = input.uv;
                 output.info = input.info;
                 output.fill = input.fill.x;
+                output.attack = input.fill.y;
                 return output;
             }
 
@@ -125,7 +131,9 @@ Shader "Hoi4/MoveArrow"
                 // Travelled part (toward the next province) in the light colour, soft edge
                 float travelled = 1.0 - smoothstep(input.fill - 0.004, input.fill + 0.004, input.info.y);
                 travelled *= step(1e-4, input.fill);
-                float3 c = lerp(_ArrowColor.rgb, _ProgressColor.rgb, travelled);
+                float3 baseC = lerp(_ArrowColor.rgb, _AttackColor.rgb, input.attack);
+                float3 doneC = lerp(_ProgressColor.rgb, _AttackProgressColor.rgb, input.attack);
+                float3 c = lerp(baseC, doneC, travelled);
                 float grey = dot(c, float3(0.299, 0.587, 0.114));
                 c = saturate(lerp(grey.xxx, c, 1.5));
                 float3 rgb = saturate(pattern.rgb * c * 1.4) * (1.0 - _StripeStrength * stripe);

@@ -132,7 +132,7 @@ namespace Hoi4.Units
                 var path = queue.GetFullPath(id);
                 ushort goal = path.Count > 0 ? path[path.Count - 1] : state.destinationProvinceID;
                 int hops = Mathf.Max(path.Count - 1, 1);
-                return $"Moving to {ProvinceName(goal)} · {hops} province{(hops == 1 ? "" : "s")} left, next in {state.daysRemaining}d";
+                return $"Moving to {ProvinceName(goal)} · {hops} province{(hops == 1 ? "" : "s")} left, next in {queue.DaysRemaining(state)}d";
             }
             return $"In {ProvinceName(unit.provinceID)}";
         }

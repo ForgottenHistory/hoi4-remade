@@ -75,6 +75,7 @@ namespace Hoi4.Units
             public readonly Dictionary<string, int> Types = new Dictionary<string, int>();
             public Vector3 Anchor;
             public int IndexInProvince, StacksInProvince;
+            public bool IsBattle; // a battle marker on a border, not a division counter (Count = attacker %)
         }
 
         GameState gameState;
@@ -236,6 +237,7 @@ namespace Hoi4.Units
             // Drawn north to south, so the last hit is the one on top
             for (int i = stacks.Count - 1; i >= 0; i--)
             {
+                if (stacks[i].IsBattle) continue;
                 if (ScreenRect(stacks[i], cam, p11, out var rect, out _) && rect.Contains(screen))
                 {
                     units = stacks[i].Units;
@@ -257,6 +259,7 @@ namespace Hoi4.Units
             float p11 = Mathf.Abs(cam.projectionMatrix[1, 1]);
             foreach (var s in stacks)
             {
+                if (s.IsBattle) continue;
                 if (country != 0 && s.Country != country) continue;
                 bool visible = ScreenRect(s, cam, p11, out var rect, out var anchor);
                 bool hit = visible ? rect.Overlaps(box) : anchor.z > 0f && box.Contains(new Vector2(anchor.x, anchor.y));
@@ -406,6 +409,11 @@ namespace Hoi4.Units
                     list[i].StacksInProvince = list.Count;
                 }
             }
+            foreach (var b in Hoi4Combat.Battles)
+            {
+                if (!centers.TryGetProvinceCenter(b.From, out var p0) || !centers.TryGetProvinceCenter(b.To, out var p1)) continue;
+                result.Add(new Stack { IsBattle = true, Count = b.AttackerPercent, Anchor = (p0 + p1) * 0.5f, StacksInProvince = 1 });
+            }
             // North first so southern counters draw on top (they are nearer the camera)
             result.Sort((a, b) => b.Anchor.z.CompareTo(a.Anchor.z));
             return result;
@@ -483,6 +491,7 @@ namespace Hoi4.Units
 
         void ComposeCounter(Stack s, int ox, int oy)
         {
+            if (s.IsBattle) { ComposeBattle(s, ox, oy); return; }
             // Layout from HOI4 interface/mapicons.gui (unit_counter)
             byte pb = (byte)Mathf.RoundToInt(Mathf.Clamp01(plateBrightness) * 255f);
             Blit(plate, 0, 0, CounterW, CounterH, ox, oy, new Color32(pb, pb, pb, 255));
@@ -516,6 +525,29 @@ namespace Hoi4.Units
             {
                 Blit(digits, (c - '0') * digitW, 0, digitW, digitH, x, y, tint);
                 x += advance;
+            }
+        }
+
+        // HOI4's battle burst: a red disc with the attackers' chance in it, standing on the border
+        void ComposeBattle(Stack s, int ox, int oy)
+        {
+            int cx = ox + SlotW / 2, cy = oy + CounterH / 2 + 1;
+            const int r = 12;
+            for (int y = -r; y <= r; y++)
+                for (int x = -r; x <= r; x++)
+                {
+                    float d = Mathf.Sqrt(x * x + y * y);
+                    if (d > r + 0.5f) continue;
+                    Over(cx + x, cy + y, d > r - 2f ? new Color32(120, 18, 16, 255) : new Color32(205, 42, 36, 255));
+                }
+            string text = s.Count.ToString();
+            const int advance = 7;
+            int textW = (text.Length - 1) * advance + digitW;
+            int tx = cx - textW / 2, ty = cy - digitH / 2;
+            foreach (char c in text)
+            {
+                Blit(digits, (c - '0') * digitW, 0, digitW, digitH, tx, ty, new Color32(255, 245, 235, 255));
+                tx += advance;
             }
         }
 

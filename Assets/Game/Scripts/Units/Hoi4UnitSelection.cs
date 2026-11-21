@@ -104,7 +104,7 @@ namespace Hoi4.Units
             {
                 gameState.EventBus.Subscribe<UnitDestroyedEvent>(e => { if (selection.Remove(e.UnitID)) { ordered.Remove(e.UnitID); OnSelectionChanged(); } }),
                 gameState.EventBus.Subscribe<UnitMovedEvent>(e => { if (selection.Contains(e.UnitID)) Changed?.Invoke(); }),
-                gameState.EventBus.Subscribe<DailyTickEvent>(_ => { if (selection.Count > 0) Changed?.Invoke(); }),
+                gameState.EventBus.Subscribe<HourlyTickEvent>(_ => { if (selection.Count > 0) Changed?.Invoke(); }),
             };
             ArchonLogger.Log("Hoi4UnitSelection: ready", "game_units");
         }

@@ -31,6 +31,8 @@ namespace Hoi4.UI
 
         /// <summary>Game speed (TimeManager multiplier, in-game days per second) for HOI4 speeds 1-5.</summary>
         public int[] speeds = { 1, 2, 5, 15, 50 };
+        [Tooltip("Game hours per real second at speed 1 (24 = a day per second)")]
+        public float baseHoursPerSecond = 6f;
         /// <summary>HOI4 base political power gain per day.</summary>
         public float politicalPowerPerDay = 2f;
 
@@ -66,6 +68,7 @@ namespace Hoi4.UI
                 yield return null;
             gameState = Engine.ArchonEngine.Instance != null ? Engine.ArchonEngine.Instance.GameState : null;
             time = gameState != null ? gameState.Time : null;
+            time?.SetBaseHoursPerSecond(baseHoursPerSecond);
             player = Initializer.Instance.PlayerState;
             if (time == null || player == null || !DataFileResolver.IsInitialized)
             {
