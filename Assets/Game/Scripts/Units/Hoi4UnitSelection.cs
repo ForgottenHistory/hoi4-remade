@@ -124,7 +124,19 @@ namespace Hoi4.Units
                 Clear();
             if (Input.GetKeyDown(KeyCode.S) && !Input.GetKey(KeyCode.LeftControl) && !Input.GetKey(KeyCode.RightControl))
                 Hoi4DivisionPresenter.SelectHalf(this);
+            if (Input.GetKeyDown(KeyCode.H)) HaltSelected();
             UpdateBox();
+        }
+
+        /// <summary>H: the selected own divisions stop where they stand, whether marching or attacking.</summary>
+        void HaltSelected()
+        {
+            var p = StarterKit.Initializer.Instance?.PlayerState;
+            if (p == null || !p.HasPlayerCountry) return;
+            foreach (ushort id in new List<ushort>(selection))
+                if (gameState.Units.HasUnit(id) && gameState.Units.GetUnit(id).countryID == p.PlayerCountryId)
+                    gameState.Units.MovementQueue.CancelMovement(id);
+            Hoi4UnitCounters.Instance?.MarkDirty();
         }
 
         // --- Box selection ---------------------------------------------------------------------
