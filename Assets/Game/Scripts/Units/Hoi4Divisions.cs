@@ -28,9 +28,55 @@ namespace Hoi4.Units
         public int SupportCompanies;
         public FP MaxStrength;         // HOI4 HP: sum of sub-unit max_strength
         public FP Strength;
-        public FP EquipmentLevel;      // share of its equipment it has (HOI4 start_equipment_factor; no production yet)
-        /// <summary>The strength it can have with its equipment: what reinforcement refills to, and "fully rested" for orders.</summary>
-        public FP FullStrength => MaxStrength * EquipmentLevel;
+        // Equipment per archetype (index into Hoi4Divisions.Archetypes): what the template needs and what it has.
+        // 1936 divisions start with Need x start_equipment_factor. Battle losses take 70% of the strength lost
+        // (EQUIPMENT_COMBAT_LOSS_FACTOR); Hoi4Equipment refills from the country's stockpile.
+        public FP[] Need, Have;
+        public Part[] Parts;           // sub-units: their strength share and the archetypes they need
+        public FP Men;                 // manpower it has, of Manpower (casualties take it, Hoi4Manpower refills it)
+
+        public struct Part { public FP Weight; public int[] Archetypes; }
+
+        /// <summary>
+        /// Share of its strength the equipment allows (HOI4: a sub-unit is as strong as its equipment): per sub-unit
+        /// the lowest fill of the archetypes it needs, weighted by the sub-unit's max strength.
+        /// </summary>
+        public FP EquipmentLevel
+        {
+            get
+            {
+                if (Parts == null || Parts.Length == 0) return FP.One;
+                FP sum = FP.Zero, total = FP.Zero;
+                foreach (var p in Parts)
+                {
+                    FP fill = FP.One;
+                    foreach (int a in p.Archetypes)
+                        fill = FP.Min(fill, Need[a] > FP.Zero ? FP.Min(FP.One, Have[a] / Need[a]) : FP.One);
+                    sum += p.Weight * fill;
+                    total += p.Weight;
+                }
+                return total > FP.Zero ? sum / total : FP.One;
+            }
+        }
+
+        /// <summary>Share of its manpower it has.</summary>
+        public FP ManpowerLevel => Manpower > 0 ? FP.Min(FP.One, Men / FP.FromInt(Manpower)) : FP.One;
+
+        /// <summary>The strength its equipment and men allow: what reinforcement refills to, and "fully rested" for orders.</summary>
+        public FP FullStrength => MaxStrength * FP.Min(EquipmentLevel, ManpowerLevel);
+
+        /// <summary>Battle damage: men lost with the strength, and 70% of the equipment (the rest is recovered).</summary>
+        public void TakeLosses(FP strengthLost)
+        {
+            if (MaxStrength <= FP.Zero || strengthLost <= FP.Zero) return;
+            FP share = FP.Min(FP.One, strengthLost / MaxStrength);
+            Men = FP.Max(FP.Zero, Men - FP.FromInt(Manpower) * share);
+            if (Need == null) return;
+            for (int a = 0; a < Need.Length; a++)
+                Have[a] = FP.Max(FP.Zero, Have[a] - Need[a] * share * EquipmentLossFactor);
+        }
+
+        public static readonly FP EquipmentLossFactor = FP.FromFraction(7, 10); // HOI4 EQUIPMENT_COMBAT_LOSS_FACTOR
         public FP MaxOrganisation;     // average of sub-unit max_organisation
         public FP Organisation;
         public FP CombatWidth;         // sum over regiments
@@ -58,6 +104,9 @@ namespace Hoi4.Units
 
         public bool IsLoaded { get; private set; }
         public IReadOnlyDictionary<ushort, Hoi4Division> All => divisions;
+
+        /// <summary>Equipment archetypes the divisions need (sorted): Hoi4Division.Need/Have and the stockpiles index them.</summary>
+        public static string[] Archetypes { get; private set; } = new string[0];
 
         public Hoi4Division Get(ushort unitId) => divisions.TryGetValue(unitId, out var d) ? d : null;
 
@@ -118,6 +167,14 @@ namespace Hoi4.Units
             var countries = root["countries"] as JObject;
             if (subUnits == null || countries == null)
                 yield break;
+
+            var archetypes = new SortedSet<string>(System.StringComparer.Ordinal);
+            foreach (var s in subUnits.Properties())
+                if (s.Value["need"] is JObject need)
+                    foreach (var a in need.Properties()) archetypes.Add(a.Name);
+            Archetypes = archetypes.ToArray();
+            archetypeIndex = new Dictionary<string, int>();
+            for (int i = 0; i < Archetypes.Length; i++) archetypeIndex[Archetypes[i]] = i;
 
             int created = 0, skipped = 0;
             var missingTags = new List<string>();
@@ -180,10 +237,29 @@ namespace Hoi4.Units
 
         static readonly FP P3 = FP.FromFraction(3, 10), P4 = FP.FromFraction(4, 10), P6 = FP.FromFraction(6, 10), P7 = FP.FromFraction(7, 10);
 
+        static Dictionary<string, int> archetypeIndex = new Dictionary<string, int>();
+
         static Hoi4Division Build(ushort unitId, string tag, JToken d, string templateName, JObject template, JObject subUnits)
         {
             var regiments = template["regiments"]?.Select(t => (string)t).ToList() ?? new List<string>();
             var support = template["support"]?.Select(t => (string)t).ToList() ?? new List<string>();
+
+            // Equipment: the template's need per archetype, and per sub-unit its strength share and archetypes
+            var need = new FP[Archetypes.Length];
+            var parts = new List<Hoi4Division.Part>();
+            foreach (string name in regiments.Concat(support))
+            {
+                if (!(subUnits[name] is JObject s)) continue;
+                var uses = new List<int>();
+                if (s["need"] is JObject n)
+                    foreach (var a in n.Properties())
+                        if (archetypeIndex.TryGetValue(a.Name, out int i))
+                        {
+                            need[i] += Num(a.Value);
+                            uses.Add(i);
+                        }
+                parts.Add(new Hoi4Division.Part { Weight = Val(s, "max_strength"), Archetypes = uses.ToArray() });
+            }
 
             FP strength = FP.Zero, org = FP.Zero, width = FP.Zero, speed = FP.MaxValue;
             FP soft = FP.Zero, hard = FP.Zero, def = FP.Zero, brk = FP.Zero, hardness = FP.Zero;
@@ -207,7 +283,9 @@ namespace Hoi4.Units
                 if (subUnits[name] is JObject s)
                     width += Val(s, "combat_width");
 
-            FP equipment = d["equipment"] != null ? Num(d["equipment"]) : FP.One;
+            FP equipment = FP.Clamp(d["equipment"] != null ? Num(d["equipment"]) : FP.One, FP.Zero, FP.One);
+            var have = new FP[need.Length];
+            for (int i = 0; i < need.Length; i++) have[i] = need[i] * equipment; // HOI4 start_equipment_factor
             var division = new Hoi4Division
             {
                 UnitId = unitId,
@@ -218,8 +296,10 @@ namespace Hoi4.Units
                 Regiments = regiments.Count,
                 SupportCompanies = support.Count,
                 MaxStrength = strength,
-                Strength = strength * FP.Clamp(equipment, FP.Zero, FP.One),
-                EquipmentLevel = FP.Clamp(equipment, FP.Zero, FP.One),
+                Need = need,
+                Have = have,
+                Parts = parts.ToArray(),
+                Men = FP.FromInt(manpower), // HOI4 1936 divisions have their full manpower; equipment is what they lack
                 MaxOrganisation = count > 0 ? org / count : FP.Zero,
                 CombatWidth = width,
                 SpeedKmh = speed == FP.MaxValue ? FP.FromInt(4) : speed,
@@ -231,6 +311,7 @@ namespace Hoi4.Units
                 Piercing = count > 0 ? P4 * pierceMax + P6 * pierceSum / count : FP.Zero,
             };
             division.Organisation = division.MaxOrganisation;
+            division.Strength = division.FullStrength; // = max strength x start_equipment_factor
             return division;
         }
     }

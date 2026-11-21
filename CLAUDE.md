@@ -78,14 +78,23 @@ When the user reports odd behaviour, read the newest recording before guessing:
 ```
 python Tools/recorder/report.py [REC]            # overview and anomalies: divisions off the line, stuck, thrashing, AI outcomes
 python Tools/recorder/unit.py [REC] ID           # one division's whole story
+python Tools/recorder/battles.py [REC]           # whole battles: outcome by terrain/river and attacker, entrenchment at the start
 python Tools/recorder/rows.py [REC] FILE col=val --cols a,b   # filter by column name; --schema, --count COL
 ```
 
-`rows.py` is the engine's tool (`Assets/Archon-Engine/Tools~/recording/`), pointed at `Recordings/`. `report.py` and `unit.py` are HOI4-specific. New systems should call `SessionRecorder.Note(system, kind, country, unit, province, target, text)` at their decision points.
+`rows.py` is the engine's tool (`Assets/Archon-Engine/Tools~/recording/`), pointed at `Recordings/`. `report.py`, `unit.py` and `battles.py` are HOI4-specific. New systems should call `SessionRecorder.Note(system, kind, country, unit, province, target, text)` at their decision points.
 
 ## Build and test
 
-There is no command-line build. Work happens in the Unity editor: open `Hoi4Test.unity` and press Play. The engine's tests use the Unity Test Framework (`Assets/Archon-Engine/Scripts/Tests`, `Scripts/Map/Tests`) and run from the Test Runner window. The game layer has no tests. The `.csproj` and `.slnx` files are Unity-generated and gitignored.
+Work happens in the Unity editor: open `Hoi4Test.unity` and press Play. To catch C# errors without the editor, `python Tools/check_build.py` compiles the game layer with `dotnet build` against the engine DLLs Unity last built (so engine changes need a Unity compile first).
+
+### Checking against real HOI4
+
+Mechanics should match real HOI4 data, not only the defines. `Tools/reference/` measures the real game: `hoi4_reinforcement.py` (refill rates from the reference workspace's daily division snapshots), `save_dig_in.py` (entrenchment in battles from a plain-text save), `wiki_text.py` (text of a wiki page saved as HTML). The reference workspace (`D:\Stuff\Coding\hoi4`, read its `CLAUDE.md`) has recordings of real games: daily division snapshots, battles, country figures, production output. `Tools/manpower_pools.py` prints our starting manpower pools, `Tools/equipment_outlook.py` each country's equipment shortfall, stockpile and production.
+
+### Tests
+
+The engine's tests use the Unity Test Framework (`Assets/Archon-Engine/Scripts/Tests`, `Scripts/Map/Tests`) and run from the Test Runner window. The game layer has no tests. The `.csproj` and `.slnx` files are Unity-generated and gitignored.
 
 ## Git
 

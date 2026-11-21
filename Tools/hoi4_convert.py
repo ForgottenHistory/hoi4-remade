@@ -841,6 +841,12 @@ def load_sub_units(hoi4: Path):
                         return float(v)
                     except (TypeError, ValueError):
                         return d
+                need = {}
+                for k, _, v in (get(u, "need") or []):
+                    try:
+                        need[k] = int(float(v))
+                    except (TypeError, ValueError):
+                        pass
                 eq = [combat_eq.get(n, {}) for n in needs]
                 stat = lambda k: sum(e.get(k, 0.0) for e in eq) * (1 + num(k))
                 subs[name] = {
@@ -860,8 +866,86 @@ def load_sub_units(hoi4: Path):
                     "hardness": round(max((e.get("hardness", 0.0) for e in eq), default=0.0), 3),
                     "armor": round(max((e.get("armor_value", 0.0) for e in eq), default=0.0), 1),
                     "piercing": round(max((e.get("ap_attack", 0.0) for e in eq), default=0.0), 1),
+                    "need": need,  # equipment archetype -> amount (HOI4 `need`)
                 }
     return subs
+
+
+def load_equipment_info(hoi4: Path):
+    """{equipment name: {"archetype", "cost"}} for every equipment in common/units/equipment: its archetype (itself
+    for an archetype) and build_cost_ic, inherited from `parent`, then the archetype, when it has none."""
+    entries = {}
+    for f in sorted((hoi4 / "common" / "units" / "equipment").glob("*.txt")):
+        for _, _, block in parse_pdx(read_text(f)):
+            for name, _, eq in (block if isinstance(block, list) else []):
+                if not isinstance(eq, list):
+                    continue
+                try:
+                    cost = float(get(eq, "build_cost_ic"))
+                except (TypeError, ValueError):
+                    cost = None
+                entries[name] = {"archetype": name if get(eq, "is_archetype") == "yes" else get(eq, "archetype"),
+                                 "parent": get(eq, "parent"), "cost": cost}
+
+    def cost_of(name, depth=0):
+        e = entries.get(name)
+        if e is None or depth > 8:
+            return None
+        if e["cost"] is not None:
+            return e["cost"]
+        for link in (e["parent"], e["archetype"]):
+            if link and link != name:
+                c = cost_of(link, depth + 1)
+                if c is not None:
+                    return c
+        return None
+
+    return {n: {"archetype": e["archetype"], "cost": cost_of(n)} for n, e in entries.items() if e["archetype"]}
+
+
+def collect_blocks(items, key, out):
+    """Every block called KEY at any depth (inside if, date blocks and the like). Of an if / else_if / else chain only
+    the if branch counts: HOI4 runs one of them, and the history files repeat the same lines in each (DLC variants)."""
+    for k, _, v in (items if isinstance(items, list) else []):
+        if isinstance(k, str) and k.lower() in ("else", "else_if"):
+            continue
+        if k == key and isinstance(v, list):
+            out.append(v)
+        elif isinstance(v, list):
+            collect_blocks(v, key, out)
+    return out
+
+
+def starting_equipment(hoi4: Path, oob_root, country_root, equipment, land_archetypes):
+    """A country's 1936 production lines (add_equipment_production in its OOB's instant_effect) and starting stockpile
+    (add_equipment_to_stockpile in its history), land equipment only. Lines: equipment, archetype, factories,
+    efficiency (0..1), cost. Stockpile: archetype -> amount; the history often lists the same stock twice, in a DLC
+    and a no-DLC branch, so per archetype the largest amount counts rather than the sum."""
+    lines = []
+    for p in collect_blocks(oob_root, "add_equipment_production", []):
+        eq = get(p, "equipment")
+        kind = get(eq, "type") if isinstance(eq, list) else None
+        info = equipment.get(kind or "")
+        if not info or info["archetype"] not in land_archetypes or not info["cost"]:
+            continue
+        try:
+            factories = int(float(get(p, "requested_factories", 1)))
+            efficiency = float(get(p, "efficiency", 10)) / 100
+        except (TypeError, ValueError):
+            continue
+        lines.append({"equipment": kind, "archetype": info["archetype"], "factories": factories,
+                      "efficiency": efficiency, "cost": info["cost"]})
+    stock = {}
+    for s in collect_blocks(country_root, "add_equipment_to_stockpile", []):
+        info = equipment.get(get(s, "type") or "")
+        if not info or info["archetype"] not in land_archetypes:
+            continue
+        try:
+            amount = int(float(get(s, "amount", 0)))
+        except (TypeError, ValueError):
+            continue
+        stock[info["archetype"]] = max(stock.get(info["archetype"], 0), amount)
+    return lines, stock
 
 
 def convert_oob(hoi4: Path, out: Path, existing_tags, ruling_party):
@@ -874,6 +958,8 @@ def convert_oob(hoi4: Path, out: Path, existing_tags, ruling_party):
     at the start (releasables) are skipped."""
     names = load_division_name_groups(hoi4)
     subs = load_sub_units(hoi4)
+    equipment = load_equipment_info(hoi4)
+    land_archetypes = {a for s in subs.values() for a in s["need"]}
     countries = {}
     used_subs = set()
     main_types = set()
@@ -882,7 +968,8 @@ def convert_oob(hoi4: Path, out: Path, existing_tags, ruling_party):
         if tag not in existing_tags:
             continue
         found = []
-        collect_oob_names(parse_pdx(read_text(f)), found)
+        country_root = parse_pdx(read_text(f))
+        collect_oob_names(country_root, found)
         base = [o for o, dlc in found if not dlc and o.startswith(f"{tag}_{OOB_START}")]
         base += [o for o, _ in found if o == f"{tag}_{OOB_START}"]  # fallback: plain TAG_1936
         path = hoi4 / "history" / "units" / f"{base[0]}.txt" if base else None
@@ -929,10 +1016,17 @@ def convert_oob(hoi4: Path, out: Path, existing_tags, ruling_party):
                 used_subs.update(t["regiments"] + t["support"])
                 main_types.add(t["main"])
         if divisions:
+            lines_, stock = starting_equipment(hoi4, root, country_root, equipment, land_archetypes)
             countries[tag] = {"ideology": ruling_party.get(tag) or "neutrality",
                               "templates": {k: {kk: vv for kk, vv in v.items() if kk != "names_group"}
                                             for k, v in templates.items()},
-                              "divisions": divisions}
+                              "divisions": divisions, "production": lines_, "stockpile": stock}
+
+    # Only the equipment the converted land divisions use (sub-units also cover ships and planes)
+    land_archetypes = {a for name in used_subs for a in subs[name]["need"]}
+    for c in countries.values():
+        c["production"] = [p for p in c["production"] if p["archetype"] in land_archetypes]
+        c["stockpile"] = {a: n for a, n in c["stockpile"].items() if a in land_archetypes}
 
     def j(v):
         return json.dumps(v, ensure_ascii=False)
@@ -952,7 +1046,14 @@ def convert_oob(hoi4: Path, out: Path, existing_tags, ruling_party):
         lines.append("      divisions: [")
         for d in c["divisions"]:
             lines.append(f"        {j(d)},")
-        lines += ["      ],", "    },"]
+        lines.append("      ],")
+        # 1936 production lines (land equipment) and starting stockpile, archetype -> amount
+        lines.append("      production: [")
+        for p in c["production"]:
+            lines.append(f"        {j(p)},")
+        lines.append("      ],")
+        lines.append(f"      stockpile: {j(c['stockpile'])},")
+        lines.append("    },")
     lines += ["  }", "}", ""]
     (out / "history" / "units").mkdir(parents=True, exist_ok=True)
     (out / "history" / "units" / f"oob_{OOB_START}.json5").write_text("\n".join(lines), encoding="utf-8")
@@ -973,6 +1074,9 @@ def convert_oob(hoi4: Path, out: Path, existing_tags, ruling_party):
             f"  hoi4: {{ icon: {j(u['icon'])}, group: {j(u['group'])}, abbreviation: {j(u['abbreviation'])} }}\n}}\n")
         (out / "units" / f"{name}.json5").write_text(text, encoding="utf-8")
     total = sum(len(c["divisions"]) for c in countries.values())
+    print(f"Equipment: {sum(len(c['production']) for c in countries.values())} land production lines, "
+          f"{sum(1 for c in countries.values() if c['stockpile'])} countries with a starting stockpile, "
+          f"archetypes needed {sorted(land_archetypes)}")
     print(f"Armies {OOB_START}: {total} divisions in {len(countries)} countries, "
           f"{sum(len(c['templates']) for c in countries.values())} templates, unit types {sorted(main_types)}")
     return countries, main_types

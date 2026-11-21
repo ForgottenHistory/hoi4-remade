@@ -19,12 +19,11 @@ namespace Hoi4.Units
     ///   divisions already in the field.
     /// - Daily: the pool grows by the yearly population growth (POPULATION_YEARLY_GROWTH_BASE, 1.5%) of the
     ///   recruitable manpower, a 365th a day.
-    /// - Daily: every damaged division gets a chunk of its missing strength back (REINFORCEMENT_MANPOWER_CHUNK, 10% of
-    ///   its full strength), paid in the men that strength stands for; with too little in the pool it gets what is left.
-    ///   Countries and divisions go in id order, so the pool runs out the same way on every machine.
-    /// No equipment yet (no production): a division refills only up to its equipment level (HOI4's
-    /// start_equipment_factor, Hoi4Division.FullStrength). Men lost in battle are simply gone; refilling them is what
-    /// drains the pool.
+    /// - Daily: every division short of men gets up to 10% of its manpower back (REINFORCEMENT_MANPOWER_CHUNK) from the
+    ///   pool; with too little in the pool it gets what is left. Countries and divisions go in id order, so the pool
+    ///   runs out the same way on every machine.
+    /// - Then every division's strength rises to what its equipment (Hoi4Equipment) and men allow
+    ///   (Hoi4Division.FullStrength). Men lost in battle are gone; refilling them is what drains the pool.
     /// </summary>
     public sealed class Hoi4Manpower : MonoBehaviour
     {
@@ -35,7 +34,7 @@ namespace Hoi4.Units
 
         static readonly FP NonCoreFactor = FP.FromFraction(2, 100);          // LOCAL_MANPOWER_ACCESSIBLE_NON_CORE_FACTOR
         static readonly FP GrowthPerDay = FP.FromFraction(15, 1000 * 365);   // POPULATION_YEARLY_GROWTH_BASE, a day
-        static readonly FP ReinforceChunk = FP.FromFraction(1, 10);          // REINFORCEMENT_MANPOWER_CHUNK, of full strength a day
+        static readonly FP ReinforceChunk = FP.FromFraction(1, 10);          // REINFORCEMENT_MANPOWER_CHUNK, of its manpower a day
 
         public static Hoi4Manpower Instance { get; private set; }
 
@@ -77,8 +76,7 @@ namespace Hoi4.Units
             gameState = Engine.ArchonEngine.Instance.GameState;
 
             var resources = gameState.Resources;
-            if (!resources.IsInitialized)
-                resources.Initialize(4096, gameState.EventBus); // nothing else in the scene uses the engine's resources
+            Hoi4Equipment.EnsureResources(gameState);
             if (!resources.IsResourceRegistered(ResourceId))
                 resources.RegisterResource(ResourceId, new ResourceDefinition
                 {
@@ -119,23 +117,15 @@ namespace Hoi4.Units
             ArchonLogger.Log($"Hoi4Manpower: pools for {countries.Count} countries", "game_units");
         }
 
-        /// <summary>Daily, from Hoi4Simulation: growth, then reinforcement.</summary>
+        /// <summary>Daily, from Hoi4Simulation after Hoi4Equipment: growth, men sent to the divisions missing some,
+        /// then every division's strength rises to what its equipment and men now allow.</summary>
         public void SimulateDay()
         {
             if (!IsReady) return;
             var resources = gameState.Resources;
             var divisions = Hoi4Divisions.Instance;
             if (divisions == null) return;
-
-            // Damaged divisions per country, in id order
-            var byCountry = new Dictionary<ushort, List<Hoi4Division>>();
-            foreach (var d in divisions.All.Values)
-            {
-                if (d.Strength >= d.FullStrength || !gameState.Units.HasUnit(d.UnitId)) continue;
-                ushort c = gameState.Units.GetUnit(d.UnitId).countryID;
-                if (!byCountry.TryGetValue(c, out var list)) byCountry[c] = list = new List<Hoi4Division>();
-                list.Add(d);
-            }
+            var byCountry = Hoi4Equipment.DivisionsByCountry(gameState, divisions);
 
             resources.BeginBatch();
             foreach (ushort country in countries)
@@ -143,30 +133,33 @@ namespace Hoi4.Units
                 FP pool = resources.GetResource(country, ResourceId) + recruitable[country] * GrowthPerDay;
                 FP spent = FP.Zero;
                 int helped = 0;
-                if (byCountry.TryGetValue(country, out var damaged))
-                {
-                    damaged.Sort((a, b) => a.UnitId.CompareTo(b.UnitId));
-                    foreach (var d in damaged)
+                if (byCountry.TryGetValue(country, out var list))
+                    foreach (var d in list)
                     {
                         if (pool <= FP.Zero) break;
-                        FP full = d.FullStrength;
-                        if (full <= FP.Zero || d.Manpower <= 0) continue;
-                        FP gain = FP.Min(full * ReinforceChunk, full - d.Strength);
-                        FP men = FP.FromInt(d.Manpower) * gain / full; // the men that strength stands for
-                        if (men > pool) { gain = gain * pool / men; men = pool; }
-                        d.Strength = FP.Min(full, d.Strength + gain);
+                        FP manpower = FP.FromInt(d.Manpower);
+                        if (d.Men >= manpower) continue;
+                        FP men = FP.Min(pool, FP.Min(manpower * ReinforceChunk, manpower - d.Men));
+                        d.Men += men;
                         pool -= men;
                         spent += men;
                         helped++;
                     }
-                }
                 resources.SetResource(country, ResourceId, pool);
                 if (helped > 0)
                     Core.Recording.SessionRecorder.Note("manpower", "reinforce", country, 0, 0, 0,
                         $"{helped} divisions, {spent.ToInt()} men, pool {pool.ToInt()}");
             }
             resources.EndBatch();
-            if (byCountry.Count > 0) Hoi4UnitCounters.Instance?.MarkDirty(); // strength bars
+
+            // Strength follows the equipment and men delivered (both already limited to a chunk a day)
+            bool changed = false;
+            foreach (var d in divisions.All.Values)
+            {
+                FP full = d.FullStrength;
+                if (d.Strength < full) { d.Strength = full; changed = true; }
+            }
+            if (changed) Hoi4UnitCounters.Instance?.MarkDirty(); // strength bars
         }
 
         static FP Num(JToken t) => t != null && t.Type != JTokenType.Null ? FP.FromDouble((double)t) : FP.Zero;

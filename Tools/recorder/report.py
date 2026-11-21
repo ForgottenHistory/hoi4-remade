@@ -299,6 +299,29 @@ def main():
         dry = "  POOL EMPTY" if pool_last[c] <= 0 else ""
         print(f"{c:8} {n:9,} men over {days[c]:4} days, pool {pool_first[c]:,} -> {pool_last[c]:,}{dry}")
 
+    # --- equipment: weekly notes (Hoi4Equipment), "made A=n ... | delivered A=n ... | stock A=n ..." --------------
+    print("\n## Equipment (made / delivered to divisions over the recording, last stockpile)")
+    eq_made, eq_given, eq_stock = defaultdict(Counter), defaultdict(Counter), {}
+    for r in notes:
+        if r["system"] != "equipment" or r["kind"] != "week":
+            continue
+        parts = r["text"].split(" | ")
+        if len(parts) != 3:
+            continue
+        pairs = lambda s: {k: int(v) for k, v in re.findall(r"(\w+)=(-?\d+)", s)}
+        eq_made[r["country"]].update(pairs(parts[0]))
+        eq_given[r["country"]].update(pairs(parts[1]))
+        eq_stock[r["country"]] = pairs(parts[2])
+    if not eq_made and not eq_given:
+        print("no equipment notes")
+    shown = [player] if player in eq_made or player in eq_given else []
+    shown += [c for c, _ in Counter({c: sum(v.values()) for c, v in eq_made.items()}).most_common(a.top) if c != player]
+    for c in shown[: a.top]:
+        arch = sorted(set(eq_made[c]) | set(eq_given[c]) | set(eq_stock.get(c, {})))
+        cells = ", ".join(f"{x.replace('_equipment', '').replace('_chassis', '').replace('_', ' ')} "
+                          f"{eq_made[c][x]:,}/{eq_given[c][x]:,}/{eq_stock.get(c, {}).get(x, 0):,}" for x in arch)
+        print(f"{c:8} {cells}")
+
     print("\n## Commands")
     for k, n in Counter(r["command"] for r in cmds).most_common():
         print(f"{n:7}  {k}")

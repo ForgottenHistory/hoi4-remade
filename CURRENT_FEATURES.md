@@ -8,7 +8,7 @@
 
 **Map:** Clausewitz-style terrain, water, coasts, smooth mesh borders in HOI4 classes, rivers, country labels, haze, clouds, day/night with city lights, political / terrain / diplomatic map modes
 
-**Units:** 1936 armies, on-map counters with action icons and battle bubbles, click and box selection, HOI4 movement rules, hourly movement, province-to-province combat with terrain, rivers and entrenchment, retreat and overrun, occupation, manpower pools and reinforcement
+**Units:** 1936 armies, on-map counters with action icons and battle bubbles, click and box selection, HOI4 movement rules, hourly movement, province-to-province combat with terrain, rivers and entrenchment, retreat and overrun, occupation, manpower pools, equipment stockpiles with the 1936 production lines, reinforcement
 
 **Armies and battle plans:** Armies with bottom-of-screen cards, front lines that divisions fill and hold, offensive plans (drag over targets) that advance as a broad front when executed, planning bonus
 
@@ -20,7 +20,7 @@
 
 **Data:** One Python converter turns the HOI4 install into an Archon data directory
 
-**Not Implemented:** production, research, politics, supply, terrain and entrenchment in combat, generals, air and naval, saving/loading of HOI4-specific state, multiplayer in practice
+**Not Implemented:** production control (only the 1936 lines run), research, politics, supply, terrain and entrenchment in combat, generals, air and naval, saving/loading of HOI4-specific state, multiplayer in practice
 
 The goal is to stress-test Archon-Engine, not to ship a game. Big visual wins are preferred over exact HOI4 fidelity.
 
@@ -66,7 +66,9 @@ The goal is to stress-test Archon-Engine, not to ship a game. Big visual wins ar
 - **River crossings** - Attacking across a river costs the divisions crossing it 30% (small) or 60% (large); crossings come from HOI4 `rivers.bmp` along province borders
 - **Entrenchment** - A division standing still out of battle digs in 1 level a day, up to 5; each level gives a defender +2% attack and defence; lost on moving or attacking. Shown in the division panel
 - **Manpower** - Each country's pool is the engine's `ResourceSystem` resource `manpower` (saved with the game): recruitable manpower (core population + 2% of non-core, times the mobilisation law) minus the men in its divisions, growing 1.5% of recruitable a year
-- **Reinforcement** - Daily, every damaged division gets back up to 10% of its full strength, paid in the men that strength stands for, until the pool runs dry; countries and divisions in id order. Without equipment a division refills only to its equipment level (HOI4 `start_equipment_factor`), and readiness checks (AI, offensives) measure against that
+- **Equipment** - Divisions track equipment per archetype (infantry, support, artillery, trucks, light tanks): what their sub-units `need` and what they have, starting at `start_equipment_factor`. A sub-unit is as strong as its scarcest equipment; strength is capped by equipment and by men. Battle losses take the men and 70% of the equipment (`EQUIPMENT_COMBAT_LOSS_FACTOR`)
+- **Stockpiles and production** - One engine `ResourceSystem` resource per archetype per country, starting at the history's `add_equipment_to_stockpile` (nearly empty, as in real HOI4). Each country runs its 1936 production lines from its OOB (`add_equipment_production`): factories x 4.5 x efficiency / build cost a day, efficiency fixed. Weekly notes per country (made, delivered, stock)
+- **Reinforcement** - Daily, every division short of equipment gets up to 10% of its need per archetype from the stockpile, and every division short of men up to 10% of its manpower from the pool; then strength rises to what equipment and men allow. Countries and divisions in id order. Readiness checks (AI, offensives) measure against that full strength
 - **Combat factors** - Planning, terrain and river (attackers) and entrenchment (defenders) multiply per division, like HOI4; the AI's odds use the same factors
 - **Retreat and overrun** - Broken defenders march to a friendly neighbouring province (a day); a retreater that arrives where an enemy stands is destroyed. Broken attackers drop their order
 - **Occupation** - Entering a province held by an enemy flips its controller (not owner); occupied land is drawn in the occupier's colour, lakes follow the land around them, allies liberate land for its owner
@@ -153,7 +155,8 @@ Tricky map algorithms are prototyped in Python under `Tools/prototypes/<topic>/`
 - Combat ignores forts, generals, supply, night, stacking and per-unit terrain modifiers (only the terrain's base penalty applies); max entrenchment ignores the division's own entrenchment stat (engineers)
 - Offensives are broad-front only; no spearhead or encirclement logic
 - AI does not use offensives or armies, only odds-based border attacks
-- No equipment or production: divisions stay at their 1936 equipment level, and equipment lost in battle comes back with the men
+- Production is fixed to the 1936 lines: no production screen, no new lines, no efficiency growth, no factory construction, no resources; country production modifiers ignored (real Germany makes about 20% more)
+- Equipment designs and variants are not modelled: an archetype is one kind of equipment, stats from the 1936 design
 - No recruiting new divisions; manpower only reinforces
 - Province selection does not persist after the state panel closes (HOI4 keeps it)
 - Only land units exist; no air or naval

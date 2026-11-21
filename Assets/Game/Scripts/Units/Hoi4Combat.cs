@@ -504,7 +504,9 @@ namespace Hoi4.Units
             foreach (var d in front)
             {
                 d.Organisation = FP.Max(FP.Zero, d.Organisation - orgEach);
+                FP before = d.Strength;
                 d.Strength = FP.Max(FP.Zero, d.Strength - hpEach);
+                d.TakeLosses(before - d.Strength); // men and 70% of the equipment go with the strength
                 if (d.Strength <= FP.Zero) destroyed.Add(d.UnitId);
             }
         }
