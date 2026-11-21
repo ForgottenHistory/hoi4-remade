@@ -984,6 +984,9 @@ def convert_front_line(hoi4: Path, out: Path):
     # Offensive plan objective line (arrowType offence_line): band in the bottom rows, a tooth pointing up
     Image.open(src / "offensive_line_mask.dds").convert("RGBA").save(dst / "offence_mask.png")
     Image.open(src / "offensive_line.dds").convert("RGBA").save(dst / "offence_pattern.png")
+    # Dragging an offensive: the dotted line through the picked provinces (arrowType virtual_line)
+    Image.open(src / "dot_mask.dds").convert("RGBA").save(dst / "dot_mask.png")
+    Image.open(src / "dot_pattern.dds").convert("RGBA").save(dst / "dot_pattern.png")
     print("Front line textures")
 
 

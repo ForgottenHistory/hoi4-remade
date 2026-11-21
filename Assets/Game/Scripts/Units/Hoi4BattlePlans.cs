@@ -1345,11 +1345,13 @@ namespace Hoi4.Units
             return res;
         }
 
-        /// <summary>Ribbon along a chain: uv.x = distance in ribbon widths, uv.y = 0 own side .. 1 enemy side (left of travel).</summary>
-        void AddRibbon(List<Vector3> pts, Color color, float style)
+        /// <summary>Ribbon along a chain: uv.x = distance in ribbon widths, uv.y = 0 own side .. 1 enemy side (left of travel).
+        /// widthPx > 0 overrides the style's width.</summary>
+        void AddRibbon(List<Vector3> pts, Color color, float style, float widthPx = -1f)
         {
             if (pts.Count < 2) return;
-            float width = style > 1.5f ? objectiveWidthPx * worldPerPxX
+            float width = widthPx > 0f ? widthPx * worldPerPxX
+                : style > 1.5f ? objectiveWidthPx * worldPerPxX
                 : lineWidthPx * worldPerPxX * (style < 0.5f ? previewWidthScale : 1f);
             float half = width * 0.5f;
             float dist = 0f;

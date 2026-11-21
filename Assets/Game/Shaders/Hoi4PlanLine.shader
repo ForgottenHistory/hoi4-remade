@@ -3,7 +3,9 @@
 // uv.y = across (0 = own side, 1 = enemy side), vertex colour = line colour, uv1.x = style:
 //   0 = dashed preview line (the hover before placing), 1 = placed front line: a solid band with
 //   ticks pointing at the enemy side, 2 = an offensive plan's objective line (HOI4 offence_line): a band
-//   with teeth pointing at the left of travel (the target).
+//   with teeth pointing at the left of travel (the target), 3 = dotted line through the targets of an
+//   offensive being dragged (HOI4 virtual_line: dot textures, one dot per width), 4 = plain soft line (the
+//   rings at the dotted line's ends).
 Shader "Hoi4/PlanLine"
 {
     Properties
@@ -15,6 +17,8 @@ Shader "Hoi4/PlanLine"
         _OffenceMaskTex ("Objective Line Mask", 2D) = "white" {}
         _OffencePatternTex ("Objective Line Pattern", 2D) = "white" {}
         _OffenceTile ("Objective line tooth spacing (widths)", Float) = 0.8
+        _DotMaskTex ("Dot Mask", 2D) = "white" {}
+        _DotPatternTex ("Dot Pattern", 2D) = "white" {}
         _HeightmapTexture ("Heightmap", 2D) = "gray" {}
         _HeightScale ("Height Scale", Float) = 10.0
         _MapWorldBounds ("Map World Bounds (min x, min z, size x, size z)", Vector) = (-5, -5, 10, 10)
@@ -57,6 +61,10 @@ Shader "Hoi4/PlanLine"
             SAMPLER(sampler_OffenceMaskTex);
             TEXTURE2D(_OffencePatternTex);
             SAMPLER(sampler_OffencePatternTex);
+            TEXTURE2D(_DotMaskTex);
+            SAMPLER(sampler_DotMaskTex);
+            TEXTURE2D(_DotPatternTex);
+            SAMPLER(sampler_DotPatternTex);
             TEXTURE2D(_HeightmapTexture);
             SAMPLER(sampler_HeightmapTexture);
 
@@ -68,6 +76,8 @@ Shader "Hoi4/PlanLine"
                 float4 _OffenceMaskTex_ST;
                 float4 _OffencePatternTex_ST;
                 float _OffenceTile;
+                float4 _DotMaskTex_ST;
+                float4 _DotPatternTex_ST;
                 float4 _HeightmapTexture_ST;
                 float _HeightScale;
                 float4 _MapWorldBounds;
@@ -113,6 +123,23 @@ Shader "Hoi4/PlanLine"
 
             half4 frag(Varyings i) : SV_Target
             {
+                if (i.style > 3.5)
+                {
+                    // Plain soft line
+                    float k = saturate(1.0 - abs(i.uv.y - 0.5) * 2.0);
+                    clip(k - 0.002);
+                    return half4(i.color.rgb, k * k * i.color.a);
+                }
+                if (i.style > 2.5)
+                {
+                    // virtual_line: one dot per ribbon width
+                    float2 duv = float2(frac(i.uv.x), saturate(i.uv.y));
+                    half4 dm = SAMPLE_TEXTURE2D_LOD(_DotMaskTex, sampler_DotMaskTex, duv, 0);
+                    half4 dp = SAMPLE_TEXTURE2D_LOD(_DotPatternTex, sampler_DotPatternTex, duv, 0);
+                    float dc = saturate(dm.r + dm.g + dm.b) * dm.a;
+                    clip(dc - 0.002);
+                    return half4(saturate(dp.rgb * i.color.rgb * 1.4), dc * i.color.a);
+                }
                 bool preview = i.style < 0.5;
                 bool objective = i.style > 1.5;
                 // HOI4 arrowTypes: unconfirmed = magnet_line (stripe textures, texture_loop 1), placed = defence_line

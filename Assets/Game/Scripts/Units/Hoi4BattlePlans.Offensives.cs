@@ -6,32 +6,35 @@ using UnityEngine.Rendering;
 
 namespace Hoi4.Units
 {
-    /// <summary>An offensive plan: an army's arrow from its front line to a target province, with the
+    /// <summary>An offensive plan: an army's arrow from its front line to the provinces to take, with the
     /// divisions assigned to it. Assigned divisions keep holding their front line until the plan runs.</summary>
     public sealed class Hoi4Offensive
     {
         public int Id;
         public ushort Owner;
         public int ArmyId;
-        public ushort Target;                       // the province to take
+        public readonly List<ushort> Targets = new List<ushort>(); // the provinces to take, in the order they were dragged over
+        public ushort Target;                       // the middle one: the arrow and the path go there
         public readonly HashSet<ushort> Units = new HashSet<ushort>();
-        // Presentation (rebuilt with the mesh)
         // Simulation: HOI4 keeps an offensive line as province points, from an own province on the front through
         // the enemy's land to the target (the last). The divisions will follow it; the arrow only starts where it
         // crosses the front (HOI4 draws one bend, not the route).
         public List<ushort> Path;
-        public List<Vector3> Objective;             // the line around the target, world
+        // Presentation (rebuilt with the mesh)
+        public List<Vector3> Objective;             // the line around the targets, world
         public Vector3 LabelWorld, LabelAhead;
     }
 
     /// <summary>
     /// Offensive battle plans, HOI4's way: with a division of an army that has a front line selected, the
     /// offence button turns the tool on and stripes the enemy's provinces (the countries the army's front
-    /// lines face) yellow; a right click on one of them places the plan at once (dragging comes later): an
-    /// arrow from the front line to that province and an objective line around it, in the army's colour.
-    /// The selected divisions of that army are assigned to it. Nothing executes yet.
-    /// Look: Tools/prototypes/battleplan/offensive.py, against HOI4 screenshots (arrowType move_thick for
-    /// the arrow, offence_line for the objective line).
+    /// lines face) yellow. Pressing the right button on one of them and dragging picks the provinces the cursor
+    /// crosses (green), with HOI4's dashed cursor trail (magnet_line) and dotted line through the picked
+    /// provinces (virtual_line); releasing places the plan: an arrow from the front line into the middle of the
+    /// targets and an objective line along their far side, in the army's colour. A click without dragging picks
+    /// one province. The selected divisions of that army are assigned to it. Nothing executes yet.
+    /// Look: Tools/prototypes/battleplan/offensive.py and drag.py, against HOI4 screenshots (arrowType
+    /// move_thick for the arrow, offence_line for the objective line).
     /// </summary>
     public sealed partial class Hoi4BattlePlans
     {
@@ -47,7 +50,12 @@ namespace Hoi4.Units
         [Tooltip("Objective line width")] public float objectiveWidthPx = 2f;
         [Tooltip("Objective line: the target's outline pulled towards its centre by this factor")] public float objectiveScale = 0.75f;
         [Tooltip("The offensive tool's stripe colour")] public Color offensiveStripeColor = new Color(0.90f, 0.88f, 0.32f, 1f);
-        [Tooltip("The province under the cursor while placing")] public Color offensiveHoverColor = new Color(0.36f, 0.92f, 0.32f, 1f);
+        [Tooltip("The province under the cursor while placing, and the provinces picked by a drag")] public Color offensiveHoverColor = new Color(0.36f, 0.92f, 0.32f, 1f);
+        [Tooltip("Dragging: the dashed cursor trail's width (HOI4 magnet_line)")] public float dragTrailWidthPx = 0.55f;
+        [Tooltip("Dragging: the dotted line through the picked provinces (HOI4 virtual_line)")] public float dragDotWidthPx = 1f;
+        [Tooltip("Dragging: the ring at each end of the dotted line")] public float dragRingRadiusPx = 1.6f;
+        public Color dragDotColor = new Color(0.85f, 0.8f, 0.7f, 1f);
+        public Color dragRingColor = new Color(0.9f, 0.9f, 0.85f, 0.55f);
 
         // HOI4 arrowType move_thick: the body ribbon maps the middle body_uv_scale of the texture height (its band,
         // rows 0.35..0.65, is then 0.75 of the ribbon); the head mesh is ribbon / body_uv_scale wide and maps the
@@ -59,6 +67,10 @@ namespace Hoi4.Units
         readonly List<Hoi4Offensive> offensives = new List<Hoi4Offensive>();
         readonly Dictionary<ushort, Hoi4Offensive> offensiveOf = new Dictionary<ushort, Hoi4Offensive>();
         readonly HashSet<ushort> offensiveTargets = new HashSet<ushort>(); // the tool's valid provinces
+        // Dragging (presentation): the cursor trail in map px and the provinces it crossed, in order
+        bool dragging;
+        readonly List<Vector2> dragTrail = new List<Vector2>();
+        readonly List<ushort> dragPicked = new List<ushort>();
         int nextOffensiveId = 1;
 
         Material arrowMaterial;
@@ -93,6 +105,13 @@ namespace Hoi4.Units
             {
                 material.SetTexture("_OffenceMaskTex", omask);
                 material.SetTexture("_OffencePatternTex", opattern);
+            }
+            var dmask = LoadTexture("gfx/maparrows/dot_mask.png");
+            var dpattern = LoadTexture("gfx/maparrows/dot_pattern.png");
+            if (dmask != null && dpattern != null)
+            {
+                material.SetTexture("_DotMaskTex", dmask);
+                material.SetTexture("_DotPatternTex", dpattern);
             }
             else ArchonLogger.LogWarning("Hoi4BattlePlans: gfx/maparrows/offence_mask.png missing (rerun Tools/hoi4_convert.py), objective lines drawn plain", "game_units");
 
@@ -141,6 +160,7 @@ namespace Hoi4.Units
             if (Active) Cancel();
             OffensiveActive = true;
             hoverProvince = 0;
+            EndDrag();
             RefreshOffensiveTargets();
             Changed?.Invoke();
         }
@@ -150,6 +170,7 @@ namespace Hoi4.Units
             if (!OffensiveActive) return;
             OffensiveActive = false;
             offensiveTargets.Clear();
+            EndDrag();
             dirtyTex = true;
             RebuildTexture();
             Changed?.Invoke();
@@ -190,49 +211,121 @@ namespace Hoi4.Units
             {
                 hoverProvince = province;
                 dirtyTex = true;
-                RebuildTexture();
             }
+            if (dragging)
+            {
+                if (!Input.GetMouseButton(1)) { FinishDrag(); return; }
+                if (cam != null && TryCursorPixel(cam, out var px)) ExtendDrag(px);
+            }
+            RebuildTexture();
         }
 
-        /// <summary>Right click on a valid province: the plan is placed. Left click cancels.</summary>
+        /// <summary>The cursor on the map, in map px (y down). The engine's heightfield-corrected hit, the point
+        /// province picking uses: a ray against the flat plane lands south of the cursor on raised terrain.</summary>
+        bool TryCursorPixel(Camera cam, out Vector2 px)
+        {
+            px = default;
+            var selector = Engine.ArchonEngine.Instance.ProvinceSelector;
+            if (selector == null || !selector.TryGetMapPointAtScreenPosition(Input.mousePosition, cam, out _, out var uv)) return false;
+            var tm = Engine.ArchonEngine.Instance.TextureManager;
+            px = new Vector2(uv.x * tm.MapWidth, (1f - uv.y) * tm.MapHeight);
+            return true;
+        }
+
+        /// <summary>Right press on a valid province starts a drag (released, the plan is placed). Left click cancels.</summary>
         bool OnOffensiveClick(int button)
         {
-            if (button == 1 && hoverProvince != 0 && offensiveTargets.Contains(hoverProvince))
+            if (button == 1 && hoverProvince != 0 && offensiveTargets.Contains(hoverProvince) && !dragging)
             {
-                var selected = ArmySelection(out var army);
-                if (selected != null)
-                {
-                    selected.Sort();
-                    ushort target = hoverProvince;
-                    CancelOffensive();
-                    gameState.TryExecuteCommand(new PlaceOffensiveCommand { CountryId = Player, ArmyId = army.Id, Target = target, UnitIds = selected }, out _);
-                    return true;
-                }
+                dragging = true;
+                dragTrail.Clear();
+                dragPicked.Clear();
+                dragPicked.Add(hoverProvince);
+                var cam = Camera.main;
+                if (cam != null && TryCursorPixel(cam, out var px)) dragTrail.Add(px);
+                dirtyTex = dirtyMesh = true;
+                return true;
             }
             if (button == 0) CancelOffensive();
             return true;
         }
 
+        /// <summary>The trail reaches the cursor; every valid province on the way (sampled every 0.25 map px, so a
+        /// fast drag skips none) is picked in order.</summary>
+        void ExtendDrag(Vector2 px)
+        {
+            if (dragTrail.Count > 0 && (px - dragTrail[dragTrail.Count - 1]).sqrMagnitude < 0.0625f) return;
+            var from = dragTrail.Count > 0 ? dragTrail[dragTrail.Count - 1] : px;
+            dragTrail.Add(px);
+            var tm = Engine.ArchonEngine.Instance.TextureManager;
+            int steps = Mathf.Max(1, Mathf.CeilToInt(Vector2.Distance(from, px) / 0.25f));
+            for (int s = 1; s <= steps; s++)
+            {
+                var q = Vector2.Lerp(from, px, s / (float)steps);
+                int x = Mathf.FloorToInt(q.x), y = Mathf.FloorToInt(q.y);
+                if (x < 0 || y < 0 || x >= tm.MapWidth || y >= tm.MapHeight) continue;
+                ushort id = tm.GetProvinceID(x, tm.MapHeight - 1 - y); // the lookup takes y from the bottom
+                if (id != 0 && offensiveTargets.Contains(id) && !dragPicked.Contains(id))
+                {
+                    dragPicked.Add(id);
+                    dirtyTex = true;
+                }
+            }
+            dirtyMesh = true;
+        }
+
+        void FinishDrag()
+        {
+            var targets = new List<ushort>(dragPicked);
+            var selected = ArmySelection(out var army);
+            CancelOffensive();
+            if (selected == null || targets.Count == 0) return;
+            selected.Sort();
+            gameState.TryExecuteCommand(new PlaceOffensiveCommand { CountryId = Player, ArmyId = army.Id, Targets = targets, UnitIds = selected }, out _);
+        }
+
+        void EndDrag()
+        {
+            dragging = false;
+            dragTrail.Clear();
+            dragPicked.Clear();
+            dirtyMesh = true;
+        }
+
         void PaintOffensiveTargets()
         {
             var yellow = (Color32)offensiveStripeColor;
-            var hover = (Color32)offensiveHoverColor;
+            var green = (Color32)offensiveHoverColor;
             foreach (ushort p in offensiveTargets)
                 if (p < planPixels.Length) planPixels[p] = new Color32(yellow.r, yellow.g, yellow.b, 64);
-            if (hoverProvince != 0 && offensiveTargets.Contains(hoverProvince) && hoverProvince < planPixels.Length)
-                planPixels[hoverProvince] = new Color32(hover.r, hover.g, hover.b, 64);
+            foreach (ushort p in dragPicked)
+                if (p < planPixels.Length) planPixels[p] = new Color32(green.r, green.g, green.b, 96);
+            if (!dragging && hoverProvince != 0 && offensiveTargets.Contains(hoverProvince) && hoverProvince < planPixels.Length)
+                planPixels[hoverProvince] = new Color32(green.r, green.g, green.b, 96);
         }
 
         // --- Plans (commands) -----------------------------------------------------------------------
 
-        /// <summary>PlaceOffensiveCommand: the army's offensive on the target, with these divisions (taken off
-        /// any other offensive; they keep holding their front line).</summary>
-        public Hoi4Offensive CreateOffensive(ushort owner, int armyId, ushort target, List<ushort> unitIds)
+        /// <summary>All the targets are valid for the army, none twice.</summary>
+        public bool AreOffensiveTargets(ushort owner, int armyId, List<ushort> targets)
         {
-            if (!simReady || !IsOffensiveTarget(owner, armyId, target)) return null;
+            if (targets == null || targets.Count == 0) return false;
+            var seen = new HashSet<ushort>();
+            foreach (ushort p in targets)
+                if (!seen.Add(p) || !IsOffensiveTarget(owner, armyId, p)) return false;
+            return true;
+        }
+
+        /// <summary>PlaceOffensiveCommand: the army's offensive on the targets, with these divisions (taken off
+        /// any other offensive; they keep holding their front line).</summary>
+        public Hoi4Offensive CreateOffensive(ushort owner, int armyId, List<ushort> targets, List<ushort> unitIds)
+        {
+            if (!simReady || !AreOffensiveTargets(owner, armyId, targets)) return null;
+            ushort target = targets[targets.Count / 2];
             var path = OffensivePath(owner, armyId, target);
             if (path == null) return null;
             var o = new Hoi4Offensive { Id = nextOffensiveId++, Owner = owner, ArmyId = armyId, Target = target, Path = path };
+            o.Targets.AddRange(targets);
             var armies = Hoi4Armies.Instance;
             foreach (ushort u in unitIds)
             {
@@ -243,7 +336,7 @@ namespace Hoi4.Units
             }
             offensives.Add(o);
             offensives.RemoveAll(x => x != o && x.Units.Count == 0);
-            Core.Recording.SessionRecorder.Note("plans", "offensive", owner, 0, 0, target, $"offensive {o.Id} army {armyId}: {o.Units.Count} divisions, path {string.Join(",", path)}");
+            Core.Recording.SessionRecorder.Note("plans", "offensive", owner, 0, 0, target, $"offensive {o.Id} army {armyId}: {o.Units.Count} divisions, targets {string.Join(",", targets)}, path {string.Join(",", path)}");
             dirtyMesh = true;
             Changed?.Invoke();
             return o;
@@ -267,8 +360,8 @@ namespace Hoi4.Units
             Core.Recording.SessionRecorder.Note("plans", "offensive_removed", o.Owner, 0, 0, o.Target, $"offensive {o.Id}: {why}");
         }
 
-        /// <summary>Hourly: divisions that died or left the army drop off; an offensive goes when its army has
-        /// no front line left, its target is taken, or nobody is assigned.</summary>
+        /// <summary>Hourly: divisions that died or left the army drop off, targets taken (or no longer valid) drop
+        /// off; an offensive goes when no target is left, or nobody is assigned.</summary>
         void PruneOffensives()
         {
             if (offensives.Count == 0) return;
@@ -285,8 +378,17 @@ namespace Hoi4.Units
                 });
                 any |= dropped > 0;
                 string why = null;
-                if (Hoi4Occupation.ControllerOf(gameState, o.Target) == o.Owner) why = "target taken";
-                else if (!IsOffensiveTarget(o.Owner, o.ArmyId, o.Target)) why = "no front line against the target's holder";
+                int lost = o.Targets.RemoveAll(p => !IsOffensiveTarget(o.Owner, o.ArmyId, p));
+                if (lost > 0)
+                {
+                    any = true;
+                    if (o.Targets.Count > 0)
+                    {
+                        ushort middle = o.Targets[o.Targets.Count / 2];
+                        if (middle != o.Target) { o.Target = middle; o.Path = null; }
+                    }
+                }
+                if (o.Targets.Count == 0) why = "targets taken (or no front line against their holder)";
                 else if (o.Units.Count == 0) why = "no divisions";
                 else if (!PathHolds(o))
                 {
@@ -400,10 +502,14 @@ namespace Hoi4.Units
         {
             aVerts.Clear(); aColors.Clear(); aUvs.Clear(); aInfos.Clear(); aKinds.Clear(); aCenters.Clear(); aBlurs.Clear(); aTris.Clear();
             var counters = Hoi4UnitCounters.Instance;
+            AddDragPreview(counters);
             foreach (var o in offensives)
             {
                 if (counters == null || !counters.TryGetProvincePoint(o.Target, out var target)) continue;
                 target.y = 0f;
+                // Several targets: the arrow goes into the middle of the line through their centres
+                var spine = o.Targets.Count > 1 ? TargetSpine(o.Targets, counters) : null;
+                if (spine != null) target = PixelToWorld(spine[spine.Count / 2]);
                 if (!ArrowControls(o, counters, target, out var root, out var bend)) continue;
                 var back = bend - target; // where the arrow comes in from: the objective line stays open there
                 back.y = 0f;
@@ -412,7 +518,7 @@ namespace Hoi4.Units
                 var color = Hoi4Armies.ColorOf(o.ArmyId, 0.95f);
                 var fill = Color.Lerp(color, Color.white, 0.35f);
 
-                o.Objective = ObjectiveLine(o.Target, target, back);
+                o.Objective = spine != null ? ObjectiveFarSide(o.Targets, spine, WorldToPixel(root)) : ObjectiveLine(o.Target, target, back);
                 if (o.Objective != null && o.Objective.Count >= 2)
                 {
                     AddRibbon(o.Objective, color, 2f);
@@ -439,6 +545,119 @@ namespace Hoi4.Units
             arrowMesh.SetUVs(4, aBlurs);
             arrowMesh.SetTriangles(aTris, 0);
             arrowMesh.bounds = new Bounds(Vector3.zero, Vector3.one * 1e6f);
+        }
+
+        /// <summary>While dragging: the cursor trail dashed, the dotted line through the picked provinces' centres
+        /// and a ring at each end. Prototype: Tools/prototypes/battleplan/drag.py.</summary>
+        void AddDragPreview(Hoi4UnitCounters counters)
+        {
+            if (!OffensiveActive || !dragging || counters == null || ArmySelection(out var army) == null) return;
+            var color = Hoi4Armies.ColorOf(army.Id, 0.95f);
+            if (dragTrail.Count >= 2)
+            {
+                var trail = Relax(new List<Vector2>(dragTrail), 0.25f, 4);
+                AddRibbon(ToWorld(trail), Color.Lerp(color, Color.white, 0.2f), 0f, dragTrailWidthPx);
+            }
+            var spine = TargetSpine(dragPicked, counters);
+            if (spine == null || spine.Count == 0) return;
+            if (spine.Count >= 2) AddRibbon(ToWorld(spine), dragDotColor, 3f, dragDotWidthPx);
+            AddRing(spine[0]);
+            if (spine.Count >= 2) AddRing(spine[spine.Count - 1]);
+        }
+
+        void AddRing(Vector2 centre)
+        {
+            var circle = new List<Vector2>(41);
+            for (int i = 0; i <= 40; i++)
+            {
+                float a = i / 40f * Mathf.PI * 2f;
+                circle.Add(centre + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * dragRingRadiusPx);
+            }
+            AddRibbon(ToWorld(circle), dragRingColor, 4f, 0.7f);
+        }
+
+        List<Vector3> ToWorld(List<Vector2> px)
+        {
+            var w = new List<Vector3>(px.Count);
+            foreach (var p in px) w.Add(PixelToWorld(p));
+            return w;
+        }
+
+        /// <summary>The targets' centres in drag order, smoothed (map px): the dotted line while dragging, the line
+        /// the objective line follows and the arrow aims at the middle of.</summary>
+        List<Vector2> TargetSpine(List<ushort> targets, Hoi4UnitCounters counters)
+        {
+            var c = new List<Vector2>(targets.Count);
+            foreach (ushort p in targets)
+                if (counters.TryGetProvincePoint(p, out var w)) c.Add(WorldToPixel(w));
+            if (c.Count <= 1) return c.Count == 1 ? c : null;
+            return Relax(c, 0.25f, 40);
+        }
+
+        /// <summary>
+        /// Several targets: the outline of all of them on the side of the spine away from the arrow's root, ordered
+        /// along the spine, pulled towards it and relaxed; at the spine's ends it wraps a little around. Teeth point
+        /// at the spine. Prototype: drag.py objective_far_side.
+        /// </summary>
+        List<Vector3> ObjectiveFarSide(List<ushort> targets, List<Vector2> sp, Vector2 rootPx)
+        {
+            if (!EnsureArcs() || sp.Count < 2) return null;
+            var tset = new HashSet<ushort>(targets);
+            int n = sp.Count;
+            var dir = new Vector2[n];
+            var nrm = new Vector2[n];
+            for (int i = 0; i < n; i++)
+            {
+                var d = sp[Mathf.Min(i + 1, n - 1)] - sp[Mathf.Max(i - 1, 0)];
+                dir[i] = d.sqrMagnitude > 1e-12f ? d.normalized : Vector2.right;
+                nrm[i] = new Vector2(dir[i].y, -dir[i].x);
+            }
+            if (Vector2.Dot(rootPx - sp[n / 2], nrm[n / 2]) > 0f)
+                for (int i = 0; i < n; i++) nrm[i] = -nrm[i];
+
+            var kept = new List<(float key, Vector2 p)>();
+            foreach (var arc in allArcs)
+            {
+                if (tset.Contains(arc.ProvinceA) == tset.Contains(arc.ProvinceB) || arc.Points.Length < 2) continue;
+                foreach (var p in arc.Points)
+                {
+                    int bi = 0;
+                    float bd = float.MaxValue;
+                    for (int i = 0; i < n; i++)
+                    {
+                        float d2 = (sp[i] - p).sqrMagnitude;
+                        if (d2 < bd) { bd = d2; bi = i; }
+                    }
+                    var r = p - sp[bi];
+                    float along = Vector2.Dot(r, dir[bi]);
+                    float side = Vector2.Dot(r, nrm[bi]);
+                    bool end = (bi == 0 && along < 0f) || (bi == n - 1 && along > 0f);
+                    if (!(side > 0f || (end && side > -0.5f * Mathf.Abs(along)))) continue;
+                    float key = end
+                        ? bi + Mathf.Sign(along) * (2f - Mathf.Clamp(side / (Mathf.Abs(along) + 1e-6f), -0.5f, 1.9f))
+                        : bi + along / 0.25f * 0.01f;
+                    kept.Add((key, sp[bi] + r * objectiveScale));
+                }
+            }
+            if (kept.Count < 4) return null;
+            kept.Sort((a, b) => a.key.CompareTo(b.key));
+            var line = new List<Vector2>(kept.Count);
+            foreach (var (_, p) in kept) line.Add(p);
+            line = Relax(line, 0.25f, 60);
+            if (line.Count > 10) line = line.GetRange(3, line.Count - 6); // the relaxed ends hook
+            // Teeth point left of travel (map space (t.y, -t.x)): turn the line so they face the spine
+            int m = line.Count / 2;
+            var t = line[Mathf.Min(m + 1, line.Count - 1)] - line[Mathf.Max(m - 1, 0)];
+            var left = new Vector2(t.y, -t.x);
+            int si = 0;
+            float sd = float.MaxValue;
+            for (int i = 0; i < n; i++)
+            {
+                float d2 = (sp[i] - line[m]).sqrMagnitude;
+                if (d2 < sd) { sd = d2; si = i; }
+            }
+            if (Vector2.Dot(left, sp[si] - line[m]) < 0f) line.Reverse();
+            return ToWorld(line);
         }
 
         void DrawOffensiveArrows()

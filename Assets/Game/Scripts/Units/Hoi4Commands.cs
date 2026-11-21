@@ -223,22 +223,22 @@ namespace Hoi4.Units
         public override void Deserialize(BinaryReader r) { CountryId = r.ReadUInt16(); PlanId = r.ReadInt32(); }
     }
 
-    /// <summary>An offensive plan of an army with a front line: an arrow to a province held by a country the
-    /// army's front lines face, with these divisions of that army assigned to it.</summary>
+    /// <summary>An offensive plan of an army with a front line: provinces to take (held by countries the army's
+    /// front lines face, in the order they were dragged over), with these divisions of that army assigned to it.</summary>
     public sealed class PlaceOffensiveCommand : BaseCommand
     {
         public ushort CountryId;
         public int ArmyId;
-        public ushort Target;
+        public List<ushort> Targets;
         public List<ushort> UnitIds;
 
         public override bool Validate(GameState gameState) =>
             Hoi4BattlePlans.Instance != null && Hoi4Armies.Instance?.Get(ArmyId) != null
             && Hoi4CommandIo.Owned(gameState, CountryId, UnitIds)
-            && Hoi4BattlePlans.Instance.IsOffensiveTarget(CountryId, ArmyId, Target);
+            && Hoi4BattlePlans.Instance.AreOffensiveTargets(CountryId, ArmyId, Targets);
 
         public override void Execute(GameState gameState) =>
-            Hoi4BattlePlans.Instance.CreateOffensive(CountryId, ArmyId, Target, UnitIds);
+            Hoi4BattlePlans.Instance.CreateOffensive(CountryId, ArmyId, Targets, UnitIds);
 
         public override void Undo(GameState gameState) { }
 
@@ -246,7 +246,7 @@ namespace Hoi4.Units
         {
             w.Write(CountryId);
             w.Write(ArmyId);
-            w.Write(Target);
+            Hoi4CommandIo.WriteIds(w, Targets);
             Hoi4CommandIo.WriteIds(w, UnitIds);
         }
 
@@ -254,7 +254,7 @@ namespace Hoi4.Units
         {
             CountryId = r.ReadUInt16();
             ArmyId = r.ReadInt32();
-            Target = r.ReadUInt16();
+            Targets = Hoi4CommandIo.ReadIds(r);
             UnitIds = Hoi4CommandIo.ReadIds(r);
         }
     }
