@@ -105,6 +105,7 @@ namespace Hoi4.UI
 
         // Lighter than the gold province selection, so the two outlines read apart
         static readonly Color StateOutline = new Color(1f, 0.93f, 0.74f, 1f);
+        static readonly Color ProvinceOutline = new Color(1f, 0.84f, 0f, 0.5f);
 
         static global::Map.Interaction.ProvinceHighlighter Highlighter =>
             Engine.ArchonEngine.Instance != null ? Engine.ArchonEngine.Instance.ProvinceHighlighter : null;
@@ -119,6 +120,7 @@ namespace Hoi4.UI
         {
             province = 0;
             Highlighter?.ClearProvinceSet();
+            Highlighter?.ClearHighlight();
             if (panel != null) panel.style.display = DisplayStyle.None;
         }
 
@@ -129,18 +131,24 @@ namespace Hoi4.UI
             dirty = true;
         }
 
+        bool wasDiplomacy;
+
         void Update()
         {
             if (panel == null) return;
             Hoi4UiHover.Report(this, panel);
             if (!HasCountry()) { if (province != 0) Hide(); return; }
             if (Input.GetKeyDown(KeyCode.Escape) && province != 0) { Hide(); return; }
+            bool diplomacy = Hoi4DiplomacyPanel.IsOpen;
+            if (diplomacy != wasDiplomacy) { wasDiplomacy = diplomacy; dirty = true; }
+            if (diplomacy && panel.resolvedStyle.display != DisplayStyle.None) panel.style.display = DisplayStyle.None;
             if (!dirty) return;
             dirty = false;
             if (province != 0 && Hoi4StatePresenter.Show(panel, gameState, province))
             {
-                panel.style.display = DisplayStyle.Flex;
+                panel.style.display = diplomacy ? DisplayStyle.None : DisplayStyle.Flex; // diplomacy mode: outline only, no panel
                 int stateId = Hoi4Regions.State(province);
+                Highlighter?.HighlightProvince(province, ProvinceOutline);
                 Highlighter?.HighlightProvinceSet(p => Hoi4Regions.State(p) == stateId, StateOutline);
             }
             else

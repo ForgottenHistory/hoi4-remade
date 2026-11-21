@@ -19,8 +19,18 @@ float _Hoi4CityLightsTiling;     // repeats per map pixel, HOI4 CITY_LIGHTS_TILI
 
 float _Hoi4CountryEdgeSoftness; // 1 = gradient over ~3-4 map px between countries, 0 = near-sharp line
 
+// Diplomatic mode (shader mode 5) reuses the political country blend, but with per-country colors
+// from this 4096x1 texture (rgb = color, a = 0 for countries drawn as plain terrain)
+TEXTURE2D(_Hoi4DiplomacyColors);
+float _Hoi4DiplomacyActive;
+
 float4 Hoi4OwnerColor(uint owner)
 {
+    if (_Hoi4DiplomacyActive > 0.5)
+    {
+        float4 d = LOAD_TEXTURE2D(_Hoi4DiplomacyColors, int2(min(owner, 4095u), 0));
+        return float4(d.rgb * d.a, d.a); // premultiplied, like the political colors
+    }
     // Unowned contributes no color (alpha 0), so it blends into plain terrain
     return owner == 0 ? float4(0, 0, 0, 0)
                       : float4(SAMPLE_TEXTURE2D_LOD(_CountryColorPalette, sampler_CountryColorPalette, GetColorUV(owner), 0).rgb, 1);
@@ -143,7 +153,7 @@ float4 RenderMapMode(int mapMode, uint provinceID, float2 uv, float3 positionWS)
     {
         return Hoi4Render(uv, positionWS, 0);
     }
-    if (mapMode >= 2 && mapMode < 100)
+    if (mapMode >= 2 && mapMode < 100 && mapMode != 5)
     {
         float4 palette = Hoi4PaletteColor(provinceID);
         return Hoi4Render(uv, positionWS, float4(palette.rgb, palette.a < 0.01 ? 0 : blend));
@@ -151,7 +161,7 @@ float4 RenderMapMode(int mapMode, uint provinceID, float2 uv, float3 positionWS)
 
     // Political (0) and fallback
     float4 country = Hoi4CountryColor(uv);
-    country.rgb = lerp(dot(country.rgb, float3(0.299, 0.587, 0.114)).xxx, country.rgb, _CountryColorSaturation);
+    country.rgb = lerp(dot(country.rgb, float3(0.299, 0.587, 0.114)).xxx, country.rgb, (_Hoi4DiplomacyActive > 0.5 ? 1.0 : _CountryColorSaturation));
     country.rgb *= 1.0 - Hoi4CountryRim(uv) * 0.5;
     return Hoi4Render(uv, positionWS, float4(country.rgb, country.a * Hoi4CountryBlend(uv)));
 }

@@ -1,0 +1,16 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <ui:VisualElement name="diplomacy-panel" class="diplomacy-panel" picking-mode="Position">
+        <ui:VisualElement class="spr dp-header" picking-mode="Ignore" />
+        <ui:Label text="DIPLOMACY" class="hoi4-label dp-title" picking-mode="Ignore" />
+        <ui:VisualElement name="close" class="spr hoi4-button dp-close" />
+
+        <ui:VisualElement name="flag" class="dp-flag" picking-mode="Ignore" />
+        <ui:Label name="country" class="hoi4-label dp-country" picking-mode="Ignore" />
+        <ui:Label name="relation" class="hoi4-label dp-relation" picking-mode="Ignore" enable-rich-text="true" />
+        <ui:Label name="opinion" class="hoi4-label dp-opinion" picking-mode="Ignore" />
+
+        <ui:VisualElement name="action" class="dp-action" picking-mode="Position">
+            <ui:Label name="action-text" class="hoi4-label center dp-action-text" picking-mode="Ignore" />
+        </ui:VisualElement>
+    </ui:VisualElement>
+</ui:UXML>

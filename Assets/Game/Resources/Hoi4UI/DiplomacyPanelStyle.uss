@@ -1,0 +1,29 @@
+/* HOI4 diplomacy view (interface/countrydiplomacyview.gui), top left under the top bar. Reduced: the
+   target country, our relation to it and the war / peace action. Coordinates are HOI4 pixel. */
+.diplomacy-panel {
+    --sprite: "gfx/interface/unitpanel/window.png";
+    position: absolute; left: 1px; top: 90px; width: 422px; height: 200px;
+    -unity-slice-left: 64; -unity-slice-right: 64; -unity-slice-top: 64; -unity-slice-bottom: 64;
+}
+
+.dp-header { --sprite: "gfx/interface/unitpanel/header.png"; left: 7px; top: 8px; width: 392px; height: 35px; }
+.dp-title { left: 20px; top: 10px; width: 200px; height: 28px; font-size: 20px; letter-spacing: 4px; }
+.dp-close { --sprite: "gfx/interface/unitpanel/btn_close.png"; left: 362px; top: 8px; width: 31px; height: 31px; }
+
+.dp-flag { position: absolute; left: 22px; top: 62px; width: 78px; height: 57px; }
+.dp-country { left: 116px; top: 60px; width: 280px; height: 30px; font-size: 24px; }
+.dp-relation { left: 116px; top: 92px; width: 280px; height: 24px; font-size: 17px; }
+.dp-opinion { left: 116px; top: 116px; width: 280px; height: 22px; font-size: 15px; }
+
+.dp-action {
+    position: absolute; left: 90px; top: 152px; width: 240px; height: 34px;
+    background-color: rgba(34, 60, 38, 0.95);
+    border-width: 1px; border-color: rgb(120, 160, 110);
+}
+.dp-action:hover { background-color: rgba(48, 84, 54, 0.95); }
+.dp-action:active { background-color: rgba(24, 44, 28, 0.95); }
+.dp-action.war { background-color: rgba(96, 30, 28, 0.95); border-color: rgb(190, 100, 90); }
+.dp-action.war:hover { background-color: rgba(128, 40, 36, 0.95); }
+.dp-action.war:active { background-color: rgba(70, 22, 20, 0.95); }
+.dp-action.disabled { background-color: rgba(30, 30, 30, 0.9); border-color: rgb(80, 80, 80); }
+.dp-action-text { left: 0; top: 0; width: 240px; height: 34px; font-size: 17px; }
