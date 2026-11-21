@@ -19,6 +19,7 @@ namespace Hoi4.Units
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Spawn()
         {
+            if (!Hoi4.Hoi4Scenes.Active) return; // not in other scenes (the engine's StarterKit scene)
             var go = new GameObject("Hoi4Simulation");
             DontDestroyOnLoad(go);
             go.AddComponent<Hoi4Simulation>();
@@ -46,6 +47,7 @@ namespace Hoi4.Units
             Hoi4Combat.Instance?.SimulateHour();
             Hoi4BattlePlans.Instance?.SimulateHour();
             if (RunsAI) Hoi4EnemyAI.Instance?.SimulateHour();
+            Hoi4Recorder.Instance?.AfterHour(); // reads only, after everything this hour did
         }
 
         void OnDay(int day)

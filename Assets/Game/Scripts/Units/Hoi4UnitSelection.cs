@@ -60,6 +60,7 @@ namespace Hoi4.Units
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Spawn()
         {
+            if (!Hoi4.Hoi4Scenes.Active) return; // not in other scenes (the engine's StarterKit scene)
             if (Instance != null) return;
             var go = new GameObject("Hoi4UnitSelection");
             DontDestroyOnLoad(go);
@@ -240,6 +241,7 @@ namespace Hoi4.Units
             if (Hoi4Combat.IsAttackedFrom(gameState, country, target))
             {
                 ArchonLogger.Log($"Hoi4UnitSelection: province {target} is attacking us, it can't be attacked back", "game_units");
+                Core.Recording.SessionRecorder.Note("player", "order_refused", country, 0, 0, target, $"{ordered.Count} selected: the target is attacking us");
                 return 0;
             }
             var paths = new Dictionary<ushort, List<ushort>>(); // per start province
@@ -287,6 +289,8 @@ namespace Hoi4.Units
                     : " (unreachable)";
             }
             ArchonLogger.Log($"Hoi4UnitSelection: {issued} divisions ordered to province {target}" + (noPath > 0 ? $", {noPath} without a path{why}" : ""), "game_units");
+            Core.Recording.SessionRecorder.Note("player", noPath > 0 ? "order_partial" : "order", country, 0, 0, target,
+                $"{issued} ordered, {stay.Count} already there, {noPath} without a path{why}");
             Hoi4UnitCounters.Instance?.MarkDirty(); // the counters show a move arrow now
             Changed?.Invoke();
             return issued;

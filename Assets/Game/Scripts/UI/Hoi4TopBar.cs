@@ -57,6 +57,7 @@ namespace Hoi4.UI
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Spawn()
         {
+            if (!Hoi4.Hoi4Scenes.Active) return; // not in other scenes (the engine's StarterKit scene)
             var go = new GameObject("Hoi4TopBar");
             DontDestroyOnLoad(go);
             go.AddComponent<Hoi4TopBar>();

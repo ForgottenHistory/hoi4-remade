@@ -25,6 +25,7 @@ namespace Hoi4.Map
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void Register()
         {
+            if (!Hoi4.Hoi4Scenes.Active) return; // not in other scenes (the engine's StarterKit scene)
             MapRendererRegistry.LabelSource = new Hoi4MapLabelSource();
         }
 

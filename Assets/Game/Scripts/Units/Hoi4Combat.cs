@@ -39,6 +39,8 @@ namespace Hoi4.Units
         {
             public ushort From, To;       // the attackers' main province and the one attacked
             public int AttackerPercent;   // attackers' share of the two sides' remaining organisation
+            public List<ushort> Attackers, Defenders; // everyone in it, front line and reserve (recorder)
+            public List<ushort> AttackerFront, DefenderFront; // the ones within the combat width
         }
 
         public static Hoi4Combat Instance { get; private set; }
@@ -58,6 +60,7 @@ namespace Hoi4.Units
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Spawn()
         {
+            if (!Hoi4.Hoi4Scenes.Active) return; // not in other scenes (the engine's StarterKit scene)
             var go = new GameObject("Hoi4Combat");
             DontDestroyOnLoad(go);
             go.AddComponent<Hoi4Combat>();
@@ -188,7 +191,9 @@ namespace Hoi4.Units
         void OnArrived(ushort unitId, ushort province)
         {
             if (!retreating.Remove(unitId) || Hoi4Divisions.Instance == null) return;
-            if (EnemyPresent(unitId, province)) Destroy(unitId, Hoi4Divisions.Instance);
+            if (!EnemyPresent(unitId, province)) return;
+            Core.Recording.SessionRecorder.Note("combat", "overrun", gameState.Units.GetUnit(unitId).countryID, unitId, province, 0, "retreated into an enemy");
+            Destroy(unitId, Hoi4Divisions.Instance);
         }
 
         bool EnemyPresent(ushort unitId, ushort province)
@@ -208,6 +213,8 @@ namespace Hoi4.Units
         void Destroy(ushort id, Hoi4Divisions divisions)
         {
             if (!gameState.Units.HasUnit(id)) return;
+            var u = gameState.Units.GetUnit(id);
+            Core.Recording.SessionRecorder.Note("combat", "destroyed", u.countryID, id, u.provinceID, 0, "");
             divisions.Remove(id);
             gameState.Units.DisbandUnit(id, DestructionReason.Combat);
         }
@@ -277,6 +284,10 @@ namespace Hoi4.Units
                 From = from,
                 To = target,
                 AttackerPercent = af + df > FP.Zero ? FP.Round(FP.Hundred * af / (af + df)).ToInt() : 50,
+                Attackers = attackers.ConvertAll(d => d.UnitId),
+                Defenders = defending.ConvertAll(d => d.UnitId),
+                AttackerFront = aFront.ConvertAll(d => d.UnitId),
+                DefenderFront = dFront.ConvertAll(d => d.UnitId),
             });
 
             // Broken attackers drop their order; broken defenders retreat now
@@ -314,7 +325,14 @@ namespace Hoi4.Units
                 if (best == 0 || (own && !bestOwn)) { best = p; bestOwn = own; }
             }
 
-            if (best == 0) { destroyed.Add(d.UnitId); return; }
+            if (best == 0)
+            {
+                Core.Recording.SessionRecorder.Note("combat", "trapped", country, d.UnitId, from, 0, "no friendly neighbour to retreat to: destroyed");
+                destroyed.Add(d.UnitId);
+                return;
+            }
+            Core.Recording.SessionRecorder.Note("combat", "retreat", country, d.UnitId, from, best,
+                $"org {d.Organisation.ToFloat():0.#}/{d.MaxOrganisation.ToFloat():0.#} str {d.Strength.ToFloat():0.#}/{d.MaxStrength.ToFloat():0.#}");
             // Retreating is a march like any other (a day), and the division is out of the fight meanwhile
             units.MovementQueue.CancelMovement(d.UnitId);
             retreating.Add(d.UnitId);

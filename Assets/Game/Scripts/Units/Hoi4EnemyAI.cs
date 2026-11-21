@@ -43,6 +43,7 @@ namespace Hoi4.Units
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Spawn()
         {
+            if (!Hoi4.Hoi4Scenes.Active) return; // not in other scenes (the engine's StarterKit scene)
             var go = new GameObject("Hoi4EnemyAI");
             DontDestroyOnLoad(go);
             go.AddComponent<Hoi4EnemyAI>();
@@ -97,7 +98,12 @@ namespace Hoi4.Units
                 var d = divisions.Get(id);
                 if (d == null) continue;
                 bool worn = d.Organisation < d.MaxOrganisation * BreakOffOrganisation || d.Strength < d.MaxStrength * BreakOffStrength;
-                if (worn || battle.AttackerPercent < BreakOffPercent) breakOff.Add(id);
+                if (worn || battle.AttackerPercent < BreakOffPercent)
+                {
+                    breakOff.Add(id);
+                    Core.Recording.SessionRecorder.Note("ai", "break_off", owner, id, st.destinationProvinceID, 0,
+                        (worn ? "worn" : "losing") + $" battle {battle.AttackerPercent}% org {d.Organisation.ToFloat():0.#}/{d.MaxOrganisation.ToFloat():0.#} str {d.Strength.ToFloat():0.#}/{d.MaxStrength.ToFloat():0.#}");
+                }
             }
             // Not while iterating the moving units; one command per country
             breakOff.Sort();
@@ -143,6 +149,8 @@ namespace Hoi4.Units
                     Attack(country);
         }
 
+        static string OddsText(FP odds) => odds == FP.MaxValue ? "undefended" : odds.ToFloat().ToString("0.00");
+
         FP Strength(ushort country)
         {
             FP total = FP.Zero;
@@ -172,7 +180,7 @@ namespace Hoi4.Units
                 if (!fronts.TryGetValue(holder, out var list)) fronts[holder] = list = new List<ushort>();
                 list.Add(p);
             }
-            if (fronts.Count == 0) return;
+            if (fronts.Count == 0) { Core.Recording.SessionRecorder.Note("ai", "no_front", country, 0, 0, 0, "at war but borders no enemy land it can attack"); return; }
 
             ushort target = 0;
             FP best = FP.NegativeOne;
@@ -182,21 +190,26 @@ namespace Hoi4.Units
                 if (s > best || (s == best && kv.Key < target)) { best = s; target = kv.Key; } // ties: lowest id
             }
             var targets = fronts[target];
+            Core.Recording.SessionRecorder.Note("ai", "target", country, 0, 0, target, $"{targets.Count} border provinces; enemies bordered {fronts.Count}");
 
             // Idle divisions: not marching, rested, and not the defenders of a province under attack
             idle.Clear();
             var own = gameState.Units.GetCountryUnits(country);
             own.Sort();
+            int tired = 0, moving = 0, defendingCount = 0;
             foreach (ushort id in own)
             {
                 var d = Hoi4Divisions.Instance.Get(id);
-                if (d == null || d.Organisation < d.MaxOrganisation * MinOrganisation || d.Strength < d.MaxStrength * MinStrength) continue;
-                if (gameState.Units.MovementQueue.IsUnitMoving(id)) continue;
+                if (d == null) continue;
+                if (d.Organisation < d.MaxOrganisation * MinOrganisation || d.Strength < d.MaxStrength * MinStrength) { tired++; continue; }
+                if (gameState.Units.MovementQueue.IsUnitMoving(id)) { moving++; continue; }
                 ushort at = gameState.Units.GetUnit(id).provinceID;
                 bool defending = false;
                 foreach (var b in Hoi4Combat.Battles) if (b.To == at) { defending = true; break; }
                 if (!defending) idle.Add(id);
+                else defendingCount++;
             }
+            Core.Recording.SessionRecorder.Note("ai", "pool", country, 0, 0, target, $"divisions {own.Count}: free {idle.Count}, tired {tired}, marching {moving}, defending {defendingCount}");
             if (idle.Count == 0) return;
 
             // Divisions already marching at this enemy count towards the spread and the odds
@@ -234,7 +247,9 @@ namespace Hoi4.Units
                 int bestLoad = int.MaxValue;
                 var order = new List<ushort>(targets);
                 order.Sort((a, b) => load[a] != load[b] ? load[a].CompareTo(load[b]) : a.CompareTo(b));
-                int tried = 0;
+                int tried = 0, badOdds = 0, noPath = 0;
+                FP bestOdds = FP.Zero, bestRejected = FP.Zero;
+                bool bold = false;
                 var self = Hoi4Divisions.Instance.Get(id);
                 foreach (ushort t in order)
                 {
@@ -242,18 +257,32 @@ namespace Hoi4.Units
                     // Odds with this division joining the ones already on the way
                     var side = new List<Hoi4Division>(attackersOf[t]) { self };
                     FP odds = Hoi4Combat.Odds(side, defendersOf[t]);
-                    if (odds < GoodOdds && (odds < BoldOdds || Roll(country, t, today) >= BoldChance)) continue;
+                    if (odds < GoodOdds && (odds < BoldOdds || Roll(country, t, today) >= BoldChance))
+                    {
+                        badOdds++;
+                        if (odds > bestRejected) bestRejected = odds;
+                        continue;
+                    }
                     tried++;
                     var path = gameState.Pathfinding.FindPath(unit.provinceID, t, country);
-                    if (path == null || path.Count < 2) continue;
+                    if (path == null || path.Count < 2) { noPath++; continue; }
                     if (bestPath == null || load[t] < bestLoad || (load[t] == bestLoad && path.Count < bestPath.Count))
                     {
                         bestPath = path;
                         bestTarget = t;
                         bestLoad = load[t];
+                        bestOdds = odds;
+                        bold = odds < GoodOdds;
                     }
                 }
-                if (bestPath == null) continue;
+                if (bestPath == null)
+                {
+                    Core.Recording.SessionRecorder.Note("ai", "hold", country, id, unit.provinceID, 0,
+                        $"rejected {badOdds} on odds (best {OddsText(bestRejected)}), {noPath} without a path, of {order.Count} targets");
+                    continue;
+                }
+                Core.Recording.SessionRecorder.Note("ai", bold ? "attack_bold" : "attack", country, id, unit.provinceID, bestTarget,
+                    $"odds {OddsText(bestOdds)} with {attackersOf[bestTarget].Count} already going, {defendersOf[bestTarget].Count} defending, path {bestPath.Count - 1} hops");
 
                 var type = unitTypes?.GetUnitType(unit.unitTypeID);
                 var command = new QueueUnitMovementCommand

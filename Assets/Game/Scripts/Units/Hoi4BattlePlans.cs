@@ -91,6 +91,7 @@ namespace Hoi4.Units
         ushort[] landProvinces;                                            // sorted
         ushort[][] landNeighbours;                                         // per province id: land neighbours, sorted
         ushort[] ctrl;                                                     // controller per province id, snapshot during a refresh
+        readonly Dictionary<ushort, HashSet<ushort>> enemyLand = new Dictionary<ushort, HashSet<ushort>>(); // per country, this hour
 
         // Hover preview
         ushort hoverProvince, hoverCountry;
@@ -111,6 +112,8 @@ namespace Hoi4.Units
         public event Action Changed;
 
         public Hoi4BattlePlan PlanOf(ushort unitId) => planOf.TryGetValue(unitId, out var p) ? p : null;
+        public bool IsBorrowed(ushort unitId) => borrowed.Contains(unitId);         // an AI division off its line, attacking
+        public bool HasManualOrder(ushort unitId) => manualOrders.Contains(unitId); // a player division ordered by hand
 
         public Hoi4BattlePlan GetPlan(int planId)
         {
@@ -121,6 +124,7 @@ namespace Hoi4.Units
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Spawn()
         {
+            if (!Hoi4.Hoi4Scenes.Active) return; // not in other scenes (the engine's StarterKit scene)
             if (Instance != null) return;
             var go = new GameObject("Hoi4BattlePlans");
             DontDestroyOnLoad(go);
@@ -335,6 +339,7 @@ namespace Hoi4.Units
 
         void RemovePlan(Hoi4BattlePlan plan)
         {
+            Core.Recording.SessionRecorder.Note("plans", "removed", plan.Owner, 0, 0, plan.Country, $"plan {plan.Id}, {plan.Units.Count} divisions released");
             plans.Remove(plan);
             dirtyPlans.Remove(plan);
             foreach (ushort u in plan.Units) planOf.Remove(u);
@@ -383,6 +388,7 @@ namespace Hoi4.Units
             }
             TraceLine(plan);
             plans.Add(plan);
+            Core.Recording.SessionRecorder.Note("plans", "created", owner, 0, 0, country, $"plan {plan.Id} army {armyId}: {plan.Units.Count} of {unitIds.Count} selected divisions, fronts {FrontSizes(plan)}");
             Distribute(plan);
             dirtyMesh = true;
             Changed?.Invoke();
@@ -419,6 +425,7 @@ namespace Hoi4.Units
         public void SimulateHour()
         {
             if (!simReady) return;
+            enemyLand.Clear();
             if (borderDirty) RefreshPlans();
             if (plans.Count == 0) return;
             var units = gameState.Units;
@@ -654,6 +661,7 @@ namespace Hoi4.Units
                 var plan = new Hoi4BattlePlan { Id = nextId++, Owner = owner, IsAI = true, Country = enemy };
                 SetFronts(plan, fronts);
                 plans.Add(plan); // divisions join on this hour's AutoAssignAI
+                Core.Recording.SessionRecorder.Note("plans", "created", owner, 0, 0, enemy, $"plan {plan.Id} (AI): fronts {FrontSizes(plan)}");
             }
         }
 
@@ -759,6 +767,14 @@ namespace Hoi4.Units
             return true;
         }
 
+        static string FrontSizes(Hoi4BattlePlan plan)
+        {
+            if (plan.Fronts == null || plan.Fronts.Count == 0) return "none";
+            var parts = new List<string>(plan.Fronts.Count);
+            foreach (var f in plan.Fronts) parts.Add(f.Count.ToString());
+            return string.Join("+", parts);
+        }
+
         void SetFronts(Hoi4BattlePlan plan, List<List<ushort>> fronts)
         {
             plan.Fronts = fronts;
@@ -795,7 +811,9 @@ namespace Hoi4.Units
                 var fronts = FrontsAgainst(plan.Owner, plan.Country);
                 if (fronts.Count == 0) { RemovePlan(plan); any |= !plan.IsAI; continue; } // nothing left to hold against
                 if (SameFronts(fronts, plan.Fronts)) continue;                        // a change somewhere else on the map
+                string before = FrontSizes(plan);
                 SetFronts(plan, fronts);
+                Core.Recording.SessionRecorder.Note("plans", "line_moved", plan.Owner, 0, 0, plan.Country, $"plan {plan.Id}: fronts {before} -> {FrontSizes(plan)}");
                 if (!plan.IsAI) { TraceLine(plan); any = true; }
                 Distribute(plan);
             }
@@ -909,7 +927,7 @@ namespace Hoi4.Units
                 var pathfinding = gameState.Pathfinding;
                 if (!ok && pathfinding != null && pathfinding.IsInitialized)
                 {
-                    var path = pathfinding.FindPath(unit.provinceID, fronts[f][0], unit.countryID);
+                    var path = FriendlyPath(unit.provinceID, fronts[f][0], unit.countryID).Path;
                     ok = path != null && path.Count >= 2;
                 }
                 reachCache[key] = ok;
@@ -985,12 +1003,20 @@ namespace Hoi4.Units
             // Left over (the fronts they can reach are full): double up on the nearest slot they can reach
             foreach (var (d, u, s) in pairs)
                 if (!plan.Slot.ContainsKey(u)) plan.Slot[u] = slots[s].province;
+            if (Core.Recording.SessionRecorder.IsRecording)
+            {
+                var parts = new List<string>(fronts.Count);
+                for (int f = 0; f < fronts.Count; f++) parts.Add($"{fronts[f].Count}p:{alloc[f]}/{reachers[f]}");
+                Core.Recording.SessionRecorder.Note("plans", "distribute", plan.Owner, 0, 0, plan.Country,
+                    $"plan {plan.Id}: {ids.Count} divisions, {plan.Slot.Count} slotted; per front provinces:allotted/can_reach {string.Join(" ", parts)}");
+            }
             foreach (ushort u in ids)
                 if (!plan.IsAI && !plan.Slot.ContainsKey(u))
                 {
                     var unit = units.GetUnit(u);
                     if (fronts.Count > 0 && fronts[0].Count > 0) OrderMove(u, unit, fronts[0][0], dryRun: true); // logs why there is no path
                     ArchonLogger.LogWarning($"Hoi4BattlePlans: plan {plan.Id}: unit {u} in province {unit.provinceID} can reach none of the {fronts.Count} fronts", "game_units");
+                    Core.Recording.SessionRecorder.Note("plans", "unreachable", plan.Owner, u, unit.provinceID, 0, $"plan {plan.Id}: can reach none of the {fronts.Count} fronts");
                 }
             Hold(plan, force: true);
         }
@@ -1064,12 +1090,11 @@ namespace Hoi4.Units
         {
             var pathfinding = gameState.Pathfinding;
             if (pathfinding == null || !pathfinding.IsInitialized) return false;
-            var options = Core.Systems.PathOptions.Default;
-            options.Context = Core.Systems.PathContext.Create(unit.countryID, 0);
-            var result = pathfinding.FindPathWithOptions(unit.provinceID, target, options);
+            var result = FriendlyPath(unit.provinceID, target, unit.countryID);
             var path = result.Path;
             if (path == null || path.Count < 2)
             {
+                if (!dryRun) Core.Recording.SessionRecorder.Note("plans", "no_path", unit.countryID, unitId, unit.provinceID, target, $"{result.Status}, {result.NodesExplored} explored");
                 // Diagnostics: why a front division can't march (owner of both ends, search status)
                 if (!log) return false;
                 var provinces = gameState.Provinces;
@@ -1084,8 +1109,41 @@ namespace Hoi4.Units
             // Only decisions (placing a plan, a manual order, an AI attack) are commands; sending these
             // moves as commands too would apply them twice on the other clients and in a replay.
             var type = StarterKit.Initializer.Instance?.UnitSystem?.GetUnitType(unit.unitTypeID);
-            gameState.Units.MovementQueue.StartMovement(unitId, path[1], type?.Speed ?? 3, new List<ushort>(path));
+            var queue = gameState.Units.MovementQueue;
+            if (queue.IsUnitMoving(unitId)) queue.CancelMovement(unitId); // a new march replaces the old one
+            queue.StartMovement(unitId, path[1], type?.Speed ?? 3, new List<ushort>(path));
             return true;
+        }
+
+        /// <summary>
+        /// A path that never enters land held by a country at war with this one. Holding the line is not
+        /// attacking: a march through an enemy province is an attack there (Hoi4Combat), so a plan that
+        /// routed a division to its spot that way had it attack every hour, at any organisation.
+        /// </summary>
+        Core.Systems.PathResult FriendlyPath(ushort from, ushort to, ushort country)
+        {
+            var options = Core.Systems.PathOptions.Default;
+            options.Context = Core.Systems.PathContext.Create(country, 0);
+            options.ForbiddenProvinces = EnemyLand(country);
+            return gameState.Pathfinding.FindPathWithOptions(from, to, options);
+        }
+
+        /// <summary>Land controlled by countries at war with this one, once per hour per country.</summary>
+        HashSet<ushort> EnemyLand(ushort country)
+        {
+            if (enemyLand.TryGetValue(country, out var set)) return set;
+            set = new HashSet<ushort>();
+            var diplomacy = gameState.Diplomacy;
+            var war = new Dictionary<ushort, bool>();
+            foreach (ushort p in landProvinces)
+            {
+                ushort c = Hoi4Occupation.ControllerOf(gameState, p);
+                if (c == 0 || c == country) continue;
+                if (!war.TryGetValue(c, out bool w)) war[c] = w = diplomacy != null && diplomacy.IsAtWar(country, c);
+                if (w) set.Add(p);
+            }
+            enemyLand[country] = set;
+            return set;
         }
 
         // --- Line geometry (prototype: Tools/prototypes/battleplan/battleplan_line.py) ---------------

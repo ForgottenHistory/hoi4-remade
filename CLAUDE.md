@@ -27,6 +27,8 @@ GAME code plugs into the engine through registries, set before the scene loads:
 static void Register() => MapRendererRegistry.BorderClassifier = new Hoi4BorderClassifier();
 ```
 
+Unity runs these methods in every scene, the engine's own StarterKit scene included (the user runs it to check the engine). So every game `RuntimeInitializeOnLoadMethod` that registers or spawns something must start with `if (!Hoi4.Hoi4Scenes.Active) return;`. `Hoi4Scenes` lists the HOI4 scenes. Cache resets at `SubsystemRegistration` don't need the check.
+
 The pattern is shown in `Hoi4BorderClassifier` (`IBorderClassifier`) and `Hoi4MapLabelSource` (which extends `DefaultMapLabelSource`). Both read the extra HOI4 data (states, strategic regions, impassable states, capitals) from `map/hoi4_regions.json5` through `DataFileResolver`, and they fall back to engine defaults when that file is missing.
 
 ### Shaders
@@ -58,6 +60,28 @@ Rerun the converter after changing it. The engine caches decoded images next to 
 ## Prototyping workflow
 
 For tricky map algorithms (border tracing and smoothing, river tracing, label placement), first prototype in Python under `Tools/prototypes/<topic>/` and render preview PNGs to check the result visually. Port to C# or HLSL only after that. Existing prototypes include `borders/trace_borders.py` with `render_borders.py`, `rivers/trace_rivers.py` and `labels/place_labels.py`.
+
+## Session recordings (how to read the game)
+
+The engine provides the mechanism (`Core.Recording.SessionRecorder`, see `Assets/Archon-Engine/Docs/Engine/session-recording.md`). The game decides when to record and which HOI4 tables to add. In the editor, `Hoi4Recorder` (`Assets/Game/Scripts/Units/Hoi4Recorder.cs`) records every play session to `Recordings/<stamp>_<TAG>/` (gitignored; the newest 12 are kept). The files are TSVs that start with `tick` (game hours) and `date`. They cover:
+
+- division changes, plus weekly snapshots;
+- plan figures and fronts;
+- battles every hour;
+- control changes;
+- every executed command;
+- `notes.tsv`, the decisions and why they were made (AI odds, targets and break-offs, plan distribution, retreats);
+- warnings and errors.
+
+When the user reports odd behaviour, read the newest recording before guessing:
+
+```
+python Tools/recorder/report.py [REC]            # overview and anomalies: divisions off the line, stuck, thrashing, AI outcomes
+python Tools/recorder/unit.py [REC] ID           # one division's whole story
+python Tools/recorder/rows.py [REC] FILE col=val --cols a,b   # filter by column name; --schema, --count COL
+```
+
+`rows.py` is the engine's tool (`Assets/Archon-Engine/Tools~/recording/`), pointed at `Recordings/`. `report.py` and `unit.py` are HOI4-specific. New systems should call `SessionRecorder.Note(system, kind, country, unit, province, target, text)` at their decision points.
 
 ## Build and test
 

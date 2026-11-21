@@ -79,6 +79,7 @@ namespace Hoi4.Units
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Spawn()
         {
+            if (!Hoi4.Hoi4Scenes.Active) return; // not in other scenes (the engine's StarterKit scene)
             if (Instance != null) return;
             var go = new GameObject("Hoi4MoveArrows");
             DontDestroyOnLoad(go);
