@@ -16,11 +16,12 @@ namespace Hoi4.Units
         public readonly List<ushort> Targets = new List<ushort>(); // the provinces to take, in the order they were dragged over
         public ushort Target;                       // the middle one: the arrow and the path go there
         public readonly HashSet<ushort> Units = new HashSet<ushort>();
-        // Simulation: HOI4 keeps an offensive line as province points, from an own province on the front through
-        // the enemy's land to the target (the last). The divisions will follow it; the arrow only starts where it
-        // crosses the front (HOI4 draws one bend, not the route).
+        // Presentation (rebuilt with the mesh). Path: HOI4 keeps an offensive line as province points, from an own
+        // province on the front through the enemy's land to the target (the last); the arrow starts where it
+        // crosses the front (HOI4 draws one bend, not the route). Its tie-breaks use the drawn province centres
+        // (floats from a GPU readback), so the simulation must never read it: divisions advance by land hops
+        // to the targets (Advance), and whether a route exists is RouteExists, from adjacency only.
         public List<ushort> Path;
-        // Presentation (rebuilt with the mesh)
         public List<Vector3> Objective;             // the line around the targets, world
         public Vector3 LabelWorld, LabelAhead;
     }
@@ -32,7 +33,8 @@ namespace Hoi4.Units
     /// crosses (green), with HOI4's dashed cursor trail (magnet_line) and dotted line through the picked
     /// provinces (virtual_line); releasing places the plan: an arrow from the front line into the middle of the
     /// targets and an objective line along their far side, in the army's colour. A click without dragging picks
-    /// one province. The selected divisions of that army are assigned to it. Nothing executes yet.
+    /// one province. The selected divisions of that army are assigned to it. They hold the front line until the
+    /// army's play button runs its plans (Advance).
     /// Look: Tools/prototypes/battleplan/offensive.py and drag.py, against HOI4 screenshots (arrowType
     /// move_thick for the arrow, offence_line for the objective line).
     /// </summary>
@@ -308,11 +310,17 @@ namespace Hoi4.Units
 
         static readonly Core.Data.FixedPoint64 PlanningGain = Core.Data.FixedPoint64.FromFraction(2, 100);  // HOI4 PLANNING_GAIN, per day
         static readonly Core.Data.FixedPoint64 PlanningDecay = Core.Data.FixedPoint64.FromFraction(1, 100); // HOI4 PLANNING_DECAY, per day
+        static readonly Core.Data.FixedPoint64 ManualOrderDecay = Core.Data.FixedPoint64.FromFraction(3, 100); // HOI4 PLAYER_ORDER_PLANNING_DECAY, per day
         static readonly Core.Data.FixedPoint64 PlanningMax = Core.Data.FixedPoint64.FromFraction(3, 10);    // HOI4 PLANNING_MAX (techs can raise it)
         public static Core.Data.FixedPoint64 MaxPlanning => PlanningMax;
 
-        /// <summary>Daily: a division on an offensive that stands still on its front line gains planning; one that
-        /// moves, or has no offensive, loses it.</summary>
+        /// <summary>
+        /// Daily (HOI4 wiki "Battle plan", Planning bonus): a division at the starting position of an offensive
+        /// battle plan, i.e. on a front province of its army's front line when the army has an offensive line,
+        /// neither moving nor fighting, gains PLANNING_GAIN up to PLANNING_MAX. Otherwise it loses PLANNING_DECAY,
+        /// or PLAYER_ORDER_PLANNING_DECAY while following a manual order. The bonus raises attack and
+        /// breakthrough by the same percentage (Hoi4Combat).
+        /// </summary>
         void UpdatePlanning()
         {
             var divisions = Hoi4Divisions.Instance;
@@ -325,13 +333,20 @@ namespace Hoi4.Units
             {
                 var d = divisions.Get(u);
                 if (d == null || !units.HasUnit(u)) continue;
-                bool planning = offensiveOf.ContainsKey(u) && !queue.IsUnitMoving(u)
-                    && planOf.TryGetValue(u, out var plan) && plan.FrontProvinces != null
+                bool planning = !queue.IsUnitMoving(u) && !Hoi4Combat.IsFighting(u)
+                    && planOf.TryGetValue(u, out var plan) && !plan.IsAI && plan.FrontProvinces != null
+                    && ArmyHasOffensive(plan.ArmyId)
                     && plan.FrontProvinces.Contains(units.GetUnit(u).provinceID);
                 d.Planning = planning
                     ? Core.Data.FixedPoint64.Min(PlanningMax, d.Planning + PlanningGain)
-                    : Core.Data.FixedPoint64.Max(Core.Data.FixedPoint64.Zero, d.Planning - PlanningDecay);
+                    : Core.Data.FixedPoint64.Max(Core.Data.FixedPoint64.Zero, d.Planning - (manualOrders.ContainsKey(u) ? ManualOrderDecay : PlanningDecay));
             }
+        }
+
+        bool ArmyHasOffensive(int armyId)
+        {
+            foreach (var o in offensives) if (o.ArmyId == armyId) return true;
+            return false;
         }
 
         // --- Executing (HOI4 COrderExecuteCommand: the army's play / stop buttons) ---------------------
@@ -353,13 +368,158 @@ namespace Hoi4.Units
         {
             if (on ? !executing.Add(armyId) : !executing.Remove(armyId)) return;
             Core.Recording.SessionRecorder.Note("plans", on ? "execute" : "stop", owner, 0, 0, 0, $"army {armyId}");
+            DirtyArmy(armyId); // the advancing divisions leave the line, or go back to it
             Changed?.Invoke();
         }
 
-        /// <summary>Hourly: an army without a front line has nothing to run.</summary>
+        /// <summary>Hourly: an army without a front line has nothing to run, and one whose offensives are all done
+        /// (every target taken) stops, like HOI4: the play button has to be pressed again for the next phase.</summary>
         void PruneExecuting()
         {
-            if (executing.RemoveWhere(a => !HasFrontLine(a)) > 0) Changed?.Invoke();
+            var stop = new List<int>();
+            foreach (int a in executing) if (!HasFrontLine(a) || !ArmyHasOffensive(a)) stop.Add(a);
+            if (stop.Count == 0) return;
+            foreach (int a in stop)
+            {
+                executing.Remove(a);
+                Core.Recording.SessionRecorder.Note("plans", "stop", 0, 0, 0, 0, $"army {a}: {(HasFrontLine(a) ? "offensives done" : "no front line")}");
+                DirtyArmy(a);
+            }
+            Changed?.Invoke();
+        }
+
+        /// <summary>The army's front line plans spread their divisions again on the next hour.</summary>
+        void DirtyArmy(int armyId)
+        {
+            foreach (var p in plans) if (!p.IsAI && p.ArmyId == armyId) dirtyPlans.Add(p);
+        }
+
+        // --- Advancing (the plan runs) ----------------------------------------------------------------
+
+        static readonly Core.Data.FixedPoint64 AttackOrganisation = Core.Data.FixedPoint64.Half;                 // of max: rests before attacking below this
+        static readonly Core.Data.FixedPoint64 AttackStrength = Core.Data.FixedPoint64.FromFraction(35, 100);     // of max: too battered to attack
+        static readonly Core.Data.FixedPoint64 BreakOffOrganisation = Core.Data.FixedPoint64.FromFraction(3, 10); // HOI4 LOW_ORG_FOR_ATTACK: breaks off below
+
+        /// <summary>A division on an offensive of an army whose plans run, following its plan (not a manual order):
+        /// it has left the front line to advance.</summary>
+        public bool IsAdvancing(ushort unitId) =>
+            offensiveOf.TryGetValue(unitId, out var o) && executing.Contains(o.ArmyId)
+            && planOf.TryGetValue(unitId, out var plan) && !plan.IsAI && !manualOrders.ContainsKey(unitId);
+
+        /// <summary>
+        /// Hourly, after the lines are held: every idle advancing division takes one step towards its offensive's
+        /// targets, to a neighbour closer to them (land hops through own, allied and enemy land). A step into enemy
+        /// land is an attack (Hoi4Combat holds it at the border until the defenders break or leave; an empty
+        /// province is simply taken, Hoi4Occupation). Of the closer neighbours it takes the one the fewest of the
+        /// offensive's divisions are already heading to, so the offensive spreads over the width of the front;
+        /// ties go to the closer one, then the lower id. A division attacks only with half its organisation and
+        /// 35% strength (it rests in place until then) and breaks off below 30% organisation. When the last target
+        /// falls the offensive ends and the army stops (PruneExecuting); the front line follows the new border.
+        /// Simulation, not commands: every client runs it the same way.
+        /// </summary>
+        void Advance()
+        {
+            if (executing.Count == 0 || offensives.Count == 0) return;
+            var units = gameState.Units;
+            var queue = units.MovementQueue;
+            var divisions = Hoi4Divisions.Instance;
+            var diplomacy = gameState.Diplomacy;
+            bool ordered = false;
+            foreach (var o in offensives)
+            {
+                if (!executing.Contains(o.ArmyId) || o.Units.Count == 0) continue;
+                var enemy = EnemyLand(o.Owner);
+                var dist = TargetDistance(o, enemy, diplomacy);
+                var ids = new List<ushort>(o.Units);
+                ids.Sort();
+                var load = new Dictionary<ushort, int>();
+                foreach (ushort u in ids)
+                {
+                    ushort h = HeadingTo(u);
+                    if (h != 0) load[h] = load.TryGetValue(h, out int n) ? n + 1 : 1;
+                }
+                foreach (ushort u in ids)
+                {
+                    if (!units.HasUnit(u) || !IsAdvancing(u) || Hoi4Combat.IsRetreating(u)) continue;
+                    var d = divisions?.Get(u);
+                    var unit = units.GetUnit(u);
+                    if (queue.IsUnitMoving(u))
+                    {
+                        // Worn down in an attack: break it off and rest
+                        if (d != null && Hoi4Combat.IsFighting(u) && d.Organisation < d.MaxOrganisation * BreakOffOrganisation
+                            && enemy.Contains(HeadingTo(u)))
+                        {
+                            queue.CancelMovement(u);
+                            Core.Recording.SessionRecorder.Note("plans", "break_off", o.Owner, u, unit.provinceID, 0,
+                                $"offensive {o.Id}: org {d.Organisation.ToFloat():0.#}/{d.MaxOrganisation.ToFloat():0.#}");
+                            ordered = true;
+                        }
+                        continue;
+                    }
+                    if (!dist.TryGetValue(unit.provinceID, out int here) || here == 0) continue;
+                    bool canAttack = d == null || (d.Organisation >= d.MaxOrganisation * AttackOrganisation
+                                                   && d.Strength >= d.MaxStrength * AttackStrength);
+                    ushort best = 0;
+                    int bestLoad = int.MaxValue, bestDist = int.MaxValue;
+                    foreach (ushort q in Neighbours(unit.provinceID))
+                    {
+                        if (!dist.TryGetValue(q, out int dq) || dq >= here) continue;
+                        if (enemy.Contains(q) && !canAttack) continue;
+                        int l = load.TryGetValue(q, out int n) ? n : 0;
+                        if (l < bestLoad || (l == bestLoad && (dq < bestDist || (dq == bestDist && q < best))))
+                        {
+                            best = q; bestLoad = l; bestDist = dq;
+                        }
+                    }
+                    if (best == 0 || !StepTo(u, unit, best)) continue;
+                    load[best] = bestLoad + 1;
+                    ordered = true;
+                    Core.Recording.SessionRecorder.Note("plans", enemy.Contains(best) ? "advance_attack" : "advance_move", o.Owner, u, unit.provinceID, best,
+                        $"offensive {o.Id}: {here} -> {bestDist} hops from the targets, {bestLoad} already heading there");
+                }
+            }
+            if (ordered) Hoi4UnitCounters.Instance?.MarkDirty();
+        }
+
+        /// <summary>Land hops from each province to the offensive's nearest target, through land a division of the
+        /// owner may walk: its own, its allies' and its enemies' (not neutrals', not impassable).</summary>
+        Dictionary<ushort, int> TargetDistance(Hoi4Offensive o, HashSet<ushort> enemy, Core.Diplomacy.DiplomacySystem diplomacy)
+        {
+            var dist = new Dictionary<ushort, int>();
+            var queue = new List<ushort>();
+            var targets = new List<ushort>(o.Targets);
+            targets.Sort();
+            foreach (ushort t in targets) if (dist.TryAdd(t, 0)) queue.Add(t);
+            var allied = new Dictionary<ushort, bool>();
+            bool Walkable(ushort p)
+            {
+                if (Hoi4Regions.IsImpassable(p)) return false;
+                if (enemy.Contains(p)) return true;
+                ushort c = Ctrl(p);
+                if (c == o.Owner) return true;
+                if (c == 0 || diplomacy == null) return false;
+                if (!allied.TryGetValue(c, out bool a)) allied[c] = a = diplomacy.AreAllied(o.Owner, c);
+                return a;
+            }
+            for (int i = 0; i < queue.Count; i++)
+            {
+                ushort p = queue[i];
+                int d = dist[p];
+                if (d >= 64) break;
+                foreach (ushort q in Neighbours(p))
+                    if (!dist.ContainsKey(q) && Walkable(q)) { dist[q] = d + 1; queue.Add(q); }
+            }
+            return dist;
+        }
+
+        /// <summary>One march to a neighbouring province (simulation, not a command; see OrderMove).</summary>
+        bool StepTo(ushort unitId, Core.Units.UnitState unit, ushort to)
+        {
+            var type = StarterKit.Initializer.Instance?.UnitSystem?.GetUnitType(unit.unitTypeID);
+            var queue = gameState.Units.MovementQueue;
+            if (queue.IsUnitMoving(unitId)) return false;
+            queue.StartMovement(unitId, to, type?.Speed ?? 3, new List<ushort> { unit.provinceID, to });
+            return true;
         }
 
         // --- Plans (commands) -----------------------------------------------------------------------
@@ -380,9 +540,8 @@ namespace Hoi4.Units
         {
             if (!simReady || !AreOffensiveTargets(owner, armyId, targets)) return null;
             ushort target = targets[targets.Count / 2];
-            var path = OffensivePath(owner, armyId, target);
-            if (path == null) return null;
-            var o = new Hoi4Offensive { Id = nextOffensiveId++, Owner = owner, ArmyId = armyId, Target = target, Path = path };
+            if (!RouteExists(owner, armyId, target)) return null;
+            var o = new Hoi4Offensive { Id = nextOffensiveId++, Owner = owner, ArmyId = armyId, Target = target };
             o.Targets.AddRange(targets);
             var armies = Hoi4Armies.Instance;
             foreach (ushort u in unitIds)
@@ -394,7 +553,8 @@ namespace Hoi4.Units
             }
             offensives.Add(o);
             offensives.RemoveAll(x => x != o && x.Units.Count == 0);
-            Core.Recording.SessionRecorder.Note("plans", "offensive", owner, 0, 0, target, $"offensive {o.Id} army {armyId}: {o.Units.Count} divisions, targets {string.Join(",", targets)}, path {string.Join(",", path)}");
+            DirtyArmy(armyId); // while the army runs, the new offensive's divisions leave the line
+            Core.Recording.SessionRecorder.Note("plans", "offensive", owner, 0, 0, target, $"offensive {o.Id} army {armyId}: {o.Units.Count} divisions, targets {string.Join(",", targets)}");
             dirtyMesh = true;
             Changed?.Invoke();
             return o;
@@ -412,6 +572,7 @@ namespace Hoi4.Units
 
         void RemoveOffensive(Hoi4Offensive o, string why)
         {
+            DirtyArmy(o.ArmyId); // its advancing divisions go back to the line
             offensives.Remove(o);
             foreach (ushort u in o.Units) if (offensiveOf.TryGetValue(u, out var x) && x == o) offensiveOf.Remove(u);
             o.Units.Clear();
@@ -419,8 +580,9 @@ namespace Hoi4.Units
         }
 
         /// <summary>Hourly: divisions that died or left the army drop off, targets taken (or no longer valid) drop
-        /// off; an offensive goes when no target is left, or nobody is assigned.</summary>
-        void PruneOffensives()
+        /// off; an offensive goes when no target is left, nobody is assigned, or (checked when the borders moved)
+        /// its target can no longer be reached from the army's front line.</summary>
+        void PruneOffensives(bool bordersMoved)
         {
             if (offensives.Count == 0) return;
             var units = gameState.Units;
@@ -448,13 +610,7 @@ namespace Hoi4.Units
                 }
                 if (o.Targets.Count == 0) why = "targets taken (or no front line against their holder)";
                 else if (o.Units.Count == 0) why = "no divisions";
-                else if (!PathHolds(o))
-                {
-                    // The front moved: route again from where it is now
-                    o.Path = OffensivePath(o.Owner, o.ArmyId, o.Target);
-                    if (o.Path == null) why = "no route to the target";
-                    any = true;
-                }
+                else if ((bordersMoved || lost > 0) && !RouteExists(o.Owner, o.ArmyId, o.Target)) why = "no route to the target";
                 if (why == null) continue;
                 RemoveOffensive(o, why);
                 any = true;
@@ -464,7 +620,31 @@ namespace Hoi4.Units
             Changed?.Invoke();
         }
 
-        /// <summary>The path still starts in an own province and runs through the target's holder's land.</summary>
+        /// <summary>
+        /// Simulation: one of the army's front provinces against the target's holder borders the holder's land that
+        /// connects to the target (OffensivePath's search, without its drawn tie-breaks, so it is the same on every
+        /// machine).
+        /// </summary>
+        bool RouteExists(ushort owner, int armyId, ushort target)
+        {
+            ushort holder = Ctrl(target);
+            if (holder == 0 || holder == owner) return false;
+            var reach = new HashSet<ushort> { target };
+            var queue = new List<ushort> { target };
+            for (int qi = 0; qi < queue.Count; qi++)
+                foreach (ushort q in Neighbours(queue[qi]))
+                    if (!reach.Contains(q) && Ctrl(q) == holder) { reach.Add(q); queue.Add(q); }
+            foreach (var plan in plans)
+            {
+                if (plan.IsAI || plan.Owner != owner || plan.ArmyId != armyId || plan.Country != holder || plan.FrontProvinces == null) continue;
+                foreach (ushort fp in plan.FrontProvinces)
+                    foreach (ushort q in Neighbours(fp))
+                        if (reach.Contains(q)) return true;
+            }
+            return false;
+        }
+
+        /// <summary>Presentation: the drawn path still starts in an own province and runs through the target's holder's land.</summary>
         bool PathHolds(Hoi4Offensive o)
         {
             if (o.Path == null || o.Path.Count < 2 || Ctrl(o.Path[0]) != o.Owner) return false;
@@ -475,7 +655,7 @@ namespace Hoi4.Units
         }
 
         /// <summary>
-        /// The offensive's province path (prototype: offensive.py offensive_path). Breadth-first from the target
+        /// Presentation: the offensive's province path for the arrow (prototype: offensive.py offensive_path). Breadth-first from the target
         /// through the land of its holder; the start is one of the army's front provinces against that country
         /// with the fewest steps (ties: nearest the target); each step goes to a neighbour one step closer, the one
         /// nearest the straight line from the start to the target. Steps and province ids decide; province
@@ -563,6 +743,7 @@ namespace Hoi4.Units
             AddDragPreview(counters);
             foreach (var o in offensives)
             {
+                if (!PathHolds(o)) o.Path = OffensivePath(o.Owner, o.ArmyId, o.Target); // new, or the front moved
                 if (counters == null || !counters.TryGetProvincePoint(o.Target, out var target)) continue;
                 target.y = 0f;
                 // Several targets: the arrow goes into the middle of the line through their centres

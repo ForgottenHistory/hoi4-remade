@@ -447,8 +447,9 @@ namespace Hoi4.Units
         {
             if (!simReady) return;
             enemyLand.Clear();
+            bool refreshed = borderDirty;
             if (borderDirty) RefreshPlans();
-            PruneOffensives();
+            PruneOffensives(refreshed);
             PruneExecuting();
             if (plans.Count == 0) return;
             var units = gameState.Units;
@@ -481,6 +482,7 @@ namespace Hoi4.Units
                 if (touched.Contains(plan)) { Distribute(plan); playerTouched |= !plan.IsAI; }
                 else Hold(plan);
             }
+            Advance();
             if (playerTouched) Changed?.Invoke();
         }
 
@@ -978,7 +980,7 @@ namespace Hoi4.Units
             if (fronts == null || fronts.Count == 0 || plan.Units.Count == 0) return;
             var units = gameState.Units;
             var ids = new List<ushort>();
-            foreach (ushort u in plan.Units) if (units.HasUnit(u)) ids.Add(u);
+            foreach (ushort u in plan.Units) if (units.HasUnit(u) && !IsAdvancing(u)) ids.Add(u); // advancing ones leave the line
             ids.Sort(); // deterministic order
             if (ids.Count == 0) return;
 
@@ -1121,7 +1123,7 @@ namespace Hoi4.Units
             int ordered = 0, holding = 0, marching = 0, noPath = 0;
             foreach (var kv in plan.Slot)
             {
-                if (!units.HasUnit(kv.Key)) continue;
+                if (!units.HasUnit(kv.Key) || IsAdvancing(kv.Key)) continue;
                 var unit = units.GetUnit(kv.Key);
                 bool moving = queue.IsUnitMoving(kv.Key);
                 if (moving && Hoi4Combat.IsRetreating(kv.Key)) { marching++; continue; } // falling back: back to the line once it stops

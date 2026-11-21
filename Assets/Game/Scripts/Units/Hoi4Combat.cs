@@ -17,7 +17,8 @@ namespace Hoi4.Units
     /// organisation and strength; divisions beyond the combat width wait in reserve. A defender at zero
     /// organisation retreats to a friendly neighbouring province (destroyed when there is none); an
     /// attacker at zero organisation drops its order. Once the target is empty the attackers walk in.
-    /// Left out: terrain, rivers, entrenchment, forts, planning, generals, supply. Occupation is Hoi4Occupation.
+    /// Planning (Hoi4BattlePlans) raises a division's attack and breakthrough by the same percentage.
+    /// Left out: terrain, rivers, entrenchment, forts, generals, supply. Occupation is Hoi4Occupation.
     /// All maths is FixedPoint64 and every loop runs in id order, so a battle ends the same on every machine.
     /// </summary>
     public sealed class Hoi4Combat : MonoBehaviour
@@ -67,6 +68,9 @@ namespace Hoi4.Units
         }
 
         void Awake() => Instance = this;
+
+        /// <summary>In a battle in the last hour, attacking or defending (front line or reserve).</summary>
+        public static bool IsFighting(ushort unitId) => Instance != null && Instance.fighting.Contains(unitId);
 
         /// <summary>A broken division marching to safety (out of the fight; don't give it other orders).</summary>
         public static bool IsRetreating(ushort unitId) => Instance != null && Instance.retreating.Contains(unitId);
@@ -399,8 +403,9 @@ namespace Hoi4.Units
             foreach (var d in front)
             {
                 FP hp = Frac(d); // damage output shrinks with strength
-                soft += d.SoftAttack * hp; hard += d.HardAttack * hp;
-                def += d.Defense * hp; brk += d.Breakthrough * hp;
+                FP plan = hp * (FP.One + d.Planning); // planning: +1% attack and breakthrough per 1%
+                soft += d.SoftAttack * plan; hard += d.HardAttack * plan;
+                def += d.Defense * hp; brk += d.Breakthrough * plan;
                 hardness += d.Hardness; pierce += d.Piercing;
                 armorMax = FP.Max(armorMax, d.Armor); armorSum += d.Armor;
             }
