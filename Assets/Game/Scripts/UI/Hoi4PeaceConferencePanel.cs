@@ -23,7 +23,16 @@ namespace Hoi4.UI
     public sealed class Hoi4PeaceConferencePanel : MonoBehaviour
     {
         const string FlagDir = "gfx/interface/topbar/flags/";
-        static readonly Color DemandOutline = new Color(0.45f, 0.65f, 1f, 1f);
+        // Map stripes (Hoi4MapModes.hlsl Hoi4PeaceOverlay; prototype Tools/prototypes/peace/peace_stripes.py)
+        static readonly Color32 OnTable = new Color32(77, 242, 64, 158);   // green, a = band opacity 0.62
+        static readonly Color32 Demanded = new Color32(77, 140, 255, 194); // blue, 0.76 (blue reads weaker over the land)
+        const int TexWidth = 256;
+        static readonly int PeaceTexId = Shader.PropertyToID("_Hoi4PeaceTex");
+        static readonly int PeaceActiveId = Shader.PropertyToID("_Hoi4PeaceActive");
+        static readonly int PeaceGlowId = Shader.PropertyToID("_Hoi4PeaceGlow");
+        static readonly int HideOccupationId = Shader.PropertyToID("_Hoi4HideOccupation");
+        Texture2D peaceTex;
+        Color32[] peacePixels;
 
         public static Hoi4PeaceConferencePanel Instance { get; private set; }
 
@@ -155,7 +164,11 @@ namespace Hoi4.UI
             loserStates.text = c.States.Count.ToString();
             Hoi4Sprites.Apply(loserFlag, FlagDir + loser + ".png");
             BuildCards();
+            Shader.SetGlobalColor(PeaceGlowId, CountryColor(c.Loser));
+            Shader.SetGlobalFloat(HideOccupationId, 1f);   // the loser in its own colour, as in HOI4
+            Shader.SetGlobalFloat(PeaceActiveId, 1f);
             if (Hoi4UnitCounters.Instance != null) Hoi4UnitCounters.Instance.Hidden = true;
+            if (Hoi4BattlePlans.Instance != null) Hoi4BattlePlans.Instance.Hidden = true;
             HideOtherUi();
             root.style.display = DisplayStyle.Flex;
             Refresh();
@@ -169,8 +182,10 @@ namespace Hoi4.UI
             cards?.Clear();
             cardOf.Clear();
             cardWorld.Clear();
-            Engine.ArchonEngine.Instance?.ProvinceHighlighter?.ClearProvinceSet();
+            Shader.SetGlobalFloat(PeaceActiveId, 0f);
+            Shader.SetGlobalFloat(HideOccupationId, 0f);
             if (Hoi4UnitCounters.Instance != null) Hoi4UnitCounters.Instance.Hidden = false;
+            if (Hoi4BattlePlans.Instance != null) Hoi4BattlePlans.Instance.Hidden = false;
             foreach (var (r, was) in hidden) r.style.display = was;
             hidden.Clear();
             Hoi4UiHover.Remove(hoverLeft);
@@ -315,11 +330,37 @@ namespace Hoi4.UI
                 victorsList.Add(tile);
             }
 
-            var set = new HashSet<ushort>();
-            foreach (int s in demands) foreach (ushort p in Hoi4Regions.ProvincesOf(s)) set.Add(p);
-            var highlighter = Engine.ArchonEngine.Instance?.ProvinceHighlighter;
-            if (set.Count > 0) highlighter?.HighlightProvinceSet(set.Contains, DemandOutline);
-            else highlighter?.ClearProvinceSet();
+            PaintStripes();
+        }
+
+        /// <summary>The loser's states into the province-indexed stripe texture: green on the table, blue demanded.</summary>
+        void PaintStripes()
+        {
+            if (peaceTex == null)
+            {
+                peaceTex = new Texture2D(TexWidth, TexWidth, TextureFormat.RGBA32, false, linear: true)
+                {
+                    filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp, name = "Hoi4PeaceTex"
+                };
+                peacePixels = new Color32[TexWidth * TexWidth];
+            }
+            System.Array.Clear(peacePixels, 0, peacePixels.Length);
+            foreach (int s in conference.States)
+            {
+                var colour = demands.Contains(s) ? Demanded : OnTable;
+                foreach (ushort p in Hoi4Regions.ProvincesOf(s))
+                    if (gameState.Provinces.GetProvinceOwner(p) == conference.Loser) peacePixels[p] = colour;
+            }
+            peaceTex.SetPixelData(peacePixels, 0);
+            peaceTex.Apply(false);
+            Shader.SetGlobalTexture(PeaceTexId, peaceTex);
+        }
+
+        /// <summary>The country's political map colour (its edge glow).</summary>
+        Color CountryColor(ushort country)
+        {
+            var c = gameState.Countries.GetCountryColor(country);
+            return new Color(c.r / 255f, c.g / 255f, c.b / 255f, 1f);
         }
 
         /// <summary>A conference_action_entry_bg row: score icon, cost, state name.</summary>

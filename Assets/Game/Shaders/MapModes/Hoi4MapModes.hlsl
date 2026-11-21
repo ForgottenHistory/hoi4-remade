@@ -27,9 +27,11 @@ float _Hoi4DiplomacyActive;
 // Occupation (Hoi4Occupation): one texel per province ID, 0 = not occupied, else the controlling country.
 // HOI4 paints an occupied province in the controller's colour, so the country blend uses it instead of the owner.
 TEXTURE2D(_Hoi4ControllerTex);
+float _Hoi4HideOccupation; // 1 = owners only (the peace conference shows the loser in its own colour)
 
 uint Hoi4Controller(uint provinceID)
 {
+    if (_Hoi4HideOccupation > 0.5) return 0u;
     return (uint)(LOAD_TEXTURE2D(_Hoi4ControllerTex, int2(provinceID % 256, provinceID / 256)).r + 0.5);
 }
 
@@ -246,11 +248,59 @@ float3 Hoi4PlanOverlay(float3 rgb, ArchonMapContext ctx)
     return lerp(rgb, tint, k) + hot * 0.05;
 }
 
+// Peace conference (Hoi4PeaceConferencePanel): province-indexed RGBA, rgb = band colour (green on the table,
+// blue demanded), a > 0 = one of the loser's states. Broad bands rising to the right at ~35 degrees, 6.4 map px
+// apart, fading in from the country's edge, where a glow of the loser's colour (_Hoi4PeaceGlow) shows; the land
+// between the bands darkens a little. Prototype: Tools/prototypes/peace/peace_stripes.py
+TEXTURE2D(_Hoi4PeaceTex);
+float _Hoi4PeaceActive;
+float4 _Hoi4PeaceGlow;
+
+float3 Hoi4PeaceOverlay(float3 rgb, ArchonMapContext ctx)
+{
+    if (_Hoi4PeaceActive < 0.5 || ctx.provinceID == 0u) return rgb;
+    uint w, h;
+    _ProvinceOwnerTexture.GetDimensions(w, h);
+    float2 texel = 1.0 / float2(w, h);
+
+    // Coverage blurred over a disc (the id texture is pixelated): soft band ends and an inner edge for the glow
+    float cover = 0.0, strong = 0.0;
+    float3 tint = 0.0;
+    const float radius = 1.6; // map px
+    [unroll] for (int i = 0; i < 13; i++)
+    {
+        float ang = i * 2.39996;
+        float r = i == 0 ? 0.0 : radius * sqrt(i / 12.0);
+        float2 uv = ctx.uv + float2(cos(ang), -sin(ang)) * r * texel;
+        uint id = SampleProvinceID(uv);
+        float4 peace = LOAD_TEXTURE2D(_Hoi4PeaceTex, int2(id % 256u, id / 256u));
+        float m = peace.a > 0.01 ? 1.0 : 0.0;
+        cover += m;
+        strong += peace.a * m;
+        tint += peace.rgb * m;
+    }
+    if (cover < 0.5) return rgb;
+    tint /= cover;
+    strong /= cover;   // band opacity: 0.62 on the table, higher for demands
+    cover /= 13.0;
+
+    float2 mapPx = float2(ctx.uv.x * w, (1.0 - ctx.uv.y) * h);
+    float across = -0.5736 * mapPx.x - 0.8192 * mapPx.y;   // 35 degrees, bands rise to the right ('/')
+    float band = saturate((sin(across * 6.2832 / 6.4) + 0.1) / 0.5);
+    float core = saturate((cover - 0.35) / 0.5);
+    float edge = saturate((1.0 - cover) * 2.2) * cover;
+    rgb = lerp(rgb, _Hoi4PeaceGlow.rgb, edge * 0.55);
+    float k = core * band * strong;
+    float dark = core * (1.0 - band) * 0.18;
+    return rgb * (1.0 - k - dark) + tint * k;
+}
+
 // Hoi4Render already lit the pixel
 #define ARCHON_OVERRIDE_LIGHTING
 float4 ArchonLighting(float4 color, ArchonMapContext ctx)
 {
     color.rgb = Hoi4PlanOverlay(color.rgb, ctx);
+    color.rgb = Hoi4PeaceOverlay(color.rgb, ctx);
     return color;
 }
 

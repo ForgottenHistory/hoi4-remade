@@ -1338,14 +1338,22 @@ namespace Hoi4.Units
             }
             planTex.SetPixelData(planPixels, 0);
             planTex.Apply(false);
-            Shader.SetGlobalFloat(PlanActiveId, show ? 1f : 0f);
+            Shader.SetGlobalFloat(PlanActiveId, show && !hidden ? 1f : 0f);
         }
 
         // --- Mesh --------------------------------------------------------------------------------
 
+        /// <summary>Nothing drawn (lines, arrows, the tools' province stripes), e.g. during the peace conference.</summary>
+        public bool Hidden
+        {
+            get => hidden;
+            set { if (hidden == value) return; hidden = value; dirtyTex = true; if (ready) RebuildTexture(); }
+        }
+        bool hidden;
+
         void LateUpdate()
         {
-            if (!ready) return;
+            if (!ready || hidden) return;
             if (dirtyMesh) { dirtyMesh = false; Rebuild(); }
             if (mesh.vertexCount > 0)
                 Graphics.DrawMesh(mesh, Matrix4x4.identity, material, 0);
