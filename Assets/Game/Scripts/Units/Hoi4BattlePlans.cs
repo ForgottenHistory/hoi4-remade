@@ -49,8 +49,9 @@ namespace Hoi4.Units
     /// client and doesn't depend on the renderer. The drawn line is presentation: ribbons built from the
     /// engine's traced border arcs (IBorderArcSource), drawn by Hoi4/PlanLine, for the player's plans only.
     /// The province stripes come from a province-indexed texture (_Hoi4PlanTex) read in Hoi4MapModes.hlsl.
+    /// Offensive plans (arrows to a target province) are in Hoi4BattlePlans.Offensives.cs.
     /// </summary>
-    public sealed class Hoi4BattlePlans : MonoBehaviour
+    public sealed partial class Hoi4BattlePlans : MonoBehaviour
     {
         public static Hoi4BattlePlans Instance { get; private set; }
 
@@ -144,6 +145,7 @@ namespace Hoi4.Units
             if (material != null) Destroy(material);
             if (mesh != null) Destroy(mesh);
             if (planTex != null) Destroy(planTex);
+            DestroyOffensiveDrawing();
         }
 
         IEnumerator Start()
@@ -212,6 +214,7 @@ namespace Hoi4.Units
             planTex.Apply(false);
             Shader.SetGlobalTexture(PlanTexId, planTex);
             Shader.SetGlobalFloat(PlanActiveId, 0f);
+            SetUpOffensiveDrawing(counters);
             ready = true;
             foreach (var plan in plans) if (!plan.IsAI) TraceLine(plan); // placed before drawing was ready
             dirtyMesh = true;
@@ -302,6 +305,7 @@ namespace Hoi4.Units
         public void BeginDrawing()
         {
             if (!ready || !HasArmySelection) return;
+            if (OffensiveActive) CancelOffensive();
             Active = true;
             hoverProvince = 0;
             SetPreview(0);
@@ -319,6 +323,19 @@ namespace Hoi4.Units
         /// <summary>Remove the plans the selected divisions follow.</summary>
         public void DeleteSelectedPlans()
         {
+            // Offensives first: the bin removes those of the selected divisions; with none, their front lines
+            var offensiveIds = new SortedSet<int>();
+            foreach (ushort id in Hoi4UnitSelection.Instance.Selected)
+            {
+                var o = OffensiveOf(id);
+                if (o != null) offensiveIds.Add(o.Id);
+            }
+            if (offensiveIds.Count > 0)
+            {
+                foreach (int oid in offensiveIds)
+                    gameState.TryExecuteCommand(new DeleteOffensiveCommand { CountryId = Player, OffensiveId = oid }, out _);
+                return;
+            }
             var ids = new SortedSet<int>();
             foreach (ushort id in Hoi4UnitSelection.Instance.Selected)
             {
@@ -352,6 +369,7 @@ namespace Hoi4.Units
         /// <summary>Selection click interceptor while the tool is on. Always consumes the click.</summary>
         public bool OnClick(int button, Vector2 screen)
         {
+            if (OffensiveActive) return OnOffensiveClick(button);
             if (!Active) return false;
             if (button == 0 && previewArcs != null && previewArcs.Count > 0) Place();
             else if (button == 1) Cancel();
@@ -403,6 +421,7 @@ namespace Hoi4.Units
         {
             if (!ready) return;
             if (dirtyMesh) { dirtyMesh = false; Rebuild(); }
+            if (OffensiveActive) { UpdateOffensiveTool(); return; }
             if (!Active) return;
             if (Input.GetKeyDown(KeyCode.Escape)) { Cancel(); return; }
             if (!HasArmySelection) { Cancel(); return; }
@@ -429,6 +448,7 @@ namespace Hoi4.Units
             if (!simReady) return;
             enemyLand.Clear();
             if (borderDirty) RefreshPlans();
+            PruneOffensives();
             if (plans.Count == 0) return;
             var units = gameState.Units;
             var queue = units.MovementQueue;
@@ -870,7 +890,12 @@ namespace Hoi4.Units
             dirtyTex = false;
             Array.Clear(planPixels, 0, planPixels.Length);
             bool show = Active && previewArcs != null;
-            if (show)
+            if (OffensiveActive)
+            {
+                PaintOffensiveTargets();
+                show = offensiveTargets.Count > 0;
+            }
+            else if (show)
             {
                 var green = (Color32)previewColor;
                 foreach (ushort p in previewProvinces)
@@ -891,6 +916,7 @@ namespace Hoi4.Units
             if (dirtyMesh) { dirtyMesh = false; Rebuild(); }
             if (mesh.vertexCount > 0)
                 Graphics.DrawMesh(mesh, Matrix4x4.identity, material, 0);
+            DrawOffensiveArrows();
         }
 
         Vector3 PixelToWorld(Vector2 px) =>
@@ -909,6 +935,7 @@ namespace Hoi4.Units
                 foreach (var chain in plan.Chains)
                     AddRibbon(chain, color, 1f);
             }
+            RebuildOffensives();
 
             mesh.Clear();
             if (verts.Count == 0) return;
@@ -1322,7 +1349,8 @@ namespace Hoi4.Units
         void AddRibbon(List<Vector3> pts, Color color, float style)
         {
             if (pts.Count < 2) return;
-            float width = lineWidthPx * worldPerPxX * (style < 0.5f ? previewWidthScale : 1f);
+            float width = style > 1.5f ? objectiveWidthPx * worldPerPxX
+                : lineWidthPx * worldPerPxX * (style < 0.5f ? previewWidthScale : 1f);
             float half = width * 0.5f;
             float dist = 0f;
             int first = verts.Count;

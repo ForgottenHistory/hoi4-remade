@@ -981,6 +981,9 @@ def convert_front_line(hoi4: Path, out: Path):
     # Unconfirmed line while drawing (arrowType magnet_line): the green dashes
     Image.open(src / "stripe_mask.dds").convert("RGBA").save(dst / "preview_mask.png")
     Image.open(src / "stripe_pattern.dds").convert("RGBA").save(dst / "preview_pattern.png")
+    # Offensive plan objective line (arrowType offence_line): band in the bottom rows, a tooth pointing up
+    Image.open(src / "offensive_line_mask.dds").convert("RGBA").save(dst / "offence_mask.png")
+    Image.open(src / "offensive_line.dds").convert("RGBA").save(dst / "offence_pattern.png")
     print("Front line textures")
 
 

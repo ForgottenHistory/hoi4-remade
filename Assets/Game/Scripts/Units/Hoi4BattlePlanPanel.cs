@@ -7,10 +7,11 @@ using UnityEngine.UIElements;
 namespace Hoi4.Units
 {
     /// <summary>
-    /// GAME: the Battle Plans window (HOI4's battleplantools_window, offensive lines only). It shows while a
-    /// division of an army is selected; the front-line button turns the draw tool of Hoi4BattlePlans on, the
-    /// bin removes the plans of the selected divisions. Also writes the text on each placed line:
-    /// "N Divs, army name", along the line's direction.
+    /// GAME: the Battle Plans window (HOI4's battleplantools_window). It shows while a division of an army is
+    /// selected; the front-line button turns the front line tool of Hoi4BattlePlans on, the offence button
+    /// (enabled once the army has a front line) the offensive tool, the bin removes the plans of the selected
+    /// divisions. Also writes the text on each placed line and objective line: "N Divs, army name", along
+    /// the line's direction.
     /// View of the UI Presenter pattern: structure BattlePlanPanel.uxml, look BattlePlanStyle.uss + Hoi4Theme.uss.
     /// </summary>
     public sealed class Hoi4BattlePlanPanel : MonoBehaviour
@@ -18,9 +19,9 @@ namespace Hoi4.Units
         const string Dir = "gfx/interface/battleplans/";
 
         UIDocument document;
-        VisualElement window, labels, front, delete;
+        VisualElement window, labels, front, offence, delete;
         readonly List<Label> labelPool = new List<Label>();
-        bool frontActive;
+        bool frontActive, offenceActive, offenceEnabled = true;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Spawn()
@@ -68,7 +69,15 @@ namespace Hoi4.Units
             labels = content.Q("bp-labels");
             window = content.Q("bp-window");
             Hoi4Sprites.Apply(window.Q("bp-bg"), Dir + "bg.png");
-            Hoi4Sprites.Apply(window.Q("bp-offence"), Dir + "offence_0.png");
+            offence = window.Q("bp-offence");
+            Hoi4Sprites.Apply(offence, Dir + "offence_0.png");
+            offence.RegisterCallback<PointerDownEvent>(e =>
+            {
+                if (e.button != 0) return;
+                var plans = Hoi4BattlePlans.Instance;
+                if (plans.OffensiveActive) plans.CancelOffensive(); else plans.BeginOffensive();
+                e.StopPropagation();
+            });
             front = window.Q("bp-front");
             delete = window.Q("bp-delete");
             Hoi4Sprites.Apply(front, Dir + "defence_0.png");
@@ -96,13 +105,24 @@ namespace Hoi4.Units
         {
             if (window == null) return;
             var plans = Hoi4BattlePlans.Instance;
-            bool show = plans.Active || plans.HasArmySelection;
+            bool show = plans.Active || plans.OffensiveActive || plans.HasArmySelection;
             window.style.display = show ? DisplayStyle.Flex : DisplayStyle.None;
             Hoi4UiHover.Report(this, window);
             if (show && frontActive != plans.Active)
             {
                 frontActive = plans.Active;
                 Hoi4Sprites.Apply(front, Dir + (frontActive ? "defence_1.png" : "defence_0.png"));
+            }
+            if (show && offenceActive != plans.OffensiveActive)
+            {
+                offenceActive = plans.OffensiveActive;
+                Hoi4Sprites.Apply(offence, Dir + (offenceActive ? "offence_1.png" : "offence_0.png"));
+            }
+            bool canOffend = show && (plans.OffensiveActive || plans.CanPlanOffensive);
+            if (canOffend != offenceEnabled)
+            {
+                offenceEnabled = canOffend;
+                offence.EnableInClassList("bp-disabled", !canOffend);
             }
             UpdateLabels(plans);
         }
@@ -119,20 +139,33 @@ namespace Hoi4.Units
                     var a = cam.WorldToScreenPoint(plan.LabelWorld);
                     var b = cam.WorldToScreenPoint(plan.LabelAhead);
                     if (a.z <= 0f) continue;
-                    var label = LabelAt(used++);
-                    label.text = plan.Units.Count + (plan.Units.Count == 1 ? " Div, " : " Divs, ") + ArmyName(armies, plan.ArmyId);
-                    var panel = label.panel;
-                    var pos = RuntimePanelUtils.ScreenToPanel(panel, new Vector2(a.x, Screen.height - a.y));
-                    var ahead = RuntimePanelUtils.ScreenToPanel(panel, new Vector2(b.x, Screen.height - b.y));
-                    float deg = Mathf.Atan2(ahead.y - pos.y, ahead.x - pos.x) * Mathf.Rad2Deg;
-                    if (deg > 90f) deg -= 180f; else if (deg < -90f) deg += 180f; // keep the text upright
-                    label.style.left = pos.x;
-                    label.style.top = pos.y;
-                    label.style.translate = new Translate(Length.Percent(-50), Length.Percent(-50));
-                    label.style.rotate = new Rotate(new Angle(deg, AngleUnit.Degree));
-                    label.style.display = DisplayStyle.Flex;
+                    Place(LabelAt(used++), plan.Units.Count, ArmyName(armies, plan.ArmyId), a, b);
+                }
+            if (cam != null)
+                foreach (var o in plans.Offensives)
+                {
+                    if (o.Objective == null) continue;
+                    var a = cam.WorldToScreenPoint(o.LabelWorld);
+                    var b = cam.WorldToScreenPoint(o.LabelAhead);
+                    if (a.z <= 0f) continue;
+                    Place(LabelAt(used++), o.Units.Count, ArmyName(armies, o.ArmyId), a, b);
                 }
             for (int i = used; i < labelPool.Count; i++) labelPool[i].style.display = DisplayStyle.None;
+        }
+
+        static void Place(Label label, int divisions, string army, Vector3 a, Vector3 b)
+        {
+            label.text = divisions + (divisions == 1 ? " Div, " : " Divs, ") + army;
+            var panel = label.panel;
+            var pos = RuntimePanelUtils.ScreenToPanel(panel, new Vector2(a.x, Screen.height - a.y));
+            var ahead = RuntimePanelUtils.ScreenToPanel(panel, new Vector2(b.x, Screen.height - b.y));
+            float deg = Mathf.Atan2(ahead.y - pos.y, ahead.x - pos.x) * Mathf.Rad2Deg;
+            if (deg > 90f) deg -= 180f; else if (deg < -90f) deg += 180f; // keep the text upright
+            label.style.left = pos.x;
+            label.style.top = pos.y;
+            label.style.translate = new Translate(Length.Percent(-50), Length.Percent(-50));
+            label.style.rotate = new Rotate(new Angle(deg, AngleUnit.Degree));
+            label.style.display = DisplayStyle.Flex;
         }
 
         static string ArmyName(Hoi4Armies armies, int id)

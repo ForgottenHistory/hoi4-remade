@@ -189,8 +189,9 @@ float4 ArchonOcean(ArchonMapContext ctx)
     return Hoi4Render(ctx.uv, ctx.positionWS, 0);
 }
 
-// Battle plan tool (Hoi4BattlePlans): province-indexed RGBA, rgb = colour, a = 0 none / 0.5 striped /
-// 1 the province under the cursor. Striped diagonally, the cursor's province brighter.
+// Battle plan tool (Hoi4BattlePlans): province-indexed RGBA, rgb = colour, a = 0 none / 0.25 offensive
+// target (yellow, broad "/" bands, a glow along the region's edge) / 0.5 striped (front line tool) /
+// 1 the province under the cursor. Prototype: Tools/prototypes/battleplan/offensive.py
 TEXTURE2D(_Hoi4PlanTex);
 float _Hoi4PlanActive;
 
@@ -203,7 +204,7 @@ float3 Hoi4PlanOverlay(float3 rgb, ArchonMapContext ctx)
 
     // The province id texture is hard-edged and pixelated; blur the coverage over a small disc so the
     // striped region has soft edges like HOI4's
-    float cover = 0.0, hot = 0.0;
+    float cover = 0.0, hot = 0.0, offensive = 0.0;
     float3 tint = 0.0;
     const float radius = 1.0; // map px: a European province is ~9 px across
     [unroll] for (int i = 0; i < 13; i++)
@@ -216,14 +217,26 @@ float3 Hoi4PlanOverlay(float3 rgb, ArchonMapContext ctx)
         float m = plan.a > 0.01 ? 1.0 : 0.0;
         cover += m;
         hot += plan.a > 0.75 ? 1.0 : 0.0;
+        offensive += (plan.a > 0.15 && plan.a < 0.35) ? 1.0 : 0.0;
         tint += plan.rgb * m;
     }
     if (cover < 0.5) return rgb;
     tint /= cover;
     cover /= 13.0;
     hot /= 13.0;
+    offensive /= 13.0;
 
     float2 mapPx = float2(ctx.uv.x * w, (1.0 - ctx.uv.y) * h);
+    if (offensive > 0.5)
+    {
+        // HOI4's offensive tool: the enemy's provinces in broad translucent bands rising to the right at
+        // ~25 degrees, brighter along the region's edge (where the blurred coverage falls off)
+        float across = -0.4226 * mapPx.x - 0.9063 * mapPx.y;
+        float band = smoothstep(-0.4, 0.4, sin(across * 6.2832 / 3.3) + 0.2);
+        float edge = saturate((1.0 - cover) * 2.5);
+        float ko = cover * (0.20 + 0.20 * band) + edge * cover * 0.35 + hot * 0.18;
+        return lerp(rgb, tint, ko) + hot * 0.05;
+    }
     float stripe = smoothstep(-0.35, 0.35, sin((mapPx.x + mapPx.y) * 6.2832 / 3.4));
     float k = cover * lerp(0.10, 0.42, stripe) + hot * 0.18;
     return lerp(rgb, tint, k) + hot * 0.05;
