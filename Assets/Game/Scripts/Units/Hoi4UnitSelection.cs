@@ -136,7 +136,10 @@ namespace Hoi4.Units
             if (p == null || !p.HasPlayerCountry) return;
             foreach (ushort id in new List<ushort>(selection))
                 if (gameState.Units.HasUnit(id) && gameState.Units.GetUnit(id).countryID == p.PlayerCountryId)
+                {
+                    Hoi4BattlePlans.Instance?.Unassign(id); // otherwise the plan sends it straight back
                     gameState.Units.MovementQueue.CancelMovement(id);
+                }
             Hoi4UnitCounters.Instance?.MarkDirty();
         }
 
@@ -246,6 +249,7 @@ namespace Hoi4.Units
             {
                 var unit = gameState.Units.GetUnit(id);
                 if (unit.unitCount == 0 || unit.countryID != country) continue;
+                Hoi4BattlePlans.Instance?.Unassign(id); // a manual order overrides the battle plan
                 if (unit.provinceID == target)
                 {
                     if (gameState.Units.MovementQueue.IsUnitMoving(id))
