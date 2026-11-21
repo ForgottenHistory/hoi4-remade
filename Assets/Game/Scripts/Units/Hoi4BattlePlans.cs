@@ -87,6 +87,10 @@ namespace Hoi4.Units
         [Tooltip("Placed front line width in map pixels (HOI4: about 1/6 of a European province)")] public float lineWidthPx = 1.7f;
         [Tooltip("Width of the unconfirmed (dashed) line relative to the placed one")] public float previewWidthScale = 0.75f;
         public Color previewColor = new Color(0.36f, 0.92f, 0.32f, 1f);
+        [Tooltip("A plan under the cursor: its front line, or an offensive's arrow and objective line, turn this colour (HOI4)")]
+        public Color hoverColor = new Color(0.36f, 0.92f, 0.32f, 1f);
+        [Tooltip("Hovering: lines thinner than this on screen are still picked within it (screen px)")]
+        public float hoverMinPx = 5f;
 
         GameState gameState;
         Material material;
@@ -448,6 +452,7 @@ namespace Hoi4.Units
         void Update()
         {
             if (!ready) return;
+            UpdateHover();
             if (dirtyMesh) { dirtyMesh = false; Rebuild(); }
             if (OffensiveActive) { UpdateOffensiveTool(); return; }
             if (!Active) return;
@@ -1051,6 +1056,77 @@ namespace Hoi4.Units
         Vector3 PixelToWorld(Vector2 px) =>
             new Vector3(bounds.x + px.x * worldPerPxX, 0f, bounds.y + (mapHeightPx - px.y) * worldPerPxZ);
 
+        // --- Hover (presentation): the plan under the cursor is drawn green ----------------------------
+
+        Hoi4BattlePlan hoverPlan;
+        int hoverFront = -1;
+        Hoi4Offensive hoverOffensive;
+
+        /// <summary>
+        /// The plan part under the cursor, like HOI4: an offensive (its arrow or its objective line; both light up)
+        /// before a front line (the stretch under the cursor). Picked within the drawn width, at least hoverMinPx
+        /// on screen. Not while a tool is on or the cursor is over a panel.
+        /// </summary>
+        void UpdateHover()
+        {
+            Hoi4BattlePlan plan = null;
+            int front = -1;
+            Hoi4Offensive offensive = null;
+            var cam = Camera.main;
+            var selector = Engine.ArchonEngine.Instance.ProvinceSelector;
+            if (!Active && !OffensiveActive && cam != null && selector != null
+                && !global::Map.CameraControllers.BaseCameraController.ScrollCaptured
+                && selector.TryGetMapPointAtScreenPosition(Input.mousePosition, cam, out var world, out _))
+            {
+                var q = new Vector2(world.x, world.z);
+                float perScreenPx = 2f * Vector3.Distance(cam.transform.position, world) * Mathf.Tan(cam.fieldOfView * 0.5f * Mathf.Deg2Rad) / Mathf.Max(Screen.height, 1);
+                float minR = hoverMinPx * perScreenPx;
+                float best = float.MaxValue;
+                foreach (var o in offensives)
+                {
+                    float r = Mathf.Max(offensiveRibbonPx * worldPerPxX * 0.5f, minR);
+                    float d = Mathf.Min(PolylineDistance(o.HitLine, q), PolylineDistance(o.Objective, q));
+                    float ro = Mathf.Max(objectiveWidthPx * worldPerPxX * 0.75f, minR);
+                    if ((d <= r || PolylineDistance(o.Objective, q) <= ro) && d < best) { best = d; offensive = o; }
+                }
+                if (offensive == null)
+                {
+                    float r = Mathf.Max(lineWidthPx * worldPerPxX * 0.75f, minR);
+                    foreach (var p in plans)
+                    {
+                        if (p.IsAI || p.Chains == null) continue;
+                        for (int c = 0; c < p.Chains.Count; c++)
+                        {
+                            float d = PolylineDistance(p.Chains[c], q);
+                            if (d <= r && d < best) { best = d; plan = p; front = c < p.ChainFront.Count ? p.ChainFront[c] : -1; }
+                        }
+                    }
+                }
+            }
+            if (plan == hoverPlan && front == hoverFront && offensive == hoverOffensive) return;
+            hoverPlan = plan; hoverFront = front; hoverOffensive = offensive;
+            dirtyMesh = true;
+        }
+
+        /// <summary>Distance in the map plane (world xz) from a point to a polyline; MaxValue when there is none.</summary>
+        static float PolylineDistance(List<Vector3> pts, Vector2 q)
+        {
+            if (pts == null || pts.Count == 0) return float.MaxValue;
+            float best = float.MaxValue;
+            var a = new Vector2(pts[0].x, pts[0].z);
+            if (pts.Count == 1) return Vector2.Distance(a, q);
+            for (int i = 1; i < pts.Count; i++)
+            {
+                var b = new Vector2(pts[i].x, pts[i].z);
+                var ab = b - a;
+                float t = ab.sqrMagnitude > 1e-12f ? Mathf.Clamp01(Vector2.Dot(q - a, ab) / ab.sqrMagnitude) : 0f;
+                float d = (a + ab * t - q).sqrMagnitude;
+                if (d < best) best = d;
+                a = b;
+            }
+            return Mathf.Sqrt(best);
+        }
+
         void Rebuild()
         {
             verts.Clear(); colors.Clear(); uvs.Clear(); styles.Clear(); centers.Clear(); tris.Clear();
@@ -1067,7 +1143,8 @@ namespace Hoi4.Units
                 {
                     int f = c < plan.ChainFront.Count ? plan.ChainFront[c] : -1;
                     bool held = f < 0 || f >= counts.Length || counts[f] > 0;
-                    AddRibbon(plan.Chains[c], color, held ? 1f : 5f);
+                    bool hot = plan == hoverPlan && f == hoverFront;
+                    AddRibbon(plan.Chains[c], hot ? hoverColor : color, held ? 1f : 5f);
                 }
             }
             RebuildOffensives();

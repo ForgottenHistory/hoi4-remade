@@ -29,6 +29,7 @@ namespace Hoi4.Units
         public List<Vector3> Objective;             // the line around the targets, world
         public Vector3 LabelWorld, LabelAhead;
         public List<Vector3> LabelPath;             // the objective line around the label (the text bends along it)
+        public List<Vector3> HitLine;               // the arrow's centre line (world, map plane): hovering picks it
         public int LabelAnchor;
     }
 
@@ -913,8 +914,12 @@ namespace Hoi4.Units
             back.y = 0f;
             if (back.sqrMagnitude < 1e-10f) return;
             back.Normalize();
-            var color = Hoi4Armies.ColorOf(o.ArmyId, 0.95f);
+            // Hovered: the arrow and the objective line both turn green
+            var color = o == hoverOffensive ? hoverColor : Hoi4Armies.ColorOf(o.ArmyId, 0.95f);
             var fill = Color.Lerp(color, Color.white, 0.35f);
+            if (o.HitLine == null) o.HitLine = new List<Vector3>();
+            o.HitLine.Clear();
+            for (int k = 0; k <= 32; k++) o.HitLine.Add(Quadratic(root, bend, target, k / 32f));
 
             o.Objective = spine != null ? ObjectiveFarSide(o.Targets, spine, WorldToPixel(root)) : ObjectiveLine(o.Target, target, back);
             if (o.Objective != null && o.Objective.Count >= 2)
