@@ -170,12 +170,13 @@ namespace Hoi4.Units
         public override void Deserialize(BinaryReader r) { CountryId = r.ReadUInt16(); ArmyId = r.ReadInt32(); }
     }
 
-    /// <summary>The player's front line along the border with the target country, held by these divisions
+    /// <summary>The player's front line along the stretch of border with the target country nearest Province, held by these divisions
     /// of the army (those already on another plan stay there).</summary>
     public sealed class PlaceBattlePlanCommand : BaseCommand
     {
         public ushort CountryId;
         public ushort TargetCountry;
+        public ushort Province;      // where it was drawn: the line holds the stretch of border nearest it
         public int ArmyId;
         public List<ushort> UnitIds;
 
@@ -185,7 +186,7 @@ namespace Hoi4.Units
             && Hoi4BattlePlans.Instance.HasBorder(CountryId, TargetCountry);
 
         public override void Execute(GameState gameState) =>
-            Hoi4BattlePlans.Instance.CreatePlan(CountryId, ArmyId, TargetCountry, UnitIds);
+            Hoi4BattlePlans.Instance.CreatePlan(CountryId, ArmyId, TargetCountry, UnitIds, Province);
 
         public override void Undo(GameState gameState) { }
 
@@ -193,6 +194,7 @@ namespace Hoi4.Units
         {
             w.Write(CountryId);
             w.Write(TargetCountry);
+            w.Write(Province);
             w.Write(ArmyId);
             Hoi4CommandIo.WriteIds(w, UnitIds);
         }
@@ -201,6 +203,7 @@ namespace Hoi4.Units
         {
             CountryId = r.ReadUInt16();
             TargetCountry = r.ReadUInt16();
+            Province = r.ReadUInt16();
             ArmyId = r.ReadInt32();
             UnitIds = Hoi4CommandIo.ReadIds(r);
         }

@@ -26,6 +26,10 @@ namespace Hoi4.Units
         public readonly HashSet<ushort> Units = new HashSet<ushort>();
         public List<ushort> FrontProvinces;         // own provinces along the line, in line order (all fronts)
         public List<List<ushort>> Fronts;           // the same per separate stretch of the line (a pocket is its own front); simulation, from adjacency
+        // The stretch of the border this line holds (its own front provinces): player lines cover only the stretch
+        // they were drawn on, like HOI4, so a border split by a third country (Luxembourg between Belgium and
+        // Alsace) is two lines. Follows the border as it moves. Null: the whole border (AI plans).
+        public HashSet<ushort> Section;
         public readonly Dictionary<ushort, ushort> Slot = new Dictionary<ushort, ushort>(); // unit -> the front province it holds
         public readonly Dictionary<(ushort, int), bool> Reach = new Dictionary<(ushort, int), bool>(); // (province, front) reachable by land; cleared with the fronts
         public readonly Dictionary<ushort, int> FrontIndex = new Dictionary<ushort, int>(); // front province -> its front
@@ -414,9 +418,10 @@ namespace Hoi4.Units
             if (selected == null) { Cancel(); return; }
             selected.Sort();
             ushort target = hoverCountry;
+            ushort province = hoverProvince; // picks the stretch of the border
             Active = false;
             SetPreview(0);
-            gameState.TryExecuteCommand(new PlaceBattlePlanCommand { CountryId = Player, TargetCountry = target, ArmyId = army.Id, UnitIds = selected }, out _);
+            gameState.TryExecuteCommand(new PlaceBattlePlanCommand { CountryId = Player, TargetCountry = target, Province = province, ArmyId = army.Id, UnitIds = selected }, out _);
             dirtyMesh = true;
             Changed?.Invoke();
         }
@@ -426,12 +431,14 @@ namespace Hoi4.Units
 
         /// <summary>PlaceBattlePlanCommand: the owner's front line against the country, traced from the
         /// current border, held by these divisions (those already on another plan stay there).</summary>
-        public Hoi4BattlePlan CreatePlan(ushort owner, int armyId, ushort country, List<ushort> unitIds)
+        public Hoi4BattlePlan CreatePlan(ushort owner, int armyId, ushort country, List<ushort> unitIds, ushort province = 0)
         {
             if (!simReady) return null;
-            var fronts = FrontsAgainst(owner, country);
-            if (fronts.Count == 0) return null;
             var plan = new Hoi4BattlePlan { Id = nextId++, Owner = owner, ArmyId = armyId, Country = country };
+            var all = FrontsAgainst(owner, country);
+            plan.Section = StretchAt(all, province);
+            var fronts = FrontsOf(plan, all);
+            if (fronts.Count == 0) return null;
             SetFronts(plan, fronts);
             foreach (ushort u in unitIds)
             {
@@ -683,7 +690,9 @@ namespace Hoi4.Units
             }
             if (country == 0) return;
 
-            var arcs = BorderWith(player, country, previewProvinces);
+            // Only the stretch of the border nearest the cursor (what Place will create)
+            var section = simReady ? StretchAt(FrontsAgainst(player, country), province) : null;
+            var arcs = BorderWith(player, country, previewProvinces, section);
             if (arcs.Count == 0) { previewProvinces.Clear(); return; }
             hoverCountry = country;
             previewArcs = arcs;
@@ -692,7 +701,7 @@ namespace Hoi4.Units
 
         /// <summary>Presentation: the traced arcs between provinces the owner controls and provinces the country
         /// controls (the drawn line); the owner's provinces along them go into ownSide (the preview stripes).</summary>
-        List<BorderArc> BorderWith(ushort owner, ushort country, HashSet<ushort> ownSide)
+        List<BorderArc> BorderWith(ushort owner, ushort country, HashSet<ushort> ownSide, HashSet<ushort> section = null)
         {
             var arcs = new List<BorderArc>();
             if (owner == 0 || !EnsureArcs()) return arcs;
@@ -701,9 +710,12 @@ namespace Hoi4.Units
                 var arc = allArcs[i];
                 ushort a = Hoi4Occupation.ControllerOf(gameState, arc.ProvinceA);
                 ushort b = Hoi4Occupation.ControllerOf(gameState, arc.ProvinceB);
-                if (a == owner && b == country) ownSide.Add(arc.ProvinceA);
-                else if (b == owner && a == country) ownSide.Add(arc.ProvinceB);
+                ushort own;
+                if (a == owner && b == country) own = arc.ProvinceA;
+                else if (b == owner && a == country) own = arc.ProvinceB;
                 else continue;
+                if (!InSection(section, own)) continue; // another stretch of the border
+                ownSide.Add(own);
                 arcs.Add(arc);
             }
             return arcs;
@@ -847,6 +859,104 @@ namespace Hoi4.Units
             return result;
         }
 
+        /// <summary>The fronts grouped into stretches of border: fronts whose provinces touch (a pocket at the main
+        /// line) are one stretch; a third country in between (Luxembourg) splits them. Front indices, in order of the
+        /// lowest front index.</summary>
+        List<List<int>> Stretches(List<List<ushort>> fronts)
+        {
+            var frontOf = new Dictionary<ushort, int>();
+            for (int f = 0; f < fronts.Count; f++) foreach (ushort p in fronts[f]) frontOf[p] = f;
+            var root = new int[fronts.Count];
+            for (int f = 0; f < root.Length; f++) root[f] = f;
+            int Find(int x) { while (root[x] != x) x = root[x] = root[root[x]]; return x; }
+            for (int f = 0; f < fronts.Count; f++)
+                foreach (ushort p in fronts[f])
+                    foreach (ushort n in Neighbours(p))
+                        if (frontOf.TryGetValue(n, out int g))
+                        {
+                            int a = Find(f), b = Find(g);
+                            if (a != b) root[Math.Max(a, b)] = Math.Min(a, b);
+                        }
+            var groups = new SortedDictionary<int, List<int>>();
+            for (int f = 0; f < fronts.Count; f++)
+            {
+                int r = Find(f);
+                if (!groups.TryGetValue(r, out var list)) groups[r] = list = new List<int>();
+                list.Add(f);
+            }
+            return new List<List<int>>(groups.Values);
+        }
+
+        /// <summary>The stretch nearest the province (hops over land, ties: the lower province id), as its front
+        /// provinces; null (the whole border) when no province is given or none is reachable.</summary>
+        HashSet<ushort> StretchAt(List<List<ushort>> fronts, ushort province)
+        {
+            if (province == 0 || fronts.Count == 0) return null;
+            var stretches = Stretches(fronts);
+            var stretchOf = new Dictionary<ushort, int>();
+            for (int s = 0; s < stretches.Count; s++)
+                foreach (int f in stretches[s]) foreach (ushort p in fronts[f]) stretchOf[p] = s;
+            var seen = new HashSet<ushort> { province };
+            var level = new List<ushort> { province };
+            while (level.Count > 0)
+            {
+                ushort best = 0;
+                foreach (ushort p in level) if (stretchOf.ContainsKey(p) && (best == 0 || p < best)) best = p;
+                if (best != 0)
+                {
+                    var set = new HashSet<ushort>();
+                    foreach (int f in stretches[stretchOf[best]]) set.UnionWith(fronts[f]);
+                    return set;
+                }
+                var next = new List<ushort>();
+                foreach (ushort p in level)
+                    foreach (ushort n in Neighbours(p))
+                        if (seen.Add(n)) next.Add(n);
+                level = next;
+            }
+            return null;
+        }
+
+        /// <summary>The fronts a plan holds: all of them for a whole-border plan, else the stretches that keep or
+        /// touch its last provinces (the border moved by a province or two; two stretches that join become one).
+        /// Updates the plan's section to them.</summary>
+        List<List<ushort>> FrontsOf(Hoi4BattlePlan plan, List<List<ushort>> fronts)
+        {
+            if (plan.Section == null) return fronts;
+            var kept = new List<List<ushort>>();
+            foreach (var stretch in Stretches(fronts))
+            {
+                bool touches = false;
+                foreach (int f in stretch)
+                {
+                    foreach (ushort p in fronts[f])
+                    {
+                        if (plan.Section.Contains(p)) { touches = true; break; }
+                        foreach (ushort n in Neighbours(p)) if (plan.Section.Contains(n)) { touches = true; break; }
+                        if (touches) break;
+                    }
+                    if (touches) break;
+                }
+                if (touches) foreach (int f in stretch) kept.Add(fronts[f]);
+            }
+            if (kept.Count > 0)
+            {
+                plan.Section = new HashSet<ushort>();
+                foreach (var f in kept) plan.Section.UnionWith(f);
+            }
+            return kept;
+        }
+
+        /// <summary>An own province's arcs belong to the stretch when it is a front province of it, or an impassable
+        /// province next to one (impassable land is never a front province but its border is still drawn).</summary>
+        bool InSection(HashSet<ushort> section, ushort own)
+        {
+            if (section == null || section.Contains(own)) return true;
+            if (!Hoi4Regions.IsImpassable(own)) return false;
+            foreach (ushort n in Neighbours(own)) if (section.Contains(n)) return true;
+            return false;
+        }
+
         /// <summary>The country's land next to the given provinces, split into connected pieces (id per province,
         /// in the order the provinces list them; sizes filled per id).</summary>
         Dictionary<ushort, int> EnemyPieces(IEnumerable<ushort> along, ushort country, List<int> sizes)
@@ -946,7 +1056,7 @@ namespace Hoi4.Units
         void TraceLine(Hoi4BattlePlan plan)
         {
             if (!ready) { plan.Arcs = new List<BorderArc>(); plan.Chains = new List<List<Vector3>>(); return; }
-            plan.Arcs = BorderWith(plan.Owner, plan.Country, new HashSet<ushort>());
+            plan.Arcs = BorderWith(plan.Owner, plan.Country, new HashSet<ushort>(), plan.Section);
             plan.Chains = new List<List<Vector3>>();
             plan.ChainFront.Clear();
             // Each front is drawn from its own arcs (the own-side province decides), so a pocket that touches the
@@ -999,7 +1109,7 @@ namespace Hoi4.Units
             {
                 // Only a country that gained or lost land can move this line (all of them on the daily pass)
                 if (changedCountries.Count > 0 && !changedCountries.Contains(plan.Owner) && !changedCountries.Contains(plan.Country)) continue;
-                var fronts = FrontsAgainst(plan.Owner, plan.Country);
+                var fronts = FrontsOf(plan, FrontsAgainst(plan.Owner, plan.Country));
                 if (fronts.Count == 0) { RemovePlan(plan); any |= !plan.IsAI; continue; } // nothing left to hold against
                 if (SameFronts(fronts, plan.Fronts)) continue;                        // a change somewhere else on the map
                 string before = FrontSizes(plan);
