@@ -1,0 +1,35 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <ui:VisualElement name="pc-root" class="pc-root" picking-mode="Ignore">
+        <ui:VisualElement name="pc-cards" class="pc-cards" picking-mode="Ignore" />
+
+        <ui:VisualElement name="pc-top" class="spr pc-top" picking-mode="Position">
+            <ui:Label name="pc-title" class="hoi4-label center pc-title" picking-mode="Ignore" />
+            <ui:Label text="Make your Demands" class="hoi4-label center pc-subtitle" picking-mode="Ignore" />
+            <ui:Label name="pc-score" class="hoi4-label center gold pc-score" picking-mode="Ignore" />
+        </ui:VisualElement>
+
+        <ui:VisualElement name="pc-left" class="spr pc-side pc-left" picking-mode="Position">
+            <ui:VisualElement class="spr pc-header" picking-mode="Ignore" />
+            <ui:Label text="MAKE DEMANDS" class="hoi4-label center pc-header-text" picking-mode="Ignore" />
+            <ui:Label text="Select the Demands you want to make." class="hoi4-label pc-hint" picking-mode="Ignore" />
+            <ui:Label text="Current action: Take State" class="hoi4-label pc-hint pc-action" picking-mode="Ignore" />
+            <ui:VisualElement name="pc-loser" class="pc-tile pc-loser" picking-mode="Ignore">
+                <ui:VisualElement name="pc-loser-flag" class="pc-flag" picking-mode="Ignore" />
+                <ui:Label name="pc-loser-name" class="hoi4-label pc-tile-name" picking-mode="Ignore" />
+            </ui:VisualElement>
+            <ui:ScrollView name="pc-states" class="pc-list pc-states" />
+            <ui:VisualElement name="pc-reset" class="pc-button pc-reset" picking-mode="Position">
+                <ui:Label text="Reset" class="hoi4-label center pc-button-text" picking-mode="Ignore" />
+            </ui:VisualElement>
+        </ui:VisualElement>
+
+        <ui:VisualElement name="pc-right" class="spr pc-side pc-right" picking-mode="Position">
+            <ui:VisualElement class="spr pc-header" picking-mode="Ignore" />
+            <ui:Label text="VICTORS" class="hoi4-label center pc-header-text" picking-mode="Ignore" />
+            <ui:ScrollView name="pc-victors" class="pc-list pc-victors" />
+            <ui:VisualElement name="pc-confirm" class="pc-button pc-confirm" picking-mode="Position">
+                <ui:Label text="Confirm and Exit" class="hoi4-label center pc-button-text" picking-mode="Ignore" />
+            </ui:VisualElement>
+        </ui:VisualElement>
+    </ui:VisualElement>
+</ui:UXML>

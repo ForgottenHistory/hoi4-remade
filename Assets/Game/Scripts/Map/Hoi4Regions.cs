@@ -19,6 +19,9 @@ namespace Hoi4.Map
         private static readonly Dictionary<ushort, int> provinceRegion = new Dictionary<ushort, int>();
         private static readonly HashSet<ushort> water = new HashSet<ushort>();
         private static readonly HashSet<int> impassableStates = new HashSet<int>();
+        private static readonly Dictionary<int, List<ushort>> stateProvinces = new Dictionary<int, List<ushort>>();
+        private static readonly Dictionary<string, ushort> capitals = new Dictionary<string, ushort>();
+        private static readonly List<int> stateIds = new List<int>();
         private static bool loaded;
         private static bool available;
 
@@ -39,6 +42,25 @@ namespace Hoi4.Map
 
         /// <summary>Province lies in an impassable state (HOI4 mountains, deserts, ice no unit may enter).</summary>
         public static bool IsImpassable(ushort province) => IsImpassableState(State(province));
+
+        /// <summary>The provinces of a state, sorted (empty when unknown).</summary>
+        public static IReadOnlyList<ushort> ProvincesOf(int state) =>
+            EnsureLoaded() && stateProvinces.TryGetValue(state, out var l) ? l : (IReadOnlyList<ushort>)System.Array.Empty<ushort>();
+
+        /// <summary>Every state id, sorted.</summary>
+        public static IReadOnlyList<int> States => EnsureLoaded() ? stateIds : (IReadOnlyList<int>)System.Array.Empty<int>();
+
+        /// <summary>A country's capital province (HOI4 history), 0 when unknown.</summary>
+        public static ushort Capital(string tag) =>
+            EnsureLoaded() && tag != null && capitals.TryGetValue(tag, out ushort p) ? p : (ushort)0;
+
+        [UnityEngine.RuntimeInitializeOnLoadMethod(UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void Reset()
+        {
+            provinceState.Clear(); provinceRegion.Clear(); water.Clear(); impassableStates.Clear();
+            stateProvinces.Clear(); capitals.Clear(); stateIds.Clear();
+            loaded = false; available = false;
+        }
 
         private static bool EnsureLoaded()
         {
@@ -61,6 +83,16 @@ namespace Hoi4.Map
                     foreach (var v in imp) impassableStates.Add((int)v);
                 if (root["water_provinces"] is JArray wat)
                     foreach (var v in wat) water.Add((ushort)(int)v);
+                foreach (var kv in provinceState)
+                {
+                    if (!stateProvinces.TryGetValue(kv.Value, out var list)) stateProvinces[kv.Value] = list = new List<ushort>();
+                    list.Add(kv.Key);
+                }
+                foreach (var list in stateProvinces.Values) list.Sort();
+                stateIds.AddRange(stateProvinces.Keys);
+                stateIds.Sort();
+                if (root["capitals"] is JObject caps)
+                    foreach (var c in caps.Properties()) capitals[c.Name] = (ushort)(int)c.Value;
 
                 ArchonLogger.Log($"Hoi4Regions: {provinceState.Count} provinces in states, {provinceRegion.Count} in " +
                                  $"strategic regions, {impassableStates.Count} impassable states, {water.Count} water", "map_initialization");

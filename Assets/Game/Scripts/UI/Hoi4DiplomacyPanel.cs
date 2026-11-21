@@ -216,12 +216,21 @@ namespace Hoi4.UI
             else
             {
                 int tick = (int)gameState.Time.CurrentTick;
-                opinion.text = $"Opinion of us: {diplomacy.GetOpinion(target, player, tick).ToInt():+0;-0;0}";
+                opinion.text = war
+                    ? $"Surrender: theirs {SurrenderText(target)}, ours {SurrenderText(player)}"
+                    : $"Opinion of us: {diplomacy.GetOpinion(target, player, tick).ToInt():+0;-0;0}";
             }
 
             action.style.display = self ? DisplayStyle.None : DisplayStyle.Flex;
             action.EnableInClassList("war", !war);
             actionText.text = war ? "Make Peace" : "Declare War";
+        }
+
+        /// <summary>HOI4 surrender progress (Hoi4War): 100% is capitulation.</summary>
+        static string SurrenderText(ushort country)
+        {
+            var war = Hoi4.War.Hoi4War.Instance;
+            return war != null ? $"{(war.SurrenderProgress(country) * 100).ToInt()}%" : "?";
         }
 
         void OnAction()

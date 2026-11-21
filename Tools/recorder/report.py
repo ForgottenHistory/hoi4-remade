@@ -322,6 +322,14 @@ def main():
                           f"{eq_made[c][x]:,}/{eq_given[c][x]:,}/{eq_stock.get(c, {}).get(x, 0):,}" for x in arch)
         print(f"{c:8} {cells}")
 
+    # --- war: capitulations and peace deals (Hoi4War / Hoi4PeaceConference) ---------------------------
+    print("\n## War (capitulations and peace deals)")
+    war_notes = [r for r in notes if r["system"] == "war"]
+    if not war_notes:
+        print("none")
+    for r in war_notes:
+        print(f"{r['date']}  {r['country']:6} {r['kind']:12} {r['text']}")
+
     print("\n## Commands")
     for k, n in Counter(r["command"] for r in cmds).most_common():
         print(f"{n:7}  {k}")

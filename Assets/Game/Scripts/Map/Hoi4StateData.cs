@@ -32,6 +32,9 @@ namespace Hoi4.Map
             public Dictionary<int, int> VictoryPoints = new Dictionary<int, int>();
             public Dictionary<string, int> Buildings = new Dictionary<string, int>();
             public Dictionary<int, Dictionary<string, int>> Provincial = new Dictionary<int, Dictionary<string, int>>();
+            public double Value;           // HOI4 state value at the start (peace conference costs and score)
+            public bool HasCenter;
+            public int CenterX, CenterY;   // centre on the map, px (y down): peace conference influence distances
         }
 
         /// <summary>Order of GFX_resources_strip frames (common/resources icon_frame 1..7).</summary>
@@ -86,7 +89,14 @@ namespace Hoi4.Map
                         Category = (string)j["category"] ?? "",
                         Manpower = (int?)j["manpower"] ?? 0,
                         Owner = (string)j["owner"] ?? "",
+                        Value = (double?)j["value"] ?? 0.0,
                     };
+                    if (j["center"] is JArray centre && centre.Count == 2)
+                    {
+                        s.HasCenter = true;
+                        s.CenterX = (int)centre[0];
+                        s.CenterY = (int)centre[1];
+                    }
                     if (j["cores"] is JArray cores) foreach (var c in cores) s.Cores.Add((string)c);
                     Fill(j["resources"] as JObject, s.Resources);
                     if (j["vps"] is JObject vps) foreach (var v in vps.Properties()) s.VictoryPoints[int.Parse(v.Name)] = (int)v.Value;

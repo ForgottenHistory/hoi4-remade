@@ -56,6 +56,7 @@ namespace Hoi4.Units
             Hoi4Equipment.Instance?.SimulateDay(); // production and equipment deliveries
             Hoi4Manpower.Instance?.SimulateDay(); // manpower growth, men delivered, strength follows
             Hoi4BattlePlans.Instance?.SimulateDay();
+            Hoi4.War.Hoi4War.Instance?.SimulateDay(); // surrender progress and capitulation (may open the peace conference)
             if (RunsAI) Hoi4EnemyAI.Instance?.SimulateDay();
         }
 

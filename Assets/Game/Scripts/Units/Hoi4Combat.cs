@@ -319,8 +319,14 @@ namespace Hoi4.Units
             FP onD = Hits(aAttacks, dDef / 10) * aPierceFactor;
             FP onA = Hits(dAttacks, aBrk / 10) * dPierceFactor;
 
-            Hurt(dFront, onD * OrgPerHit * dDie * OrgScale, onD * HpPerHit * HpScale);
-            Hurt(aFront, onA * OrgPerHit * aDie * OrgScale, onA * HpPerHit * HpScale);
+            Hurt(dFront, onD * OrgPerHit * dDie * OrgScale, onD * HpPerHit * HpScale, out FP dLost, out FP dMen);
+            Hurt(aFront, onA * OrgPerHit * aDie * OrgScale, onA * HpPerHit * HpScale, out FP aLost, out FP aMen);
+            var war = Hoi4.War.Hoi4War.Instance; // war participation: damage and casualties dealt
+            if (war != null)
+            {
+                war.CreditDamage(aFront, dFront, dLost, dMen);
+                war.CreditDamage(dFront, aFront, aLost, aMen);
+            }
 
             FP aOrg = FP.Zero, aMax = FP.Zero, dOrg = FP.Zero, dMax = FP.Zero;
             foreach (var d in attackers) { aOrg += d.Organisation; aMax += d.MaxOrganisation; }
@@ -496,9 +502,10 @@ namespace Hoi4.Units
             return piercing * 4 >= armor * 3 ? Pierce80 : piercing * 2 >= armor ? Pierce65 : FP.Half;
         }
 
-        /// <summary>Spread a side's damage evenly over its front divisions.</summary>
-        void Hurt(List<Hoi4Division> front, FP org, FP hp)
+        /// <summary>Spread a side's damage evenly over its front divisions; strength and men it lost come back out.</summary>
+        void Hurt(List<Hoi4Division> front, FP org, FP hp, out FP strengthLost, out FP menLost)
         {
+            strengthLost = menLost = FP.Zero;
             if (front.Count == 0) return;
             FP orgEach = org / front.Count, hpEach = hp / front.Count;
             foreach (var d in front)
@@ -506,7 +513,8 @@ namespace Hoi4.Units
                 d.Organisation = FP.Max(FP.Zero, d.Organisation - orgEach);
                 FP before = d.Strength;
                 d.Strength = FP.Max(FP.Zero, d.Strength - hpEach);
-                d.TakeLosses(before - d.Strength); // men and 70% of the equipment go with the strength
+                strengthLost += before - d.Strength;
+                menLost += d.TakeLosses(before - d.Strength); // men and 70% of the equipment go with the strength
                 if (d.Strength <= FP.Zero) destroyed.Add(d.UnitId);
             }
         }

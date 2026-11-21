@@ -59,7 +59,7 @@ Rerun the converter after changing it. The engine caches decoded images next to 
 
 ## Prototyping workflow
 
-For tricky map algorithms (border tracing and smoothing, river tracing, label placement), first prototype in Python under `Tools/prototypes/<topic>/` and render preview PNGs to check the result visually. Port to C# or HLSL only after that. Existing prototypes include `borders/trace_borders.py` with `render_borders.py`, `rivers/trace_rivers.py` and `labels/place_labels.py`.
+For tricky map algorithms (border tracing and smoothing, river tracing, label placement), first prototype in Python under `Tools/prototypes/<topic>/` and render preview PNGs to check the result visually. Port to C# or HLSL only after that. Existing prototypes include `borders/trace_borders.py` with `render_borders.py`, `rivers/trace_rivers.py`, `labels/place_labels.py` and `peace/peace_conference.py` (peace conference costs and score, checked against a live HOI4 conference).
 
 ## Session recordings (how to read the game)
 

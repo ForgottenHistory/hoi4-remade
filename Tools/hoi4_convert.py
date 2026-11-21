@@ -482,6 +482,20 @@ def convert(hoi4: Path, out: Path):
     water_px = found & water_keys[idx]
     prov_ids = np.array([p[0] for p in provinces], dtype=np.int32)[order]
     write_river_crossings(hoi4, out, np.where(found & ~water_px, prov_ids[idx], 0))
+    # State centres (mean pixel of their land, map px, y down): the peace conference's influence distances
+    land_ids = np.where(found & ~water_px, prov_ids[idx], 0)
+    state_lut = np.zeros(int(land_ids.max()) + 1, dtype=np.int64)
+    for pid, sid in province_state.items():
+        if pid < len(state_lut):
+            state_lut[pid] = sid
+    state_px = state_lut[land_ids]
+    sy, sx = np.nonzero(state_px)
+    sv = state_px[sy, sx]
+    n_px = np.bincount(sv)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        mx = np.bincount(sv, weights=sx) / n_px
+        my = np.bincount(sv, weights=sy) / n_px
+    state_centers = {int(s): [int(round(mx[s])), int(round(my[s]))] for s in np.nonzero(n_px)[0]}
     convert_gfx(hoi4, out, water_px)
 
     (out / "map" / "default.json5").write_text(
@@ -507,9 +521,9 @@ def convert(hoi4: Path, out: Path):
     convert_army_cards(hoi4, out)
     convert_battleplan_gfx(hoi4, out)
     convert_front_line(hoi4, out)
-    convert_state_view(hoi4, out)
+    convert_state_view(hoi4, out, state_centers)
     convert_move_arrow(hoi4, out)
-    write_country_stats(out, tags, country_stats, owner_manpower)
+    write_country_stats(out, tags, country_stats, owner_manpower, ruling_party)
     convert_topbar(hoi4, out, {t: ruling_party.get(t) or "neutrality" for t in tags})
 
     # HOI4 visual style data for the GAME terrain shader
@@ -1151,11 +1165,12 @@ def convert_move_arrow(hoi4: Path, out: Path, arrow_name="move_thick"):
     print(f"Move arrow: {arrow_name} {params['body_width']} head {params['head_length']}")
 
 
-def write_country_stats(out: Path, tags, country_stats, owner_manpower):
+def write_country_stats(out: Path, tags, country_stats, owner_manpower, ruling_party=None):
     """common/hoi4_country_stats.json5: per country starting stability, war support (0..1),
     population of its owned core states and of its owned non-core states (sums of the states' `manpower`),
     and conscription (mobilisation law factor), for the GAME top bar and manpower pool. HOI4 recruitable
-    manpower = (population + non-core population * LOCAL_MANPOWER_ACCESSIBLE_NON_CORE_FACTOR) * conscription."""
+    manpower = (population + non-core population * LOCAL_MANPOWER_ACCESSIBLE_NON_CORE_FACTOR) * conscription.
+    `ideology` is the ruling party's ideology group at the start (peace conference cost modifiers)."""
     lines = ["// Generated from HOI4 history/countries (set_stability, set_war_support, mobilisation law)",
              "// and history/states (state manpower = population, summed per owner; core states apart from non-core)", "{"]
     for tag in tags:
@@ -1163,7 +1178,8 @@ def write_country_stats(out: Path, tags, country_stats, owner_manpower):
         lines.append(f"  {tag}: {{ stability: {st.get('stability', 0.5)}, war_support: {st.get('war_support', 0.5)}, "
                      f"population: {owner_manpower.get((tag, True), 0)}, "
                      f"noncore_population: {owner_manpower.get((tag, False), 0)}, "
-                     f"conscription: {st.get('conscription', 0.015)} }},")
+                     f"conscription: {st.get('conscription', 0.015)}, "
+                     f"ideology: \"{(ruling_party or {}).get(tag) or 'neutrality'}\" }},")
     lines.append("}")
     (out / "common" / "hoi4_country_stats.json5").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -1388,10 +1404,13 @@ STATEVIEW_SPRITES = {
 }
 
 
-def convert_state_view(hoi4: Path, out: Path):
+def convert_state_view(hoi4: Path, out: Path, state_centers=None):
     """HOI4 state view data and sprites for the GAME state panel (Hoi4StatePanel.cs):
     map/hoi4_state_data.json5 (building definitions, state categories, per-state owner, cores,
-    manpower, resources, victory points, buildings at the 1936 start) and gfx/interface/stateview/."""
+    manpower, resources, victory points, buildings at the 1936 start) and gfx/interface/stateview/.
+    Each state also gets its HOI4 state value at the start (`value`: 10 + 1 per 100,000 people + base resources
+    + 4 per building slot of its category + the `value` of its state buildings; provincial ones don't count, checked
+    against a live peace conference) and its centre on the map (`center`, map px) for the peace conference."""
     import hoi4_gui as gui
     dst = out / "gfx" / "interface" / "stateview"
     (dst / "terrain").mkdir(parents=True, exist_ok=True)
@@ -1420,6 +1439,8 @@ def convert_state_view(hoi4: Path, out: Path):
             continue
         cap = get(body, "level_cap", [])
         d = {"frame": int(get(body, "icon_frame", 0) or 0), "coastal": get(body, "only_costal") == "yes"}
+        if get(body, "value") is not None:
+            d["value"] = float(get(body, "value"))  # peace conference / state value points per level
         if isinstance(cap, list):
             d["shared"] = get(cap, "shares_slots") == "yes"
             if get(cap, "state_max") is not None:
@@ -1497,6 +1518,11 @@ def convert_state_view(hoi4: Path, out: Path):
             e["buildings"] = sb
         if pb:
             e["provincial"] = {str(p): b for p, b in pb.items()}
+        e["value"] = round(10 + e["manpower"] / 100000 + sum(e.get("resources", {}).values())
+                           + 4 * categories.get(e["category"], 0)
+                           + sum(defs.get(k, {}).get("value", 0) * n for k, n in sb.items()), 2)
+        if state_centers and int(sid) in state_centers:
+            e["center"] = state_centers[int(sid)]
         states[sid] = e
 
     # small shield flags (GFX_flag_small2) for owners and cores

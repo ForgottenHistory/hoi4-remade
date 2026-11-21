@@ -197,6 +197,8 @@ namespace Hoi4.Units
 
         bool OnClick(int button, Vector2 screen)
         {
+            var peace = Hoi4.UI.Hoi4PeaceConferencePanel.Instance; // the peace conference owns the map while open
+            if (peace != null && peace.OnClick(button, screen)) return true;
             if (Hoi4BattlePlans.Instance != null && Hoi4BattlePlans.Instance.OnClick(button, screen)) return true;
             var counters = Hoi4UnitCounters.Instance;
             if (button == 0)

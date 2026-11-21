@@ -20,7 +20,9 @@
 
 **Data:** One Python converter turns the HOI4 install into an Archon data directory
 
-**Not Implemented:** production control (only the 1936 lines run), research, politics, supply, terrain and entrenchment in combat, generals, air and naval, saving/loading of HOI4-specific state, multiplayer in practice
+**War and peace:** War participation, surrender progress from victory points, capitulation, a basic peace conference (take states)
+
+**Not Implemented:** production control (only the 1936 lines run), research, politics, supply, generals, air and naval, factions, conditional surrender, saving/loading of HOI4-specific state, multiplayer in practice
 
 The goal is to stress-test Archon-Engine, not to ship a game. Big visual wins are preferred over exact HOI4 fidelity.
 
@@ -92,6 +94,15 @@ The goal is to stress-test Archon-Engine, not to ship a game. Big visual wins ar
 
 ---
 
+## War and Peace
+
+- **War participation** - Per country against each enemy (HOI4 defines): 0.1 per strength point of damage dealt, 0.5 per 1,000 casualties inflicted, and per province taken 0.2 per victory point plus 0.2 x its share of the state's value. A winner's participation is its share of its side's points
+- **Surrender progress** - The share of a country's victory points its enemies hold, over the 80% surrender limit (provinces when it has no victory points). Shown in the diplomacy panel for both sides of a war
+- **Capitulation** - At 100%, once the war is 7 days old: the loser's divisions disband, its land not yet held by a winner goes to the winner it capitulates to (the one holding its capital, else the one with the most participation), and a peace conference opens among everyone at war with it. The conference hides the rest of the UI and the unit counters until it ends
+- **After the peace** - Divisions left on land their country may not enter (no war, alliance or military access) go to their capital
+- **Peace conference** - Basic HOI4 version, checked against a live conference (`Tools/prototypes/peace/`): score = 1.35 x the value of the loser's states the winners control, shared by participation. Take State only, one turn, no contests. Cost = state value (10 + population / 100,000 + resources + 4 x category slots + building values) x ideology (democratic 1.3, fascist 0.9) x 0.8 when the taker controls it (x 10 when no winner does) x influence (0.7 to 1.0 by distance to the taker's capital, cores and controlled states, cheaper next to states already demanded). With the player among the winners the game pauses on the conference screen: Make Demands on the left (Select All, Reset), the victors on the right, cost cards on the map (click a state to demand it), Confirm and Exit. The AI winners then take the states they control, best value for the cost first. Taken states change owner, the rest of the occupation ends, the wars end
+- **Command** - `PeaceDealCommand` carries the player's demands
+
 ## AI
 
 - **Front lines** - Each AI country at war gets an (undrawn) front line per enemy it borders, holding all its idle divisions
@@ -161,4 +172,5 @@ Tricky map algorithms are prototyped in Python under `Tools/prototypes/<topic>/`
 - Province selection does not persist after the state panel closes (HOI4 keeps it)
 - Only land units exist; no air or naval
 - Political power only counts up; nothing spends it
+- Peace conferences are one turn with Take State only: no puppets, liberation, government change, contests, compliance or war goals; war participation ignores air and naval and the attacker-and-winner bonus
 - Plan confidence indicator on army cards is always the tick

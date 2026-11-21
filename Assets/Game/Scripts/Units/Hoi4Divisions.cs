@@ -65,15 +65,18 @@ namespace Hoi4.Units
         /// <summary>The strength its equipment and men allow: what reinforcement refills to, and "fully rested" for orders.</summary>
         public FP FullStrength => MaxStrength * FP.Min(EquipmentLevel, ManpowerLevel);
 
-        /// <summary>Battle damage: men lost with the strength, and 70% of the equipment (the rest is recovered).</summary>
-        public void TakeLosses(FP strengthLost)
+        /// <summary>Battle damage: men lost with the strength, and 70% of the equipment (the rest is recovered).
+        /// Returns the men lost (casualties, for war score).</summary>
+        public FP TakeLosses(FP strengthLost)
         {
-            if (MaxStrength <= FP.Zero || strengthLost <= FP.Zero) return;
+            if (MaxStrength <= FP.Zero || strengthLost <= FP.Zero) return FP.Zero;
             FP share = FP.Min(FP.One, strengthLost / MaxStrength);
+            FP before = Men;
             Men = FP.Max(FP.Zero, Men - FP.FromInt(Manpower) * share);
-            if (Need == null) return;
-            for (int a = 0; a < Need.Length; a++)
-                Have[a] = FP.Max(FP.Zero, Have[a] - Need[a] * share * EquipmentLossFactor);
+            if (Need != null)
+                for (int a = 0; a < Need.Length; a++)
+                    Have[a] = FP.Max(FP.Zero, Have[a] - Need[a] * share * EquipmentLossFactor);
+            return before - Men;
         }
 
         public static readonly FP EquipmentLossFactor = FP.FromFraction(7, 10); // HOI4 EQUIPMENT_COMBAT_LOSS_FACTOR

@@ -1,0 +1,76 @@
+/* HOI4 peace conference (basic): a score panel at the top, Make Demands on the left, the victors on the right,
+   the map between them with a cost card on each of the loser's states. HOI4 pixel coordinates like the other panels. */
+.pc-root { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
+.pc-cards { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
+
+.pc-top {
+    --sprite: "gfx/interface/unitpanel/window.png";
+    position: absolute; left: 50%; translate: -50% 0; top: 70px; width: 440px; height: 108px;
+    -unity-slice-left: 64; -unity-slice-right: 64; -unity-slice-top: 64; -unity-slice-bottom: 44;
+}
+.pc-title { left: 0; top: 10px; width: 440px; height: 30px; font-size: 22px; letter-spacing: 3px; }
+.pc-subtitle { left: 0; top: 42px; width: 440px; height: 22px; font-size: 16px; }
+.pc-score { left: 0; top: 66px; width: 440px; height: 28px; font-size: 19px; }
+
+.pc-side {
+    --sprite: "gfx/interface/unitpanel/window.png";
+    position: absolute; top: 110px; bottom: 60px; width: 340px;
+    -unity-slice-left: 64; -unity-slice-right: 64; -unity-slice-top: 64; -unity-slice-bottom: 64;
+}
+.pc-left { left: 0; }
+.pc-right { right: 0; }
+.pc-header { --sprite: "gfx/interface/unitpanel/header.png"; left: 12px; top: 10px; width: 316px; height: 35px; }
+.pc-header-text { left: 12px; top: 10px; width: 316px; height: 35px; font-size: 19px; letter-spacing: 4px; }
+.pc-hint { left: 18px; top: 52px; width: 304px; height: 20px; font-size: 14px; }
+.pc-action { top: 72px; color: rgb(240, 200, 80); }
+
+.pc-tile {
+    position: absolute; left: 14px; width: 312px; height: 44px;
+    background-color: rgba(60, 70, 50, 0.9); border-width: 1px; border-color: rgb(150, 160, 110);
+}
+.pc-loser { top: 100px; }
+.pc-flag { position: absolute; left: 6px; top: 6px; width: 44px; height: 30px; }
+.pc-tile-name { left: 58px; top: 0; width: 250px; height: 42px; font-size: 18px; }
+
+.pc-list { position: absolute; left: 14px; width: 312px; }
+.pc-states { top: 150px; bottom: 60px; }
+.pc-victors { top: 54px; bottom: 60px; }
+
+.pc-row {
+    flex-direction: row; height: 30px; margin-bottom: 2px;
+    background-color: rgba(40, 60, 36, 0.9); border-width: 1px; border-color: rgb(80, 110, 70);
+}
+.pc-row:hover { background-color: rgba(56, 86, 50, 0.95); }
+.pc-row.demanded { background-color: rgba(40, 70, 120, 0.95); border-color: rgb(120, 160, 220); }
+.pc-row.unaffordable { background-color: rgba(40, 40, 40, 0.9); border-color: rgb(70, 70, 70); }
+.pc-row.taken { background-color: rgba(30, 30, 30, 0.8); border-color: rgb(60, 60, 60); }
+.pc-row-cost { position: relative; width: 70px; height: 28px; font-size: 15px; -unity-text-align: middle-right; padding-right: 10px; color: rgb(240, 200, 80); }
+.pc-row-name { position: relative; width: 230px; height: 28px; font-size: 15px; -unity-text-align: middle-left; }
+.pc-row.unaffordable .pc-row-cost { color: rgb(150, 120, 110); }
+.pc-row.unaffordable .pc-row-name { color: rgb(150, 150, 150); }
+
+.pc-victor { margin-bottom: 6px; background-color: rgba(60, 70, 50, 0.9); border-width: 1px; border-color: rgb(150, 160, 110); }
+.pc-victor.player { border-color: rgb(240, 200, 80); }
+.pc-victor-head { height: 46px; }
+.pc-victor-name { left: 58px; top: 2px; width: 240px; height: 22px; font-size: 17px; }
+.pc-victor-stats { left: 58px; top: 22px; width: 240px; height: 20px; font-size: 14px; color: rgb(220, 220, 200); }
+.pc-victor-demand { position: relative; height: 20px; font-size: 14px; padding-left: 58px; color: rgb(200, 210, 230); }
+
+.pc-button {
+    position: absolute; bottom: 14px; height: 34px;
+    background-color: rgba(34, 60, 38, 0.95); border-width: 1px; border-color: rgb(120, 160, 110);
+}
+.pc-button:hover { background-color: rgba(48, 84, 54, 0.95); }
+.pc-button:active { background-color: rgba(24, 44, 28, 0.95); }
+.pc-button-text { left: 0; top: 0; right: 0; bottom: 0; font-size: 17px; }
+.pc-reset { left: 90px; width: 160px; }
+.pc-confirm { left: 50px; width: 240px; }
+
+.pc-card {
+    position: absolute; translate: -50% -50%; width: 64px; height: 26px;
+    background-color: rgba(30, 40, 30, 0.88); border-width: 1px; border-color: rgb(120, 200, 110);
+}
+.pc-card.demanded { background-color: rgba(30, 50, 100, 0.92); border-color: rgb(130, 170, 240); }
+.pc-card.unaffordable { border-color: rgb(110, 110, 110); }
+.pc-card.taken { display: none; }
+.pc-card-text { left: 0; top: 0; width: 64px; height: 26px; font-size: 15px; color: rgb(240, 200, 80); }

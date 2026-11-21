@@ -40,6 +40,9 @@ namespace Hoi4.UI
             { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
 
         GameState gameState;
+        /// <summary>The peace conference keeps the game paused until it ends.</summary>
+        static bool InConference => Hoi4.War.Hoi4War.Instance?.Conference != null;
+
         TimeManager time;
         PlayerState player;
         UIDocument document;
@@ -138,7 +141,7 @@ namespace Hoi4.UI
             date = bar.Q<Label>("date");
             pill = bar.Q("pill");
 
-            pill.RegisterCallback<ClickEvent>(_ => time.TogglePause());
+            pill.RegisterCallback<ClickEvent>(_ => { if (!InConference) time.TogglePause(); });
             bar.Q("speed-down").RegisterCallback<ClickEvent>(_ => StepSpeed(-1));
             bar.Q("speed-up").RegisterCallback<ClickEvent>(_ => StepSpeed(+1));
             for (int i = 0; i < steps.Length; i++)
@@ -167,7 +170,7 @@ namespace Hoi4.UI
             bar.style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
             if (!visible) return;
 
-            if (Input.GetKeyDown(KeyCode.Space)) time.TogglePause();
+            if (Input.GetKeyDown(KeyCode.Space) && !InConference) time.TogglePause();
             if (Input.GetKeyDown(KeyCode.KeypadPlus) || Input.GetKeyDown(KeyCode.Equals)) StepSpeed(+1);
             if (Input.GetKeyDown(KeyCode.KeypadMinus) || Input.GetKeyDown(KeyCode.Minus)) StepSpeed(-1);
 
