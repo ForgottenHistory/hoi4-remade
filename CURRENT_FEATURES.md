@@ -8,7 +8,7 @@
 
 **Map:** Clausewitz-style terrain, water, coasts, smooth mesh borders in HOI4 classes, rivers, country labels, haze, clouds, day/night with city lights, political / terrain / diplomatic map modes
 
-**Units:** 1936 armies, on-map counters with action icons and battle bubbles, click and box selection, HOI4 movement rules, hourly movement, province-to-province combat with retreat and overrun, occupation
+**Units:** 1936 armies, on-map counters with action icons and battle bubbles, click and box selection, HOI4 movement rules, hourly movement, province-to-province combat with terrain, rivers and entrenchment, retreat and overrun, occupation, manpower pools and reinforcement
 
 **Armies and battle plans:** Armies with bottom-of-screen cards, front lines that divisions fill and hold, offensive plans (drag over targets) that advance as a broad front when executed, planning bonus
 
@@ -65,6 +65,8 @@ The goal is to stress-test Archon-Engine, not to ship a game. Big visual wins ar
 - **Terrain in combat** - The target's terrain (HOI4 `00_terrain.txt`) sets the combat width (plains 70, forest 60, mountain 50, urban 80...), plus its support width for each extra attack direction (flanking), and the attacker's attack and breakthrough penalty (forest -15% up to mountain -50%)
 - **River crossings** - Attacking across a river costs the divisions crossing it 30% (small) or 60% (large); crossings come from HOI4 `rivers.bmp` along province borders
 - **Entrenchment** - A division standing still out of battle digs in 1 level a day, up to 5; each level gives a defender +2% attack and defence; lost on moving or attacking. Shown in the division panel
+- **Manpower** - Each country's pool is the engine's `ResourceSystem` resource `manpower` (saved with the game): recruitable manpower (core population + 2% of non-core, times the mobilisation law) minus the men in its divisions, growing 1.5% of recruitable a year
+- **Reinforcement** - Daily, every damaged division gets back up to 10% of its full strength, paid in the men that strength stands for, until the pool runs dry; countries and divisions in id order. Without equipment a division refills only to its equipment level (HOI4 `start_equipment_factor`), and readiness checks (AI, offensives) measure against that
 - **Combat factors** - Planning, terrain and river (attackers) and entrenchment (defenders) multiply per division, like HOI4; the AI's odds use the same factors
 - **Retreat and overrun** - Broken defenders march to a friendly neighbouring province (a day); a retreater that arrives where an enemy stands is destroyed. Broken attackers drop their order
 - **Occupation** - Entering a province held by an enemy flips its controller (not owner); occupied land is drawn in the occupier's colour, lakes follow the land around them, allies liberate land for its owner
@@ -112,7 +114,7 @@ The goal is to stress-test Archon-Engine, not to ship a game. Big visual wins ar
 
 All panels follow one pattern: structure in `.uxml`, look in `*Style.uss` + `Hoi4Theme.uss`, display logic in a static Presenter, a thin View MonoBehaviour that wires events. Sprites are named in USS (`--sprite: "gfx/..."`) and loaded at runtime from the data directory, so no HOI4 art is in the project or a build.
 
-- **Top bar** - Player flag, political power (+2/day), stability, war support, manpower, date pill (click or Space to pause), speed down/up (-/+), five speed steps. Shown once a country is picked
+- **Top bar** - Player flag, political power (+2/day), stability, war support, live manpower pool, date pill (click or Space to pause), speed down/up (-/+), five speed steps. Shown once a country is picked
 - **State panel** - Click a land province to see its state: owner, cores, manpower, resources, victory points, buildings, categories. Appears only after a country is selected; hidden while divisions are selected; Escape hides it
 - **Division panel** - Selected divisions (widened to the whole army) as cards with organisation, strength and planning bars, HOI4's entrenchment shovel and bar, icon, status, per-card close, select-half, scrollable list
 - **Army cards and battle plan window** - See Armies and Battle Plans
@@ -130,7 +132,7 @@ All panels follow one pattern: structure in `.uxml`, look in `*Style.uss` + `Hoi
 - **States and strategic regions** - `map/hoi4_regions.json5` (states, regions, impassable states, capitals, water)
 - **Combat terrain** - Combat width, support width and attack penalty per terrain in `map/terrain.json5`; river crossings between provinces in `map/hoi4_river_crossings.json5`
 - **State details** - `map/hoi4_state_data.json5`
-- **Countries** - Colors, ideologies, stats (`common/hoi4_country_stats.json5`), history
+- **Countries** - Colors, ideologies, stats (`common/hoi4_country_stats.json5`: stability, war support, core and non-core population, mobilisation law), history
 - **Localisation** - Names for provinces, states, countries
 - **Order of battle** - 1936 divisions
 - **Terrain and water textures** - Atlases, colormaps, water cubemap, normals, border strips
@@ -151,7 +153,8 @@ Tricky map algorithms are prototyped in Python under `Tools/prototypes/<topic>/`
 - Combat ignores forts, generals, supply, night, stacking and per-unit terrain modifiers (only the terrain's base penalty applies); max entrenchment ignores the division's own entrenchment stat (engineers)
 - Offensives are broad-front only; no spearhead or encirclement logic
 - AI does not use offensives or armies, only odds-based border attacks
-- No division recruitment or reinforcement, so losses are permanent
+- No equipment or production: divisions stay at their 1936 equipment level, and equipment lost in battle comes back with the men
+- No recruiting new divisions; manpower only reinforces
 - Province selection does not persist after the state panel closes (HOI4 keeps it)
 - Only land units exist; no air or naval
 - Political power only counts up; nothing spends it

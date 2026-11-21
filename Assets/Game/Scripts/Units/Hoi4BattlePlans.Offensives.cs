@@ -542,7 +542,7 @@ namespace Hoi4.Units
                         }
                         continue;
                     }
-                    if (d != null && (d.Organisation < d.MaxOrganisation * AttackOrganisation || d.Strength < d.MaxStrength * AttackStrength)) continue;
+                    if (d != null && (d.Organisation < d.MaxOrganisation * AttackOrganisation || d.Strength < d.FullStrength * AttackStrength)) continue;
                     if (!o.FrontSet.Contains(unit.provinceID)) continue; // on another front (a pocket): it holds there
                     ushort best = 0;
                     int bestLoad = int.MaxValue, bestDist = int.MaxValue;

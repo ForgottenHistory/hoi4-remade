@@ -230,7 +230,7 @@ def convert(hoi4: Path, out: Path):
     impassable_states = set()
     vp_names = {}         # pid -> name
     state_top_vp = {}     # state id -> (value, pid) of its biggest victory point (the state's main city)
-    owner_manpower = {}   # tag -> summed state manpower (HOI4 top bar)
+    owner_manpower = {}   # (tag, is core) -> summed state manpower (HOI4 recruitable manpower)
     for f in sorted((hoi4 / "history" / "states").glob("*.txt")):
         root = parse_pdx(read_text(f))
         st = get(root, "state")
@@ -245,7 +245,10 @@ def convert(hoi4: Path, out: Path):
         owner = get(hist, "owner") if isinstance(hist, list) else None
         if owner:
             try:
-                owner_manpower[owner] = owner_manpower.get(owner, 0) + int(float(get(st, "manpower", 0)))
+                # Core and non-core population apart: HOI4 recruits only a fraction of non-core states
+                cores = {v for k, _, v in hist if k == "add_core_of"} if isinstance(hist, list) else set()
+                key = (owner, owner in cores)
+                owner_manpower[key] = owner_manpower.get(key, 0) + int(float(get(st, "manpower", 0)))
             except ValueError:
                 pass
         controller = owner
@@ -1046,14 +1049,17 @@ def convert_move_arrow(hoi4: Path, out: Path, arrow_name="move_thick"):
 
 def write_country_stats(out: Path, tags, country_stats, owner_manpower):
     """common/hoi4_country_stats.json5: per country starting stability, war support (0..1),
-    population (sum of owned states' `manpower`) and conscription (mobilisation law factor), for the
-    GAME top bar. Recruitable manpower = population * conscription."""
+    population of its owned core states and of its owned non-core states (sums of the states' `manpower`),
+    and conscription (mobilisation law factor), for the GAME top bar and manpower pool. HOI4 recruitable
+    manpower = (population + non-core population * LOCAL_MANPOWER_ACCESSIBLE_NON_CORE_FACTOR) * conscription."""
     lines = ["// Generated from HOI4 history/countries (set_stability, set_war_support, mobilisation law)",
-             "// and history/states (state manpower = population, summed per owner)", "{"]
+             "// and history/states (state manpower = population, summed per owner; core states apart from non-core)", "{"]
     for tag in tags:
         st = country_stats.get(tag, {})
         lines.append(f"  {tag}: {{ stability: {st.get('stability', 0.5)}, war_support: {st.get('war_support', 0.5)}, "
-                     f"population: {owner_manpower.get(tag, 0)}, conscription: {st.get('conscription', 0.015)} }},")
+                     f"population: {owner_manpower.get((tag, True), 0)}, "
+                     f"noncore_population: {owner_manpower.get((tag, False), 0)}, "
+                     f"conscription: {st.get('conscription', 0.015)} }},")
     lines.append("}")
     (out / "common" / "hoi4_country_stats.json5").write_text("\n".join(lines) + "\n", encoding="utf-8")
 

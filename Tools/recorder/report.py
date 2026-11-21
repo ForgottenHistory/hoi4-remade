@@ -279,6 +279,26 @@ def main():
     for c in sorted(set(gain) | set(loss), key=lambda c: -(gain[c] - loss[c]))[: a.top]:
         print(f"{c:8} +{gain[c]:4} -{loss[c]:4}")
 
+    # --- manpower: reinforcement notes (Hoi4Manpower), "N divisions, M men, pool P" ------------------------
+    print("\n## Manpower (reinforcement)")
+    spent, days, pool_first, pool_last = Counter(), Counter(), {}, {}
+    for r in notes:
+        if r["system"] != "manpower" or r["kind"] != "reinforce":
+            continue
+        m_ = re.match(r"(\d+) divisions, (\d+) men, pool (-?\d+)", r["text"])
+        if not m_:
+            continue
+        c = r["country"]
+        spent[c] += int(m_.group(2))
+        days[c] += 1
+        pool_first.setdefault(c, int(m_.group(3)) + int(m_.group(2)))
+        pool_last[c] = int(m_.group(3))
+    if not spent:
+        print("no reinforcement")
+    for c, n in spent.most_common(a.top):
+        dry = "  POOL EMPTY" if pool_last[c] <= 0 else ""
+        print(f"{c:8} {n:9,} men over {days[c]:4} days, pool {pool_first[c]:,} -> {pool_last[c]:,}{dry}")
+
     print("\n## Commands")
     for k, n in Counter(r["command"] for r in cmds).most_common():
         print(f"{n:7}  {k}")

@@ -98,7 +98,7 @@ namespace Hoi4.Units
                 if (!gameState.Diplomacy.IsAtWar(owner, Hoi4Occupation.ControllerOf(gameState, st.destinationProvinceID))) continue;
                 var d = divisions.Get(id);
                 if (d == null) continue;
-                bool worn = d.Organisation < d.MaxOrganisation * BreakOffOrganisation || d.Strength < d.MaxStrength * BreakOffStrength;
+                bool worn = d.Organisation < d.MaxOrganisation * BreakOffOrganisation || d.Strength < d.FullStrength * BreakOffStrength;
                 if (worn || battle.AttackerPercent < BreakOffPercent)
                 {
                     breakOff.Add(id);
@@ -202,7 +202,7 @@ namespace Hoi4.Units
             {
                 var d = Hoi4Divisions.Instance.Get(id);
                 if (d == null) continue;
-                if (d.Organisation < d.MaxOrganisation * MinOrganisation || d.Strength < d.MaxStrength * MinStrength) { tired++; continue; }
+                if (d.Organisation < d.MaxOrganisation * MinOrganisation || d.Strength < d.FullStrength * MinStrength) { tired++; continue; }
                 if (gameState.Units.MovementQueue.IsUnitMoving(id)) { moving++; continue; }
                 ushort at = gameState.Units.GetUnit(id).provinceID;
                 bool defending = false;

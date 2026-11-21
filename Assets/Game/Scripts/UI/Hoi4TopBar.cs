@@ -50,6 +50,7 @@ namespace Hoi4.UI
         IDisposable[] subscriptions;
         float pp;
         ushort shownCountry;
+        long shownManpower = -1;
         int lastLevel = -1;
         bool lastPaused;
         string lastDate;
@@ -172,6 +173,12 @@ namespace Hoi4.UI
 
             if (shownCountry != player.PlayerCountryId) ShowCountry(player.PlayerCountryId);
             politicalPower.text = Mathf.FloorToInt(pp).ToString();
+            var pools = Hoi4.Units.Hoi4Manpower.Instance;
+            if (pools != null && pools.IsReady)
+            {
+                long men = pools.Available(shownCountry).ToInt();
+                if (men != shownManpower) { shownManpower = men; manpower.text = FormatManpower(men); }
+            }
 
             var t = time.GetCurrentGameTime();
             string d = $"{t.Hour}:00, {t.Day} {MonthNames[Mathf.Clamp(t.Month - 1, 0, 11)]} {t.Year}";
@@ -194,6 +201,7 @@ namespace Hoi4.UI
         void ShowCountry(ushort country)
         {
             shownCountry = country;
+            shownManpower = -1;
             pp = 0f;
             string tag = gameState.Countries.GetCountryTag(country);
             Hoi4Sprites.Apply(flag, string.IsNullOrEmpty(tag) ? null : $"{FlagDir}{tag}.png");
@@ -201,7 +209,9 @@ namespace Hoi4.UI
             {
                 stability.text = $"{Mathf.RoundToInt((float)s["stability"] * 100f)}%";
                 warSupport.text = $"{Mathf.RoundToInt((float)s["war_support"] * 100f)}%";
-                manpower.text = FormatManpower((double)s["population"] * (double)s["conscription"]);
+                // Recruitable until the live pool (Hoi4Manpower) is up; non-core states count 2% (HOI4)
+                double noncore = s["noncore_population"] != null ? (double)s["noncore_population"] : 0;
+                manpower.text = FormatManpower(((double)s["population"] + 0.02 * noncore) * (double)s["conscription"]);
             }
             else
             {

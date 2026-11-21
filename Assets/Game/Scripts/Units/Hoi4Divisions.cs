@@ -28,6 +28,9 @@ namespace Hoi4.Units
         public int SupportCompanies;
         public FP MaxStrength;         // HOI4 HP: sum of sub-unit max_strength
         public FP Strength;
+        public FP EquipmentLevel;      // share of its equipment it has (HOI4 start_equipment_factor; no production yet)
+        /// <summary>The strength it can have with its equipment: what reinforcement refills to, and "fully rested" for orders.</summary>
+        public FP FullStrength => MaxStrength * EquipmentLevel;
         public FP MaxOrganisation;     // average of sub-unit max_organisation
         public FP Organisation;
         public FP CombatWidth;         // sum over regiments
@@ -216,6 +219,7 @@ namespace Hoi4.Units
                 SupportCompanies = support.Count,
                 MaxStrength = strength,
                 Strength = strength * FP.Clamp(equipment, FP.Zero, FP.One),
+                EquipmentLevel = FP.Clamp(equipment, FP.Zero, FP.One),
                 MaxOrganisation = count > 0 ? org / count : FP.Zero,
                 CombatWidth = width,
                 SpeedKmh = speed == FP.MaxValue ? FP.FromInt(4) : speed,

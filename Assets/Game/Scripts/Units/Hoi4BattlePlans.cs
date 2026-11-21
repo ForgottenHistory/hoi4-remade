@@ -1292,6 +1292,8 @@ namespace Hoi4.Units
                 {
                     var unit = units.GetUnit(u);
                     if (fronts.Count > 0 && fronts[0].Count > 0) OrderMove(u, unit, fronts[0][0], dryRun: true); // logs why there is no path
+                    // Once per division and province: plans spread their divisions again every time the line moves
+                    if (!noPathWarned.Add(((uint)u << 16 | unit.provinceID, 0))) continue;
                     ArchonLogger.LogWarning($"Hoi4BattlePlans: plan {plan.Id}: unit {u} in province {unit.provinceID} can reach none of the {fronts.Count} fronts", "game_units");
                     Core.Recording.SessionRecorder.Note("plans", "unreachable", plan.Owner, u, unit.provinceID, 0, $"plan {plan.Id}: can reach none of the {fronts.Count} fronts");
                 }
@@ -1364,6 +1366,8 @@ namespace Hoi4.Units
             return queue.TryGetMovementState(unitId, out var s) ? s.destinationProvinceID : (ushort)0;
         }
 
+        readonly HashSet<(uint, ushort)> noPathWarned = new HashSet<(uint, ushort)>();
+
         bool OrderMove(ushort unitId, Core.Units.UnitState unit, ushort target, bool dryRun = false, bool log = true)
         {
             var pathfinding = gameState.Pathfinding;
@@ -1373,8 +1377,9 @@ namespace Hoi4.Units
             if (path == null || path.Count < 2)
             {
                 if (!dryRun) Core.Recording.SessionRecorder.Note("plans", "no_path", unit.countryID, unitId, unit.provinceID, target, $"{result.Status}, {result.NodesExplored} explored");
-                // Diagnostics: why a front division can't march (owner of both ends, search status)
-                if (!log) return false;
+                // Diagnostics: why a front division can't march (owner of both ends, search status). Once per
+                // division, start and target: a front out of reach (across the sea) would otherwise warn every hour.
+                if (!log || !noPathWarned.Add(((uint)unitId << 16 | unit.provinceID, target))) return false;
                 var provinces = gameState.Provinces;
                 ArchonLogger.LogWarning($"Hoi4BattlePlans: no path for unit {unitId} (type {unit.unitTypeID}, country {unit.countryID}) " +
                     $"from {unit.provinceID} (owner {provinces.GetProvinceOwner(unit.provinceID)}, water {Hoi4Regions.IsWater(unit.provinceID)}) " +
