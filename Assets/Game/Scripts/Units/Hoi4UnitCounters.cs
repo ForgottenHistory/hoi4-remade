@@ -28,7 +28,8 @@ namespace Hoi4.Units
     public sealed class Hoi4UnitCounters : MonoBehaviour
     {
         // Counter canvas: HOI4 plate is 66x27; slots get a transparent margin against bilinear bleed
-        const int CounterW = 66, CounterH = 27, SlotW = 68, SlotH = 29;
+        // Each slot has a strip on the left for the no-orders mark (mapicons.gui no_orders sits at x -10)
+        const int CounterW = 66, CounterH = 27, BodyW = 68, LeftMargin = 12, SlotW = BodyW + LeftMargin, SlotH = 29;
         const int AtlasWidth = 2048;
         const float StackSpacingPx = 70f;
         const float BaseYPx = -CounterH * 1.5f; // the lowest counter is centred on the province, not standing on it
@@ -80,6 +81,7 @@ namespace Hoi4.Units
             public int Battle; // battle bubble: 0 not the player's fight, 1 the player is losing, 2 winning
             public int ArmyId; // the army of its first division, 0 when unassigned: colours the strip behind the action icon
             public int Action; // 0 idle, 1 moving, 2 defending a battle, 3 attacking
+            public bool NoOrders; // a division of an army that follows no battle plan and no order: red exclamation mark
             public Color32 Color; // the country's map colour, the counter's background
             public int Row; // templates of one country stack upwards
             public bool IsBattle; // a battle marker on a border, not a division counter (Count = attacker %)
@@ -96,6 +98,7 @@ namespace Hoi4.Units
         readonly Dictionary<string, Color32[]> composed = new Dictionary<string, Color32[]>();
 
         Sprite actionMove, actionDefend, actionAttack; // optional: the arrow, shield and double chevron on a counter's right edge
+        Sprite noOrders; // optional: GFX_mapicon_unit_no_orders
         Sprite plate, selectedFrame, ideologyStrip, barOrg, barStr, digits;
         List<Stack> stacks = new List<Stack>();
         Texture2D heightmap;
@@ -283,6 +286,25 @@ namespace Hoi4.Units
         }
 
         /// <summary>
+        /// The counters' zoom rules at a world point, for other things written on the map (plan labels): false
+        /// where counters are hidden; scale = the counters' size factor (1 at full size, minSizeFraction zoomed
+        /// out), alpha = their fade-in.
+        /// </summary>
+        public bool ZoomRules(Vector3 world, Camera cam, out float scale, out float alpha)
+        {
+            scale = 1f; alpha = 1f;
+            var screen = cam.WorldToScreenPoint(world);
+            if (screen.z <= 0f) return false;
+            float p11 = Mathf.Abs(cam.projectionMatrix[1, 1]);
+            float worldPerScreenPx = 2f * Mathf.Max(screen.z, 1e-3f) / (p11 * Screen.height);
+            float zoom = worldPerMapPixel / worldPerScreenPx;
+            if (zoom < fadeHiddenZoom) return false;
+            scale = Mathf.Clamp(zoom / Mathf.Max(fullSizeZoom, 0.01f), Mathf.Clamp01(minSizeFraction), 1f);
+            alpha = Mathf.InverseLerp(fadeHiddenZoom, Mathf.Max(fadeVisibleZoom, fadeHiddenZoom + 0.01f), zoom);
+            return true;
+        }
+
+        /// <summary>
         /// A counter's screen rectangle (pixels, origin bottom-left), mirroring the Hoi4/UnitCounter
         /// vertex shader's size and placement. False when it is behind the camera or hidden at this zoom.
         /// </summary>
@@ -315,6 +337,7 @@ namespace Hoi4.Units
             actionMove = LoadSprite("gfx/counters/action_move.png");
             actionDefend = LoadSprite("gfx/counters/action_defend.png");
             actionAttack = LoadSprite("gfx/counters/action_attack.png");
+            noOrders = LoadSprite("gfx/counters/no_orders.png");
             if (plate == null || ideologyStrip == null || barOrg == null || barStr == null || digits == null)
             {
                 ArchonLogger.LogWarning("Hoi4UnitCounters: counter sprites missing under gfx/counters (rerun Tools/hoi4_convert.py)", "game_units");
@@ -422,6 +445,10 @@ namespace Hoi4.Units
                     : queue != null && queue.IsUnitMoving(id) ? 1 : 0;
                 if (action > s.Action) s.Action = action;
                 if (s.ArmyId == 0) s.ArmyId = Hoi4Armies.Instance?.ArmyOf(id)?.Id ?? 0;
+                // Like HOI4: in an army but on no battle plan, and not following a manual order
+                var plans = Hoi4BattlePlans.Instance;
+                if (plans != null && Hoi4Armies.Instance?.ArmyOf(id) != null && plans.PlanOf(id) == null && !plans.HasManualOrder(id))
+                    s.NoOrders = true;
                 s.Units.Add(id);
                 if (Selection != null && Selection.Contains(id)) s.Selected = true;
                 string type = d?.MainType ?? "infantry";
@@ -510,7 +537,7 @@ namespace Hoi4.Units
             {
                 var s = stacks[i];
                 int sx = (i % cols) * SlotW, sy = (i / cols) * SlotH; // slot top-left, row 0 = top
-                ComposeCached(s, sx, sy);
+                ComposeCached(s, sx, sy); // the counter itself starts LeftMargin into the slot
 
                 // Atlas uv (texture rows are bottom-up)
                 float u0 = (float)sx / AtlasWidth, u1 = (float)(sx + SlotW) / AtlasWidth;
@@ -518,8 +545,8 @@ namespace Hoi4.Units
 
                 // Offsets in counter pixels from the anchor (x right, y up), stacks side by side
                 float shift = (s.IndexInProvince - (s.StacksInProvince - 1) * 0.5f) * StackSpacingPx;
-                float x0 = -SlotW * 0.5f + shift, x1 = SlotW * 0.5f + shift;
-                s.X0 = x0; s.X1 = x1;
+                float x0 = -BodyW * 0.5f - LeftMargin + shift, x1 = BodyW * 0.5f + shift;
+                s.X0 = -BodyW * 0.5f + shift; s.X1 = x1; // picking: the counter, not the mark strip
                 float y0 = BaseYPx + s.Row * RowSpacingPx, y1 = y0 + SlotH; // bottom edge on the anchor (shader stands it up)
 
                 int v = i * 4;
@@ -556,7 +583,7 @@ namespace Hoi4.Units
                 if (kv.Value > best) { best = kv.Value; type = kv.Key; }
             int org = Mathf.RoundToInt(barOrg.Width * Mathf.Clamp01(s.MaxOrg > 0 ? s.Org / s.MaxOrg : 1f));
             int str = Mathf.RoundToInt(barStr.Width * Mathf.Clamp01(s.MaxStr > 0 ? s.Str / s.MaxStr : 1f));
-            return string.Concat(s.Tag, "|", s.Color.r.ToString(), ",", s.Color.g.ToString(), ",", s.Color.b.ToString(), "|", type, "|a", s.Action.ToString(), "|m", s.ArmyId.ToString(), "|", s.Count.ToString(), "|", org.ToString(), "|", str.ToString(), s.Selected ? "|s" : "");
+            return string.Concat(s.Tag, "|", s.Color.r.ToString(), ",", s.Color.g.ToString(), ",", s.Color.b.ToString(), "|", type, "|a", s.Action.ToString(), "|m", s.ArmyId.ToString(), "|", s.Count.ToString(), "|", org.ToString(), "|", str.ToString(), s.Selected ? "|s" : "", s.NoOrders ? "|n" : "");
         }
 
         void ComposeCached(Stack s, int ox, int oy)
@@ -569,7 +596,8 @@ namespace Hoi4.Units
                     Array.Copy(block, y * SlotW, atlasPixels, (h - 1 - (oy + y)) * AtlasWidth + ox, SlotW);
                 return;
             }
-            ComposeCounter(s, ox, oy);
+            if (s.IsBattle) ComposeBattle(s, ox + LeftMargin, oy);
+            else ComposeCounter(s, ox + LeftMargin, oy);
             if (composed.Count > 5000) composed.Clear();
             block = new Color32[SlotW * SlotH];
             for (int y = 0; y < SlotH; y++)
@@ -580,6 +608,8 @@ namespace Hoi4.Units
         void ComposeCounter(Stack s, int ox, int oy)
         {
             if (s.IsBattle) { ComposeBattle(s, ox, oy); return; }
+            // mapicons.gui no_orders: left of the plate (x -10, y 8), in the slot's margin strip
+            if (s.NoOrders && noOrders != null) Blit(noOrders, 0, 0, noOrders.Width, noOrders.Height, ox - 10, oy + 8);
             // Layout from HOI4 interface/mapicons.gui (unit_counter)
             BlitPlate(s.Color, ox, oy);
             // Dark box behind the icon, flag and bars (the count box on the right is part of the plate)
@@ -634,7 +664,7 @@ namespace Hoi4.Units
         // HOI4's battle burst: a red disc with the attackers' chance in it, standing on the border
         void ComposeBattle(Stack s, int ox, int oy)
         {
-            int cx = ox + SlotW / 2, cy = oy + CounterH / 2 + 1;
+            int cx = ox + BodyW / 2, cy = oy + CounterH / 2 + 1;
             const int r = 12;
             for (int y = -r; y <= r; y++)
                 for (int x = -r; x <= r; x++)

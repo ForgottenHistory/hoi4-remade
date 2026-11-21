@@ -10,8 +10,9 @@ namespace Hoi4.Units
     /// GAME: the Battle Plans window (HOI4's battleplantools_window). It shows while a division of an army is
     /// selected; the front-line button turns the front line tool of Hoi4BattlePlans on, the offence button
     /// (enabled once the army has a front line) the offensive tool, the bin removes the plans of the selected
-    /// divisions. Also writes the text on each placed line and objective line: "N Divs, army name", along
-    /// the line's direction.
+    /// divisions. Also writes the text on each placed line and objective line: "N Divs, army name", bent
+    /// along the line like HOI4 (one element per letter), scaled and hidden with zoom by the unit counters'
+    /// rules (Hoi4UnitCounters.ZoomRules).
     /// View of the UI Presenter pattern: structure BattlePlanPanel.uxml, look BattlePlanStyle.uss + Hoi4Theme.uss.
     /// </summary>
     public sealed class Hoi4BattlePlanPanel : MonoBehaviour
@@ -20,7 +21,12 @@ namespace Hoi4.Units
 
         UIDocument document;
         VisualElement window, labels, front, offence, delete;
-        readonly List<Label> labelPool = new List<Label>();
+        readonly List<Label> labelPool = new List<Label>();   // one per letter
+        readonly Dictionary<char, float> charWidth = new Dictionary<char, float>(); // at BaseFontPx, panel px
+        Label probe;                                            // measures letters
+        const float BaseFontPx = 15f;                           // BattlePlanStyle.uss .bp-line-label at full size
+        readonly List<Vector2> linePts = new List<Vector2>();
+        readonly List<float> lineRun = new List<float>();
         bool frontActive, offenceActive, offenceEnabled = true;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -131,41 +137,132 @@ namespace Hoi4.Units
         {
             var cam = Camera.main;
             var armies = Hoi4Armies.Instance;
+            var counters = Hoi4UnitCounters.Instance;
             int used = 0;
-            if (cam != null)
+            skip = default;
+            if (cam != null && counters != null)
+            {
                 foreach (var plan in plans.Plans)
                 {
-                    if (plan.IsAI) continue;
-                    var a = cam.WorldToScreenPoint(plan.LabelWorld);
-                    var b = cam.WorldToScreenPoint(plan.LabelAhead);
-                    if (a.z <= 0f) continue;
-                    Place(LabelAt(used++), plan.Units.Count, ArmyName(armies, plan.ArmyId), a, b);
+                    if (plan.IsAI || plan.Labels.Count == 0) continue;
+                    var counts = plan.DivisionsPerFront();
+                    string army = ArmyName(armies, plan.ArmyId);
+                    foreach (var label in plan.Labels)
+                    {
+                        int n = label.Front < counts.Length ? counts[label.Front] : 0;
+                        PlaceAlong(Text(n, army), label.Path, label.Anchor, cam, counters, ref used);
+                    }
                 }
-            if (cam != null)
                 foreach (var o in plans.Offensives)
-                {
-                    if (o.Objective == null) continue;
-                    var a = cam.WorldToScreenPoint(o.LabelWorld);
-                    var b = cam.WorldToScreenPoint(o.LabelAhead);
-                    if (a.z <= 0f) continue;
-                    Place(LabelAt(used++), o.Units.Count, ArmyName(armies, o.ArmyId), a, b);
-                }
+                    if (o.Objective != null)
+                        PlaceAlong(Text(o.Units.Count, ArmyName(armies, o.ArmyId)), o.LabelPath, o.LabelAnchor, cam, counters, ref used);
+            }
             for (int i = used; i < labelPool.Count; i++) labelPool[i].style.display = DisplayStyle.None;
+            // Diagnostics: lines exist but no text was written (logged now and then, with why)
+            if (used == 0 && skip.Total > 0 && Time.unscaledTime > nextSkipLog)
+            {
+                nextSkipLog = Time.unscaledTime + 5f;
+                ArchonLogger.Log($"Hoi4BattlePlanPanel: {skip.Total} line labels, none written: {skip.NoPath} without a path, " +
+                                 $"{skip.Zoom} hidden by zoom, {skip.NoPanel} no panel, {skip.Behind} behind the camera, {skip.Bad} bad positions", "game_units");
+            }
         }
 
-        static void Place(Label label, int divisions, string army, Vector3 a, Vector3 b)
+        struct SkipCounts { public int Total, NoPath, Zoom, NoPanel, Behind, Bad; }
+        SkipCounts skip;
+        float nextSkipLog;
+
+        static string Text(int divisions, string army) => divisions + (divisions == 1 ? " Div, " : " Divs, ") + army;
+
+        /// <summary>
+        /// Write the text centred on path[anchor], one letter at a time along the line as it appears on screen
+        /// (HOI4 bends the text with the line), each letter turned to the line's direction there. Reads left to
+        /// right: the path is walked backwards when it runs leftwards at the centre. Hidden where the unit
+        /// counters are, and sized like them.
+        /// </summary>
+        void PlaceAlong(string text, List<Vector3> path, int anchor, Camera cam, Hoi4UnitCounters counters, ref int used)
         {
-            label.text = divisions + (divisions == 1 ? " Div, " : " Divs, ") + army;
-            var panel = label.panel;
-            var pos = RuntimePanelUtils.ScreenToPanel(panel, new Vector2(a.x, Screen.height - a.y));
-            var ahead = RuntimePanelUtils.ScreenToPanel(panel, new Vector2(b.x, Screen.height - b.y));
-            float deg = Mathf.Atan2(ahead.y - pos.y, ahead.x - pos.x) * Mathf.Rad2Deg;
-            if (deg > 90f) deg -= 180f; else if (deg < -90f) deg += 180f; // keep the text upright
-            label.style.left = pos.x;
-            label.style.top = pos.y;
-            label.style.translate = new Translate(Length.Percent(-50), Length.Percent(-50));
-            label.style.rotate = new Rotate(new Angle(deg, AngleUnit.Degree));
-            label.style.display = DisplayStyle.Flex;
+            skip.Total++;
+            if (path == null || path.Count < 2 || anchor < 0 || anchor >= path.Count) { skip.NoPath++; return; }
+            if (!counters.ZoomRules(path[anchor], cam, out float scale, out float alpha) || alpha <= 0.01f) { skip.Zoom++; return; }
+            var panel = labels.panel;
+            if (panel == null) { skip.NoPanel++; return; }
+
+            // The line on screen (panel px), cumulative length
+            linePts.Clear(); lineRun.Clear();
+            int anchorAt = -1;
+            for (int i = 0; i < path.Count; i++)
+            {
+                var s = cam.WorldToScreenPoint(path[i]);
+                if (s.z <= 0f) { if (i < anchor) { linePts.Clear(); continue; } break; } // behind the camera: cut there
+                if (i == anchor) anchorAt = linePts.Count;
+                linePts.Add(RuntimePanelUtils.ScreenToPanel(panel, new Vector2(s.x, Screen.height - s.y)));
+            }
+            if (anchorAt < 0 || linePts.Count < 2) { skip.Behind++; return; }
+            int m = Mathf.Clamp(anchorAt, 1, linePts.Count - 1);
+            if (linePts[m].x - linePts[m - 1].x < 0f) // runs leftwards: read it from the other end
+            {
+                linePts.Reverse();
+                anchorAt = linePts.Count - 1 - anchorAt;
+            }
+            float run = 0f;
+            lineRun.Add(0f);
+            for (int i = 1; i < linePts.Count; i++) { run += Vector2.Distance(linePts[i - 1], linePts[i]); lineRun.Add(run); }
+
+            float font = BaseFontPx * scale;
+            float width = 0f;
+            foreach (char c in text) width += CharWidth(c) * scale;
+            float at = lineRun[anchorAt] - width * 0.5f;
+            if (float.IsNaN(at) || float.IsInfinity(at)) { skip.Bad++; return; }
+            var color = new Color(1f, 1f, 1f, alpha);
+            foreach (char c in text)
+            {
+                float w = CharWidth(c) * scale;
+                if (c != ' ')
+                {
+                    PointAt(at + w * 0.5f, out var pos, out var dir);
+                    var l = LabelAt(used++);
+                    l.text = c.ToString();
+                    l.style.fontSize = font;
+                    l.style.color = color;
+                    l.style.left = pos.x;
+                    l.style.top = pos.y;
+                    l.style.translate = new Translate(Length.Percent(-50), Length.Percent(-50));
+                    l.style.rotate = new Rotate(new Angle(Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg, AngleUnit.Degree));
+                    l.style.display = DisplayStyle.Flex;
+                }
+                at += w;
+            }
+        }
+
+        /// <summary>Point and direction at a distance along the screen line (straight on past its ends).</summary>
+        void PointAt(float s, out Vector2 pos, out Vector2 dir)
+        {
+            int n = linePts.Count;
+            int i = 1;
+            while (i < n - 1 && lineRun[i] < s) i++;
+            var a = linePts[i - 1];
+            var b = linePts[i];
+            float seg = lineRun[i] - lineRun[i - 1];
+            dir = seg > 1e-4f ? (b - a) / seg : Vector2.right;
+            pos = a + dir * (s - lineRun[i - 1]);
+        }
+
+        /// <summary>A letter's advance at BaseFontPx, measured once with the label style.</summary>
+        float CharWidth(char c)
+        {
+            if (charWidth.TryGetValue(c, out float w)) return w;
+            if (probe == null)
+            {
+                probe = new Label { pickingMode = PickingMode.Ignore };
+                probe.AddToClassList("bp-line-label");
+                probe.style.visibility = Visibility.Hidden;
+                labels.Add(probe);
+            }
+            var size = probe.MeasureTextSize(c == ' ' ? "\u00a0" : c.ToString(), 0f, VisualElement.MeasureMode.Undefined, 0f, VisualElement.MeasureMode.Undefined);
+            w = size.x;
+            if (float.IsNaN(w) || float.IsInfinity(w) || w <= 0.01f) return BaseFontPx * 0.55f; // style not resolved yet: guess, measure again next time
+            charWidth[c] = w;
+            return w;
         }
 
         static string ArmyName(Hoi4Armies armies, int id)

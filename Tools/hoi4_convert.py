@@ -978,6 +978,8 @@ def convert_front_line(hoi4: Path, out: Path):
     dst.mkdir(parents=True, exist_ok=True)
     Image.open(src / "defensive_line_mask.dds").convert("RGBA").save(dst / "front_mask.png")
     Image.open(src / "defensive_line.dds").convert("RGBA").save(dst / "front_pattern.png")
+    # defence_line's alternative mask: the line of a front nobody holds (separate teeth, no band)
+    Image.open(src / "defensive_line_unassigned_mask.dds").convert("RGBA").save(dst / "front_unassigned_mask.png")
     # Unconfirmed line while drawing (arrowType magnet_line): the green dashes
     Image.open(src / "stripe_mask.dds").convert("RGBA").save(dst / "preview_mask.png")
     Image.open(src / "stripe_pattern.dds").convert("RGBA").save(dst / "preview_pattern.png")
@@ -1410,6 +1412,8 @@ def convert_counter_gfx(hoi4: Path, out: Path, tag_ideology, main_types):
     act = Image.open(gi / "onmap_action_icon.dds").convert("RGBA")  # 14 frames
     for name, i in (("defend", 2), ("move", 4), ("attack", 5)):
         frame(act, i, 14).save(dst / f"action_{name}.png")
+    # GFX_mapicon_unit_no_orders: the red exclamation mark left of a division without orders
+    Image.open(gi / "mapicons" / "mapicon_unit_no_orders.dds").convert("RGBA").save(dst / "no_orders.png")
     for kind in ("org", "str"):
         bar = Image.open(gi / "mapicons" / f"mapicon_bar_{kind}_sprite.dds").convert("RGBA")
         bar.rotate(90, expand=True).save(dst / f"bar_{kind}.png")  # 17x3, full end on the left

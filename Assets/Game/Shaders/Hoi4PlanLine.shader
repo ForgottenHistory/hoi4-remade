@@ -5,13 +5,15 @@
 //   ticks pointing at the enemy side, 2 = an offensive plan's objective line (HOI4 offence_line): a band
 //   with teeth pointing at the left of travel (the target), 3 = dotted line through the targets of an
 //   offensive being dragged (HOI4 virtual_line: dot textures, one dot per width), 4 = plain soft line (the
-//   rings at the dotted line's ends).
+//   rings at the dotted line's ends), 5 = a front line nobody holds (defence_line's unassigned mask: the
+//   teeth without the band).
 Shader "Hoi4/PlanLine"
 {
     Properties
     {
         _MaskTex ("Mask", 2D) = "white" {}
         _PatternTex ("Pattern", 2D) = "white" {}
+        _UnassignedMaskTex ("Unassigned Mask", 2D) = "white" {}
         _PreviewMaskTex ("Preview Mask", 2D) = "white" {}
         _PreviewPatternTex ("Preview Pattern", 2D) = "white" {}
         _OffenceMaskTex ("Objective Line Mask", 2D) = "white" {}
@@ -52,6 +54,8 @@ Shader "Hoi4/PlanLine"
             TEXTURE2D(_MaskTex);
             SAMPLER(sampler_MaskTex);
             TEXTURE2D(_PatternTex);
+            TEXTURE2D(_UnassignedMaskTex);
+            SAMPLER(sampler_UnassignedMaskTex);
             SAMPLER(sampler_PatternTex);
             TEXTURE2D(_PreviewMaskTex);
             SAMPLER(sampler_PreviewMaskTex);
@@ -123,14 +127,15 @@ Shader "Hoi4/PlanLine"
 
             half4 frag(Varyings i) : SV_Target
             {
-                if (i.style > 3.5)
+                bool unassigned = i.style > 4.5;
+                if (i.style > 3.5 && !unassigned)
                 {
                     // Plain soft line
                     float k = saturate(1.0 - abs(i.uv.y - 0.5) * 2.0);
                     clip(k - 0.002);
                     return half4(i.color.rgb, k * k * i.color.a);
                 }
-                if (i.style > 2.5)
+                if (i.style > 2.5 && !unassigned)
                 {
                     // virtual_line: one dot per ribbon width
                     float2 duv = float2(frac(i.uv.x), saturate(i.uv.y));
@@ -141,7 +146,7 @@ Shader "Hoi4/PlanLine"
                     return half4(saturate(dp.rgb * i.color.rgb * 1.4), dc * i.color.a);
                 }
                 bool preview = i.style < 0.5;
-                bool objective = i.style > 1.5;
+                bool objective = i.style > 1.5 && !unassigned;
                 // HOI4 arrowTypes: unconfirmed = magnet_line (stripe textures, texture_loop 1), placed = defence_line
                 // (texture_loop 3.2: one tile spans 3.2 widths). The texture's top row (the band) is the own side, v = 0.
                 // Objective line = offence_line: band in the bottom rows at v = 0, the tooth tips (top rows) at v = 1.
@@ -161,7 +166,9 @@ Shader "Hoi4/PlanLine"
                 }
                 else
                 {
-                    mask = SAMPLE_TEXTURE2D_LOD(_MaskTex, sampler_MaskTex, uv, 0);
+                    mask = unassigned
+                        ? SAMPLE_TEXTURE2D_LOD(_UnassignedMaskTex, sampler_UnassignedMaskTex, uv, 0)
+                        : SAMPLE_TEXTURE2D_LOD(_MaskTex, sampler_MaskTex, uv, 0);
                     pattern = SAMPLE_TEXTURE2D_LOD(_PatternTex, sampler_PatternTex, uv, 0);
                 }
                 float coverage = saturate(mask.r + mask.g + mask.b) * mask.a;

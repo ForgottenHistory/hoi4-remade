@@ -113,11 +113,18 @@ namespace Hoi4.Units
             return false;
         }
 
-        /// <summary>True while this division's move is an attack: its target province holds an enemy.</summary>
+        /// <summary>Presentation (red move arrow, attack counter): this division's move is an attack, its next
+        /// province holds an enemy division or is land an enemy controls (an empty one is taken on arrival).</summary>
         public bool IsAttacking(ushort unitId)
         {
             if (gameState == null || retreating.Contains(unitId)) return false;
-            return gameState.Units.MovementQueue.TryGetMovementState(unitId, out var st) && EnemyHolds(unitId, st.destinationProvinceID);
+            if (!gameState.Units.MovementQueue.TryGetMovementState(unitId, out var st)) return false;
+            ushort to = st.destinationProvinceID;
+            if (EnemyHolds(unitId, to)) return true;
+            var diplomacy = gameState.Diplomacy;
+            ushort country = gameState.Units.GetUnit(unitId).countryID;
+            ushort holder = Hoi4Occupation.ControllerOf(gameState, to);
+            return diplomacy != null && holder != 0 && holder != country && diplomacy.IsAtWar(country, holder);
         }
 
         bool EnemyHolds(ushort unitId, ushort province)

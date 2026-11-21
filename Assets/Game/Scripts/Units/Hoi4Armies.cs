@@ -54,7 +54,11 @@ namespace Hoi4.Units
             go.AddComponent<Hoi4Armies>();
         }
 
-        void Awake() => Instance = this;
+        void Awake()
+        {
+            Instance = this;
+            Changed += () => Hoi4UnitCounters.Instance?.MarkDirty(); // the no-orders mark follows plan and army membership
+        }
 
         IEnumerator Start()
         {

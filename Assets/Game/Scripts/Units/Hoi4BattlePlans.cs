@@ -28,7 +28,29 @@ namespace Hoi4.Units
         public List<List<ushort>> Fronts;           // the same per separate stretch of the line (a pocket is its own front); simulation, from adjacency
         public readonly Dictionary<ushort, ushort> Slot = new Dictionary<ushort, ushort>(); // unit -> the front province it holds
         public readonly Dictionary<(ushort, int), bool> Reach = new Dictionary<(ushort, int), bool>(); // (province, front) reachable by land; cleared with the fronts
-        public Vector3 LabelWorld, LabelAhead;      // text anchor on the line and a point a little further along it
+        public readonly Dictionary<ushort, int> FrontIndex = new Dictionary<ushort, int>(); // front province -> its front
+        // Presentation: one label per front (a pocket gets its own), on that front's longest drawn stretch,
+        // and the front each drawn stretch (Chains[i]) belongs to
+        public readonly List<FrontLabel> Labels = new List<FrontLabel>();
+        public readonly List<int> ChainFront = new List<int>();
+
+        /// <summary>Divisions slotted on each front (an attack from the line still counts for its front).</summary>
+        public int[] DivisionsPerFront()
+        {
+            var counts = new int[Fronts?.Count ?? 0];
+            foreach (var kv in Slot)
+                if (FrontIndex.TryGetValue(kv.Value, out int f) && f < counts.Length) counts[f]++;
+            return counts;
+        }
+    }
+
+    /// <summary>Text anchor on a front's line and a point a little further along it (the text's direction).</summary>
+    public struct FrontLabel
+    {
+        public int Front;
+        public Vector3 World, Ahead;
+        public List<Vector3> Path;  // the line around the label (world, on the terrain): the text bends along it
+        public int Anchor;          // index in Path of the label's centre
     }
 
     /// <summary>
@@ -134,7 +156,11 @@ namespace Hoi4.Units
             go.AddComponent<Hoi4BattlePlans>();
         }
 
-        void Awake() => Instance = this;
+        void Awake()
+        {
+            Instance = this;
+            Changed += () => Hoi4UnitCounters.Instance?.MarkDirty(); // the no-orders mark follows plan and army membership
+        }
 
         void OnDestroy()
         {
@@ -200,6 +226,8 @@ namespace Hoi4.Units
             }
             material.SetTexture("_MaskTex", mask);
             material.SetTexture("_PatternTex", pattern);
+            var umask = LoadTexture("gfx/maparrows/front_unassigned_mask.png");
+            material.SetTexture("_UnassignedMaskTex", umask != null ? umask : mask); // older data: drawn like a held front
             material.SetVector(BoundsId, bounds);
             if (counters.Heightmap != null) material.SetTexture(HeightmapId, counters.Heightmap);
             material.SetFloat(HeightScaleId, counters.HeightScale);
@@ -840,7 +868,12 @@ namespace Hoi4.Units
         {
             plan.Fronts = fronts;
             plan.FrontProvinces = new List<ushort>();
-            foreach (var f in fronts) plan.FrontProvinces.AddRange(f);
+            plan.FrontIndex.Clear();
+            for (int f = 0; f < fronts.Count; f++)
+            {
+                plan.FrontProvinces.AddRange(fronts[f]);
+                foreach (ushort p in fronts[f]) plan.FrontIndex[p] = f;
+            }
             plan.Reach.Clear();
         }
 
@@ -936,8 +969,14 @@ namespace Hoi4.Units
             {
                 if (plan.IsAI) continue; // AI lines are not drawn
                 var color = Hoi4Armies.ColorOf(plan.ArmyId, 0.95f);
-                foreach (var chain in plan.Chains)
-                    AddRibbon(chain, color, 1f);
+                // A front nobody is slotted on: HOI4's unassigned line (separate teeth)
+                var counts = plan.DivisionsPerFront();
+                for (int c = 0; c < plan.Chains.Count; c++)
+                {
+                    int f = c < plan.ChainFront.Count ? plan.ChainFront[c] : -1;
+                    bool held = f < 0 || f >= counts.Length || counts[f] > 0;
+                    AddRibbon(plan.Chains[c], color, held ? 1f : 5f);
+                }
             }
             RebuildOffensives();
 
@@ -975,12 +1014,13 @@ namespace Hoi4.Units
         /// </summary>
         void Distribute(Hoi4BattlePlan plan)
         {
+            if (!plan.IsAI) dirtyMesh = true; // a front may have gained or lost all its divisions (unassigned look)
             plan.Slot.Clear();
             var fronts = plan.Fronts;
             if (fronts == null || fronts.Count == 0 || plan.Units.Count == 0) return;
             var units = gameState.Units;
             var ids = new List<ushort>();
-            foreach (ushort u in plan.Units) if (units.HasUnit(u) && !IsAdvancing(u)) ids.Add(u); // advancing ones leave the line
+            foreach (ushort u in plan.Units) if (units.HasUnit(u)) ids.Add(u);
             ids.Sort(); // deterministic order
             if (ids.Count == 0) return;
 
@@ -1123,8 +1163,9 @@ namespace Hoi4.Units
             int ordered = 0, holding = 0, marching = 0, noPath = 0;
             foreach (var kv in plan.Slot)
             {
-                if (!units.HasUnit(kv.Key) || IsAdvancing(kv.Key)) continue;
+                if (!units.HasUnit(kv.Key)) continue;
                 var unit = units.GetUnit(kv.Key);
+                if (IsPlanAttack(kv.Key, unit)) { marching++; continue; } // attacking from the line: leave it be
                 bool moving = queue.IsUnitMoving(kv.Key);
                 if (moving && Hoi4Combat.IsRetreating(kv.Key)) { marching++; continue; } // falling back: back to the line once it stops
                 if (unit.provinceID == kv.Value)
@@ -1388,35 +1429,113 @@ namespace Hoi4.Units
         }
 
         /// <summary>Anchor and direction for the plan's text: the middle of its longest arc.</summary>
+        [Tooltip("Text along a line: how much of the line around the label is kept to bend the text along (map px each way)")]
+        public float labelPathPx = 40f;
+
+        /// <summary>The part of a line within labelPathPx (along it) of the point at distance 'at', with that point
+        /// inserted (anchor) and every point lifted onto the terrain. Presentation.</summary>
+        internal List<Vector3> LabelPath(List<Vector3> pts, float at, out int anchor)
+        {
+            var counters = Hoi4UnitCounters.Instance;
+            float window = labelPathPx * worldPerPxX;
+            var path = new List<Vector3>();
+            anchor = 0;
+            float run = 0f;
+            bool placed = false;
+            for (int i = 0; i < pts.Count; i++)
+            {
+                if (i > 0)
+                {
+                    float seg = Vector3.Distance(pts[i - 1], pts[i]);
+                    if (!placed && run + seg >= at)
+                    {
+                        float f = seg > 1e-6f ? (at - run) / seg : 0f;
+                        anchor = path.Count;
+                        path.Add(Vector3.Lerp(pts[i - 1], pts[i], f));
+                        placed = true;
+                    }
+                    run += seg;
+                }
+                if (Mathf.Abs(run - at) <= window) path.Add(pts[i]);
+            }
+            if (!placed) { anchor = path.Count; path.Add(pts[pts.Count - 1]); }
+            if (counters != null)
+                for (int i = 0; i < path.Count; i++)
+                {
+                    var p = path[i];
+                    p.y = counters.TerrainHeight(p);
+                    path[i] = p;
+                }
+            return path;
+        }
+
+        /// <summary>
+        /// One label per front, like HOI4 (an encircled pocket is its own front with its own count): each drawn
+        /// stretch of line belongs to the front whose provinces lie nearest its points (a vote over the points),
+        /// and a front's label sits halfway along its longest stretch. A front without a drawn stretch gets none.
+        /// </summary>
         void ComputeLabelAnchor(Hoi4BattlePlan plan)
         {
-            List<Vector3> bestPts = null;
-            float bestLen = -1f;
+            plan.Labels.Clear();
+            plan.ChainFront.Clear();
+            var counters = Hoi4UnitCounters.Instance;
+            if (counters == null || plan.Chains == null || plan.Fronts == null || plan.Fronts.Count == 0) return;
+            if (plan.Chains.Count == 0) return;
+            var centres = new List<(Vector2 p, int front)>();
+            for (int f = 0; f < plan.Fronts.Count; f++)
+                foreach (ushort prov in plan.Fronts[f])
+                    if (counters.TryGetProvincePoint(prov, out var w)) centres.Add((new Vector2(w.x, w.z), f));
+            if (centres.Count == 0) return;
+            // (ChainFront stays empty when nothing could be matched: every stretch is then drawn as held)
+
+            var longest = new SortedDictionary<int, (List<Vector3> pts, float len)>();
+            var votes = new int[plan.Fronts.Count];
             foreach (var pts in plan.Chains)
             {
+                if (pts.Count < 2) { plan.ChainFront.Add(-1); continue; }
+                Array.Clear(votes, 0, votes.Length);
                 float len = 0f;
-                for (int i = 1; i < pts.Count; i++) len += Vector3.Distance(pts[i - 1], pts[i]);
-                if (len > bestLen) { bestLen = len; bestPts = pts; }
-            }
-            if (bestPts == null || bestPts.Count < 2) return;
-            float half = bestLen * 0.5f, run = 0f;
-            for (int i = 1; i < bestPts.Count; i++)
-            {
-                float seg = Vector3.Distance(bestPts[i - 1], bestPts[i]);
-                if (run + seg >= half)
+                for (int i = 0; i < pts.Count; i++)
                 {
-                    float f = seg > 1e-6f ? (half - run) / seg : 0f;
-                    plan.LabelWorld = Vector3.Lerp(bestPts[i - 1], bestPts[i], f);
-                    plan.LabelAhead = bestPts[i];
-                    if ((plan.LabelAhead - plan.LabelWorld).sqrMagnitude < 1e-8f) plan.LabelAhead = bestPts[Mathf.Min(i + 1, bestPts.Count - 1)];
-                    break;
+                    if (i > 0) len += Vector3.Distance(pts[i - 1], pts[i]);
+                    var q = new Vector2(pts[i].x, pts[i].z);
+                    int nearest = 0;
+                    float bestD = float.MaxValue;
+                    foreach (var c in centres)
+                    {
+                        float d = (c.p - q).sqrMagnitude;
+                        if (d < bestD) { bestD = d; nearest = c.front; }
+                    }
+                    votes[nearest]++;
                 }
-                run += seg;
+                int front = 0;
+                for (int f = 1; f < votes.Length; f++) if (votes[f] > votes[front]) front = f;
+                plan.ChainFront.Add(front);
+                if (!longest.TryGetValue(front, out var was) || len > was.len) longest[front] = (pts, len);
             }
-            if (Hoi4UnitCounters.Instance != null)
+
+            foreach (var kv in longest)
             {
-                plan.LabelWorld.y = Hoi4UnitCounters.Instance.TerrainHeight(plan.LabelWorld);
-                plan.LabelAhead.y = Hoi4UnitCounters.Instance.TerrainHeight(plan.LabelAhead);
+                var pts = kv.Value.pts;
+                float half = kv.Value.len * 0.5f, run = 0f;
+                var label = new FrontLabel { Front = kv.Key, World = pts[0], Ahead = pts[1] };
+                for (int i = 1; i < pts.Count; i++)
+                {
+                    float seg = Vector3.Distance(pts[i - 1], pts[i]);
+                    if (run + seg >= half)
+                    {
+                        float f = seg > 1e-6f ? (half - run) / seg : 0f;
+                        label.World = Vector3.Lerp(pts[i - 1], pts[i], f);
+                        label.Ahead = pts[i];
+                        if ((label.Ahead - label.World).sqrMagnitude < 1e-8f) label.Ahead = pts[Mathf.Min(i + 1, pts.Count - 1)];
+                        break;
+                    }
+                    run += seg;
+                }
+                label.World.y = counters.TerrainHeight(label.World);
+                label.Ahead.y = counters.TerrainHeight(label.Ahead);
+                label.Path = LabelPath(pts, half, out label.Anchor);
+                plan.Labels.Add(label);
             }
         }
     }
