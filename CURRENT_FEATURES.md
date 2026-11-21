@@ -89,17 +89,6 @@ Tricky map algorithms are prototyped in Python under `Tools/prototypes/<topic>/`
 
 ---
 
-## Engine Changes Driven By This Project
-
-- Mesh border highlight outline with glow, tinted by the caller
-- Secondary outline slot (`SetSecondaryOutline`, `ProvinceHighlighter.HighlightProvinceSet`) for any province set
-- Click interceptors and pointer blockers on `ProvinceSelector`
-- Camera scroll capture flag
-- Hover highlight off when its colour alpha is 0 (StarterKit `ProvinceInfoUI`)
-- Faster startup and river tracing, localisation UTF-8 fix, province picking fix
-
----
-
 ## Known Gaps
 
 - `icons/light_armor.png` sprite is missing from the converted data (infantry icon used instead)

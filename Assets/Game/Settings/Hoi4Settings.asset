@@ -13,6 +13,9 @@ MonoBehaviour:
   m_Name: Hoi4Settings
   m_EditorClassIdentifier: 
   editorDataDirectory: Hoi4Data
+  startYear: 0
+  startMonth: 1
+  startDay: 1
   EnableParallelLoading: 1
   EnableDataValidation: 1
   UseGracefulDegradation: 1
@@ -20,6 +23,8 @@ MonoBehaviour:
   RetryAttempts: 1
   EnableMemoryLeakDetection: 0
   SkipCacheWarming: 0
+  WatchStyleDataFile: 1
+  WatchStyleDataFileInDevelopmentBuilds: 0
   LogLevel: 4
   AutoUpdateBorders: 1
   AutoUpdateMapModeTextures: 1
