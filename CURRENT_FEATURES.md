@@ -8,13 +8,13 @@
 
 **Map:** Clausewitz-style terrain, water, coasts, smooth mesh borders in HOI4 classes, rivers, country labels, haze, clouds, day/night with city lights
 
-**Units:** 1936 armies, on-map counters, click and box selection, HOI4 movement rules, move arrows (red when attacking), hourly movement, province-to-province combat with retreat and overrun
+**Units:** 1936 armies, on-map counters, click and box selection, HOI4 movement rules, move arrows (red when attacking), hourly movement, province-to-province combat with retreat and overrun, occupation (controller flips, drawn in the occupier's colour)
 
 **UI:** Top bar, state panel and division panel (UI Toolkit: UXML + USS + C#), all sprites loaded at runtime from the converted data
 
 **Data:** One Python converter turns the HOI4 install into an Archon data directory
 
-**Not Implemented:** Province capture, production, research, politics, AI (including enemy armies), saving/loading of HOI4-specific state, multiplayer
+**Not Implemented:** production, research, politics, AI (including enemy armies), saving/loading of HOI4-specific state, multiplayer
 
 The goal is to stress-test Archon-Engine, not to ship a game. Big visual wins are preferred over exact HOI4 fidelity.
 
@@ -54,6 +54,7 @@ The goal is to stress-test Archon-Engine, not to ship a game. Big visual wins ar
 - **Combat** - Province-to-province battles from converted HOI4 equipment stats (attack, defence, breakthrough, hardness, armour, piercing). The attack starts when the move starts; the move into the province is held while an enemy is there. Battle markers sit on the border between the two provinces
 - **Retreat and overrun** - Broken defenders march to a friendly neighbouring province (a day); a retreater that arrives where an enemy stands is destroyed
 - **Attack arrows** - Move arrows turn red for attacks, with a lighter red for the travelled part
+- **Occupation** - Entering a province held by an enemy flips its controller (not owner); occupied land is drawn in the occupier's colour, lakes follow the land around them, and country labels follow control
 - **Hover blocking** - No province hover or click through counters
 
 ---
