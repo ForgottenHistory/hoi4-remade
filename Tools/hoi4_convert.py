@@ -520,6 +520,7 @@ def convert(hoi4: Path, out: Path):
     convert_unit_panel(hoi4, out, main_types)
     convert_army_cards(hoi4, out)
     convert_battleplan_gfx(hoi4, out)
+    convert_peace_gfx(hoi4, out)
     convert_front_line(hoi4, out)
     convert_state_view(hoi4, out, state_centers)
     convert_move_arrow(hoi4, out)
@@ -1391,6 +1392,41 @@ def convert_battleplan_gfx(hoi4: Path, out: Path):
         for i, fr in enumerate(frames):
             fr.save(dst / (f"{name}.png" if len(frames) == 1 else f"{name}_{i}.png"))
     print("Battle plan sprites written")
+
+
+# Peace conference (interface/peaceconferencewindow.gui) sprites: file name -> GFX sprite. Tiled ones are 9-sliced
+# in USS with their borderSize.
+PEACE_SPRITES = {
+    "upper_bar": "GFX_tiled_peace_upper_bar", "top_art": "GFX_top_art_winning_conference",
+    "button_261": "GFX_button_261x34", "button_148": "GFX_button_148x34", "plain_bg": "GFX_tiled_plain_bg",
+    "window_small_small": "GFX_tiled_window_small_small", "window_thin_border": "GFX_tiled_window_thin_border2",
+    "window_small": "GFX_tiled_window_small", "window_border": "GFX_tiled_window2_1b_border",
+    "overlay": "GFX_tiled_generic_overlay_bg1_small", "icon_button": "GFX_icon_button_46x46",
+    "take_state": "GFX_icon_occupied_territories", "action_header": "GFX_conference_action_header",
+    "action_bottom": "GFX_peace_action_bottom", "turn_bg": "GFX_peace_turn_bg",
+    "country_entry": "GFX_load_save_entry2", "flag_frame": "GFX_small_flag_frame_thin2",
+    "entry": "GFX_conference_action_entry_bg", "victory_entry": "GFX_peace_conference_victory_entry",
+    "tab": "GFX_sort_button_140x29", "lobby_button": "GFX_main_lobby_button", "icons": "GFX_peace_conf_icons",
+    "player": "GFX_players_icon", "score": "GFX_victory_points", "participation": "GFX_war_score",
+    "expand": "GFX_peace_drop_down_icon",
+}
+
+
+def convert_peace_gfx(hoi4: Path, out: Path):
+    """Sprites of the peace conference screen (interface/peaceconferencewindow.gui) under gfx/interface/peace/
+    for Hoi4PeaceConferencePanel: PEACE_SPRITES, multi-frame ones as name_0.png, name_1.png..."""
+    import hoi4_gui as gui
+    dst = out / "gfx" / "interface" / "peace"
+    dst.mkdir(parents=True, exist_ok=True)
+    sprites = gui.load_sprites(hoi4)
+    for name, spr in PEACE_SPRITES.items():
+        frames = gui.sprite_frames(hoi4, sprites, spr)
+        if not frames:
+            print(f"  peace conference: no sprite {spr}")
+            continue
+        for i, fr in enumerate(frames):
+            fr.save(dst / (f"{name}.png" if len(frames) == 1 else f"{name}_{i}.png"))
+    print("Peace conference sprites written")
 
 
 # State view (interface/countrystateview.gui) sprites: name -> GFX sprite

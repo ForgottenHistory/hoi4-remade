@@ -31,8 +31,9 @@ namespace Hoi4.UI
         UIDocument document;
         VisualElement root, cards;
         ScrollView statesList, victorsList;
-        Label title, score, loserName;
+        Label title, score, participation, spentLabel, loserName, loserStates, submitText;
         VisualElement loserFlag;
+        readonly object hoverLeft = new object(), hoverRight = new object();
 
         Hoi4PeaceConference conference;
         ushort player;
@@ -89,10 +90,15 @@ namespace Hoi4.UI
             victorsList = root.Q<ScrollView>("pc-victors");
             title = root.Q<Label>("pc-title");
             score = root.Q<Label>("pc-score");
+            participation = root.Q<Label>("pc-participation");
+            spentLabel = root.Q<Label>("pc-spent");
             loserName = root.Q<Label>("pc-loser-name");
+            loserStates = root.Q<Label>("pc-loser-states");
             loserFlag = root.Q("pc-loser-flag");
+            submitText = root.Q<Label>("pc-submit-text");
             root.Q("pc-reset").RegisterCallback<ClickEvent>(_ => { demands.Clear(); Refresh(); });
-            root.Q("pc-confirm").RegisterCallback<ClickEvent>(_ => Confirm());
+            root.Q("pc-done").RegisterCallback<ClickEvent>(_ => Confirm());
+            root.Q("pc-submit").RegisterCallback<ClickEvent>(_ => Confirm()); // one turn: submitting ends it
             root.style.display = DisplayStyle.None;
             docRoot.Add(root);
 
@@ -108,7 +114,8 @@ namespace Hoi4.UI
                 Hoi4War.Instance.ConferenceOpened -= Open;
                 Hoi4War.Instance.ConferenceClosed -= Close;
             }
-            Hoi4UiHover.Remove(this);
+            Hoi4UiHover.Remove(hoverLeft);
+            Hoi4UiHover.Remove(hoverRight);
             if (Instance == this) Instance = null;
         }
 
@@ -118,6 +125,15 @@ namespace Hoi4.UI
         {
             string name = LocalizationManager.Get(tag);
             return string.IsNullOrEmpty(name) || name == tag ? tag : name;
+        }
+
+        /// <summary>The loser's capital's province name (HOI4: "Treaty of Brussels"), else its state's name.</summary>
+        static string CapitalName(string tag)
+        {
+            ushort capital = Hoi4Regions.Capital(tag);
+            string key = $"PROV{capital}";
+            string name = LocalizationManager.Get(key);
+            return string.IsNullOrEmpty(name) || name == key ? StateName(Hoi4Regions.State(capital)) : name;
         }
 
         static string StateName(int state)
@@ -134,8 +150,9 @@ namespace Hoi4.UI
             player = StarterKit.Initializer.Instance?.PlayerState?.PlayerCountryId ?? 0;
             demands.Clear();
             string loser = Tag(c.Loser);
-            title.text = $"TREATY OF {StateName(Hoi4Regions.State(Hoi4Regions.Capital(loser))).ToUpperInvariant()}";
+            title.text = $"TREATY OF {CapitalName(loser).ToUpperInvariant()}";
             loserName.text = CountryName(loser);
+            loserStates.text = c.States.Count.ToString();
             Hoi4Sprites.Apply(loserFlag, FlagDir + loser + ".png");
             BuildCards();
             if (Hoi4UnitCounters.Instance != null) Hoi4UnitCounters.Instance.Hidden = true;
@@ -156,7 +173,8 @@ namespace Hoi4.UI
             if (Hoi4UnitCounters.Instance != null) Hoi4UnitCounters.Instance.Hidden = false;
             foreach (var (r, was) in hidden) r.style.display = was;
             hidden.Clear();
-            Hoi4UiHover.Remove(this);
+            Hoi4UiHover.Remove(hoverLeft);
+            Hoi4UiHover.Remove(hoverRight);
         }
 
         /// <summary>Every other UI document's root hidden (top bar, panels, army cards, plan window, labels).</summary>
@@ -223,14 +241,18 @@ namespace Hoi4.UI
         {
             if (conference == null) return;
             FP total = PlayerScore, spent = Spent, left = total - spent;
-            score.text = $"Score: {left.ToInt()} / {total.ToInt()}";
+            score.text = $"Score: <color=#f7d45a>{left.ToInt()}</color>";
+            var me = conference.WinnerOf(player);
+            participation.text = me != null ? $"{(me.Participation * 100).ToInt()}%" : "";
+            spentLabel.text = spent.ToInt().ToString();
+            submitText.text = demands.Count > 0 ? $"Submit Demands   {spent.ToInt()}" : "Pass";
 
             statesList.Clear();
             var order = new List<int>(conference.States);
             order.Sort((a, b) => CostNow(b).CompareTo(CostNow(a)));
             FP all = FP.Zero;
             foreach (int s in order) if (!demands.Contains(s)) all += CostNow(s);
-            var selectAll = Row($"{all.ToInt()}", "Select All", "");
+            var selectAll = Row(all.ToInt().ToString(), "Select All", "");
             selectAll.RegisterCallback<ClickEvent>(_ => SelectAll());
             statesList.Add(selectAll);
             foreach (int s in order)
@@ -254,26 +276,42 @@ namespace Hoi4.UI
             foreach (var w in conference.Winners)
             {
                 bool isPlayer = w.Country == player;
-                var tile = new VisualElement();
+                var tile = new VisualElement { pickingMode = PickingMode.Ignore };
                 tile.AddToClassList("pc-victor");
                 tile.EnableInClassList("player", isPlayer);
-                var head = new VisualElement();
-                head.AddToClassList("pc-victor-head");
-                var flag = new VisualElement();
+                var head = Hoi4Sprites.Make("pc-victor-head");
+                var frame = Hoi4Sprites.Make("pc-flag-frame", "pc-victor-flag-frame");
+                var flag = new VisualElement { pickingMode = PickingMode.Ignore };
                 flag.AddToClassList("pc-flag");
                 Hoi4Sprites.Apply(flag, FlagDir + Tag(w.Country) + ".png");
-                head.Add(flag);
+                frame.Add(flag);
+                head.Add(frame);
                 head.Add(Text(CountryName(Tag(w.Country)), "pc-victor-name"));
-                FP have = isPlayer ? left : w.Score;
-                head.Add(Text($"{(w.Participation * 100).ToInt()}% participation   score {have.ToInt()}", "pc-victor-stats"));
+                if (isPlayer) head.Add(Hoi4Sprites.Make("pc-victor-player"));
+                head.Add(Hoi4Sprites.Make("pc-icon", "pc-icon-score", "pc-victor-score-icon"));
+                head.Add(Text((isPlayer ? left : w.Score).ToInt().ToString(), "pc-victor-score"));
+                head.Add(Hoi4Sprites.Make("pc-icon", "pc-icon-bids", "pc-victor-bids-icon"));
+                head.Add(Text(isPlayer ? demands.Count.ToString() : "0", "pc-victor-bids"));
+                head.Add(Hoi4Sprites.Make("pc-icon", "pc-icon-contested", "pc-victor-contested-icon"));
+                head.Add(Text("0", "pc-victor-contested"));
+                head.Add(Hoi4Sprites.Make("pc-icon", "pc-icon-participation", "pc-victor-part-icon"));
+                head.Add(Text($"{(w.Participation * 100).ToInt()}%", "pc-victor-part"));
                 tile.Add(head);
-                if (isPlayer)
+                if (isPlayer && demands.Count > 0)
+                {
+                    var list = new VisualElement { pickingMode = PickingMode.Ignore };
+                    list.AddToClassList("pc-victor-demands");
+                    var done = new List<int>();
                     foreach (int s in demands)
                     {
-                        var l = new Label(StateName(s));
-                        l.AddToClassList("pc-victor-demand");
-                        tile.Add(l);
+                        int state = s;
+                        var row = Row(conference.Cost(s, player, done).ToInt().ToString(), StateName(s), "demanded");
+                        row.RegisterCallback<ClickEvent>(_ => Toggle(state)); // click to take it back
+                        list.Add(row);
+                        done.Add(s);
                     }
+                    tile.Add(list);
+                }
                 victorsList.Add(tile);
             }
 
@@ -284,23 +322,23 @@ namespace Hoi4.UI
             else highlighter?.ClearProvinceSet();
         }
 
+        /// <summary>A conference_action_entry_bg row: score icon, cost, state name.</summary>
         static VisualElement Row(string cost, string name, string look)
         {
             var row = new VisualElement();
+            row.AddToClassList("spr");
             row.AddToClassList("pc-row");
             if (!string.IsNullOrEmpty(look)) row.AddToClassList(look);
-            var c = new Label(cost);
-            c.AddToClassList("pc-row-cost");
-            var n = new Label(name);
-            n.AddToClassList("pc-row-name");
-            row.Add(c);
-            row.Add(n);
+            Hoi4Sprites.Hook(row);
+            row.Add(Hoi4Sprites.Make("pc-icon", "pc-icon-score", "pc-row-icon"));
+            row.Add(Text(cost, "pc-row-cost"));
+            row.Add(Text(name, "pc-row-name"));
             return row;
         }
 
         static Label Text(string text, string cls)
         {
-            var l = new Label(text);
+            var l = new Label(text) { pickingMode = PickingMode.Ignore };
             l.AddToClassList("hoi4-label");
             l.AddToClassList(cls);
             return l;
@@ -323,15 +361,9 @@ namespace Hoi4.UI
                 if (at == 0)
                     foreach (ushort p in Hoi4Regions.ProvincesOf(s)) if (!Hoi4Regions.IsWater(p)) { at = p; break; }
                 if (at == 0 || !counters.TryGetProvincePoint(at, out var world)) continue;
-                var card = new VisualElement();
-                card.AddToClassList("pc-card");
-                card.pickingMode = PickingMode.Ignore;
-                var l = new Label();
-                l.AddToClassList("hoi4-label");
-                l.AddToClassList("center");
-                l.AddToClassList("pc-card-text");
-                l.pickingMode = PickingMode.Ignore;
-                card.Add(l);
+                var card = Hoi4Sprites.Make("pc-card");
+                card.Add(Hoi4Sprites.Make("pc-icon", "pc-icon-score", "pc-card-icon"));
+                card.Add(Text("", "pc-card-text"));
                 cards.Add(card);
                 cardOf[s] = card;
                 cardWorld[s] = world;
@@ -341,7 +373,8 @@ namespace Hoi4.UI
         void LateUpdate()
         {
             if (conference == null || cards == null || cards.panel == null) return;
-            Hoi4UiHover.Report(this, root.Q("pc-left"));
+            Hoi4UiHover.Report(hoverLeft, root.Q("pc-actions"));
+            Hoi4UiHover.Report(hoverRight, root.Q("pc-right"));
             var cam = Camera.main;
             if (cam == null) return;
             foreach (var kv in cardOf)

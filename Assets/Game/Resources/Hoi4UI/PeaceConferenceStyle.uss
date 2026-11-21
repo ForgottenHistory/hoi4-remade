@@ -1,76 +1,154 @@
-/* HOI4 peace conference (basic): a score panel at the top, Make Demands on the left, the victors on the right,
-   the map between them with a cost card on each of the loser's states. HOI4 pixel coordinates like the other panels. */
+/* HOI4 peace conference (interface/peaceconferencewindow.gui), basic version: positions and sizes are the .gui's,
+   in HOI4 pixels. Sprites from gfx/interface/peace/ (converter: convert_peace_gfx); tiled ones are 9-sliced with
+   their .gfx borderSize. Shortened: only the Take State demand, so the select window is lower and the actions list
+   starts higher. */
 .pc-root { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
 .pc-cards { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
 
-.pc-top {
-    --sprite: "gfx/interface/unitpanel/window.png";
-    position: absolute; left: 50%; translate: -50% 0; top: 70px; width: 440px; height: 108px;
-    -unity-slice-left: 64; -unity-slice-right: 64; -unity-slice-top: 64; -unity-slice-bottom: 44;
-}
-.pc-title { left: 0; top: 10px; width: 440px; height: 30px; font-size: 22px; letter-spacing: 3px; }
-.pc-subtitle { left: 0; top: 42px; width: 440px; height: 22px; font-size: 16px; }
-.pc-score { left: 0; top: 66px; width: 440px; height: 28px; font-size: 19px; }
+.pc-icon { width: 18px; height: 18px; }
+.pc-icon-score { --sprite: "gfx/interface/peace/score.png"; }
+.pc-icon-participation { --sprite: "gfx/interface/peace/participation.png"; }
+.pc-icon-bids { --sprite: "gfx/interface/peace/icons_0.png"; }
+.pc-icon-contested { --sprite: "gfx/interface/peace/icons_2.png"; }
+.pc-button-text { left: 0; top: 0; right: 0; bottom: 0; font-size: 16px; }
 
-.pc-side {
-    --sprite: "gfx/interface/unitpanel/window.png";
-    position: absolute; top: 110px; bottom: 60px; width: 340px;
+/* --- top window ------------------------------------------------------------------------------------------- */
+.pc-top {
+    --sprite: "gfx/interface/peace/upper_bar.png";
+    left: -20px; right: -20px; top: -3px; height: 96px;
+    -unity-slice-left: 52; -unity-slice-right: 52; -unity-slice-top: 52; -unity-slice-bottom: 43;
+}
+.pc-title { left: 50px; top: 30px; width: 600px; height: 32px; font-size: 20px; letter-spacing: 4px; }
+.pc-done { --sprite: "gfx/interface/peace/button_261.png"; right: 60px; top: 40px; width: 261px; height: 34px; }
+.pc-top-art { --sprite: "gfx/interface/peace/top_art.png"; left: 50%; translate: -50% 0; top: -3px; width: 580px; height: 100px; }
+
+.pc-turn { --sprite: "gfx/interface/peace/turn_bg.png"; left: 50%; translate: -50% 0; top: 85px; width: 515px; height: 65px; }
+.pc-turn-player { left: 0; top: 5px; width: 515px; height: 22px; font-size: 16px; }
+.pc-turn-part-icon { position: absolute; left: 112px; top: 32px; }
+.pc-turn-part { left: 134px; top: 30px; width: 150px; height: 22px; font-size: 16px; color: var(--hoi4-gold); }
+.pc-turn-score-icon { position: absolute; left: 292px; top: 32px; }
+.pc-turn-score { left: 314px; top: 30px; width: 190px; height: 22px; font-size: 16px; }
+
+.pc-phase {
+    --sprite: "gfx/interface/peace/window_small.png";
+    left: 50%; translate: -50% 0; top: 145px; width: 400px; height: 40px;
+    -unity-slice-left: 32; -unity-slice-right: 32; -unity-slice-top: 32; -unity-slice-bottom: 32;
+}
+.pc-phase-turn { left: 20px; top: 9px; width: 200px; height: 22px; font-size: 14px; }
+.pc-phase-icon { position: absolute; left: 250px; top: 11px; }
+.pc-phase-spent { left: 272px; top: 9px; width: 60px; height: 22px; font-size: 14px; }
+.pc-phase-turns { left: 340px; top: 9px; width: 50px; height: 22px; font-size: 14px; }
+
+/* --- left: select action window -------------------------------------------------------------------------- */
+.pc-select {
+    --sprite: "gfx/interface/peace/plain_bg.png";
+    left: -3px; top: 87px; width: 340px; height: 215px;
     -unity-slice-left: 64; -unity-slice-right: 64; -unity-slice-top: 64; -unity-slice-bottom: 64;
 }
-.pc-left { left: 0; }
-.pc-right { right: 0; }
-.pc-header { --sprite: "gfx/interface/unitpanel/header.png"; left: 12px; top: 10px; width: 316px; height: 35px; }
-.pc-header-text { left: 12px; top: 10px; width: 316px; height: 35px; font-size: 19px; letter-spacing: 4px; }
-.pc-hint { left: 18px; top: 52px; width: 304px; height: 20px; font-size: 14px; }
-.pc-action { top: 72px; color: rgb(240, 200, 80); }
-
-.pc-tile {
-    position: absolute; left: 14px; width: 312px; height: 44px;
-    background-color: rgba(60, 70, 50, 0.9); border-width: 1px; border-color: rgb(150, 160, 110);
+.pc-header { --sprite: "gfx/interface/peace/action_header.png"; left: 10px; top: 8px; width: 319px; height: 49px; }
+.pc-header-text { left: 10px; top: 8px; width: 319px; height: 49px; font-size: 18px; letter-spacing: 4px; }
+.pc-description {
+    --sprite: "gfx/interface/peace/window_small_small.png";
+    left: 5px; top: 58px; width: 330px; height: 72px;
+    -unity-slice-left: 16; -unity-slice-right: 16; -unity-slice-top: 16; -unity-slice-bottom: 16;
 }
-.pc-loser { top: 100px; }
-.pc-flag { position: absolute; left: 6px; top: 6px; width: 44px; height: 30px; }
-.pc-tile-name { left: 58px; top: 0; width: 250px; height: 42px; font-size: 18px; }
+.pc-desc-line { left: 10px; top: 10px; width: 310px; height: 18px; font-size: 14px; }
+.pc-desc-action { top: 28px; width: 110px; }
+.pc-desc-icon { --sprite: "gfx/interface/peace/take_state.png"; left: 112px; top: 30px; width: 14px; height: 14px; }
+.pc-desc-take { left: 130px; top: 28px; width: 180px; }
+.pc-bid-actions {
+    --sprite: "gfx/interface/peace/window_thin_border.png";
+    left: 3px; top: 133px; width: 335px; height: 78px;
+    -unity-slice-left: 32; -unity-slice-right: 32; -unity-slice-top: 32; -unity-slice-bottom: 32;
+}
+.pc-bid-label { left: 10px; top: 6px; width: 200px; height: 20px; font-size: 16px; }
+.pc-action-button { --sprite: "gfx/interface/peace/icon_button_0.png"; left: 10px; top: 26px; width: 46px; height: 46px; }
+.pc-action-button.selected { --sprite: "gfx/interface/peace/icon_button_1.png"; }
+.pc-action-icon { --sprite: "gfx/interface/peace/take_state.png"; left: 7px; top: 7px; width: 31px; height: 31px; }
 
-.pc-list { position: absolute; left: 14px; width: 312px; }
-.pc-states { top: 150px; bottom: 60px; }
-.pc-victors { top: 54px; bottom: 60px; }
+/* --- left: actions window (the loser and its states) ----------------------------------------------------- */
+.pc-actions {
+    --sprite: "gfx/interface/peace/window_border.png";
+    left: -3px; top: 296px; width: 340px; bottom: 77px;
+    -unity-slice-left: 64; -unity-slice-right: 64; -unity-slice-top: 64; -unity-slice-bottom: 64;
+}
+.pc-overlay {
+    --sprite: "gfx/interface/peace/overlay.png";
+    left: 0; top: 0; right: 0; bottom: 0;
+    -unity-slice-left: 144; -unity-slice-right: 144; -unity-slice-top: 144; -unity-slice-bottom: 144;
+}
+.pc-country { --sprite: "gfx/interface/peace/country_entry_0.png"; left: 12px; top: 10px; width: 312px; height: 54px; }
+.pc-flag-frame { --sprite: "gfx/interface/peace/flag_frame.png"; left: 8px; top: 9px; width: 51px; height: 36px; }
+.pc-flag { position: absolute; left: 4px; top: 4px; width: 43px; height: 28px; }
+.pc-country-name { left: 70px; top: 6px; width: 230px; height: 22px; font-size: 16px; }
+.pc-country-icon { position: absolute; left: 70px; top: 31px; }
+.pc-country-count { left: 92px; top: 29px; width: 60px; height: 20px; font-size: 15px; }
+
+.pc-list { position: absolute; }
+.pc-states { left: 14px; top: 68px; right: 10px; bottom: 12px; }
 
 .pc-row {
-    flex-direction: row; height: 30px; margin-bottom: 2px;
-    background-color: rgba(40, 60, 36, 0.9); border-width: 1px; border-color: rgb(80, 110, 70);
+    --sprite: "gfx/interface/peace/entry_0.png";
+    position: relative; width: 301px; height: 29px; flex-shrink: 0;
 }
-.pc-row:hover { background-color: rgba(56, 86, 50, 0.95); }
-.pc-row.demanded { background-color: rgba(40, 70, 120, 0.95); border-color: rgb(120, 160, 220); }
-.pc-row.unaffordable { background-color: rgba(40, 40, 40, 0.9); border-color: rgb(70, 70, 70); }
-.pc-row.taken { background-color: rgba(30, 30, 30, 0.8); border-color: rgb(60, 60, 60); }
-.pc-row-cost { position: relative; width: 70px; height: 28px; font-size: 15px; -unity-text-align: middle-right; padding-right: 10px; color: rgb(240, 200, 80); }
-.pc-row-name { position: relative; width: 230px; height: 28px; font-size: 15px; -unity-text-align: middle-left; }
-.pc-row.unaffordable .pc-row-cost { color: rgb(150, 120, 110); }
-.pc-row.unaffordable .pc-row-name { color: rgb(150, 150, 150); }
+.pc-row:hover { -unity-background-image-tint-color: rgb(255, 255, 230); }
+.pc-row.demanded { --sprite: "gfx/interface/peace/entry_1.png"; }
+.pc-row-icon { position: absolute; left: 22px; top: 5px; }
+.pc-row-cost { left: 46px; top: 4px; width: 56px; height: 22px; font-size: 15px; }
+.pc-row-name { left: 110px; top: 4px; width: 180px; height: 22px; font-size: 15px; }
+.pc-row.unaffordable .pc-row-cost { color: rgb(220, 80, 70); }
+.pc-row.unaffordable .pc-row-name { color: rgb(150, 150, 140); }
+.pc-row.unaffordable .pc-row-icon { -unity-background-image-tint-color: rgb(140, 140, 140); }
 
-.pc-victor { margin-bottom: 6px; background-color: rgba(60, 70, 50, 0.9); border-width: 1px; border-color: rgb(150, 160, 110); }
-.pc-victor.player { border-color: rgb(240, 200, 80); }
-.pc-victor-head { height: 46px; }
-.pc-victor-name { left: 58px; top: 2px; width: 240px; height: 22px; font-size: 17px; }
-.pc-victor-stats { left: 58px; top: 22px; width: 240px; height: 20px; font-size: 14px; color: rgb(220, 220, 200); }
-.pc-victor-demand { position: relative; height: 20px; font-size: 14px; padding-left: 58px; color: rgb(200, 210, 230); }
+.pc-bottom { --sprite: "gfx/interface/peace/action_bottom.png"; bottom: 1px; width: 341px; height: 83px; }
+.pc-bottom-left { left: -5px; }
+.pc-reset { --sprite: "gfx/interface/peace/button_148.png"; left: 95px; top: 24px; width: 148px; height: 36px; }
 
-.pc-button {
-    position: absolute; bottom: 14px; height: 34px;
-    background-color: rgba(34, 60, 38, 0.95); border-width: 1px; border-color: rgb(120, 160, 110);
+/* --- right: victors ------------------------------------------------------------------------------------- */
+.pc-right {
+    --sprite: "gfx/interface/peace/plain_bg.png";
+    right: -5px; top: 87px; width: 340px; bottom: 0;
+    -unity-slice-left: 64; -unity-slice-right: 64; -unity-slice-top: 64; -unity-slice-bottom: 64;
 }
-.pc-button:hover { background-color: rgba(48, 84, 54, 0.95); }
-.pc-button:active { background-color: rgba(24, 44, 28, 0.95); }
-.pc-button-text { left: 0; top: 0; right: 0; bottom: 0; font-size: 17px; }
-.pc-reset { left: 90px; width: 160px; }
-.pc-confirm { left: 50px; width: 240px; }
+.pc-tab { --sprite: "gfx/interface/peace/tab_1.png"; left: 100px; top: 25px; width: 140px; height: 29px; }
+.pc-tab-text { left: 0; top: 0; width: 140px; height: 29px; font-size: 15px; }
+.pc-history {
+    --sprite: "gfx/interface/peace/window_border.png";
+    left: -3px; top: 70px; width: 340px; bottom: 80px;
+    -unity-slice-left: 64; -unity-slice-right: 64; -unity-slice-top: 64; -unity-slice-bottom: 64;
+}
+.pc-right-header { left: 5px; top: 80px; }
+.pc-right-header-text { left: 5px; top: 80px; }
+.pc-victors { left: 12px; top: 134px; right: 10px; bottom: 90px; }
+.pc-bottom-right { right: -6px; }
+.pc-submit { --sprite: "gfx/interface/peace/lobby_button_0.png"; left: 27px; top: 24px; width: 288px; height: 36px; }
+.pc-submit:hover { --sprite: "gfx/interface/peace/lobby_button_1.png"; }
+.pc-submit:active { --sprite: "gfx/interface/peace/lobby_button_2.png"; }
 
+.pc-victor { position: relative; width: 312px; flex-shrink: 0; margin-bottom: 4px; }
+.pc-victor-head { --sprite: "gfx/interface/peace/victory_entry_0.png"; position: relative; width: 312px; height: 84px; }
+.pc-victor.player .pc-victor-head { --sprite: "gfx/interface/peace/victory_entry_1.png"; }
+.pc-victor-flag-frame { left: 3px; top: 11px; }
+.pc-victor-name { left: 62px; top: 17px; width: 135px; height: 22px; font-size: 16px; }
+.pc-victor-player { --sprite: "gfx/interface/peace/player.png"; left: 200px; top: 18px; width: 20px; height: 20px; }
+.pc-victor-score-icon { position: absolute; left: 232px; top: 20px; }
+.pc-victor-score { left: 254px; top: 17px; width: 54px; height: 22px; font-size: 16px; }
+.pc-victor-bids-icon { position: absolute; left: 40px; top: 52px; }
+.pc-victor-bids { left: 60px; top: 50px; width: 40px; height: 22px; font-size: 15px; }
+.pc-victor-contested-icon { position: absolute; left: 100px; top: 52px; }
+.pc-victor-contested { left: 120px; top: 50px; width: 40px; height: 22px; font-size: 15px; }
+.pc-victor-part-icon { position: absolute; left: 160px; top: 52px; }
+.pc-victor-part { left: 182px; top: 50px; width: 80px; height: 22px; font-size: 15px; }
+.pc-victor-demands { position: relative; padding-left: 6px; }
+
+/* --- cost cards on the map ------------------------------------------------------------------------------ */
 .pc-card {
-    position: absolute; translate: -50% -50%; width: 64px; height: 26px;
-    background-color: rgba(30, 40, 30, 0.88); border-width: 1px; border-color: rgb(120, 200, 110);
+    --sprite: "gfx/interface/peace/window_small_small.png";
+    position: absolute; translate: -50% -50%; width: 74px; height: 26px;
+    -unity-slice-left: 16; -unity-slice-right: 16; -unity-slice-top: 16; -unity-slice-bottom: 16;
 }
-.pc-card.demanded { background-color: rgba(30, 50, 100, 0.92); border-color: rgb(130, 170, 240); }
-.pc-card.unaffordable { border-color: rgb(110, 110, 110); }
-.pc-card.taken { display: none; }
-.pc-card-text { left: 0; top: 0; width: 64px; height: 26px; font-size: 15px; color: rgb(240, 200, 80); }
+.pc-card.demanded { -unity-background-image-tint-color: rgb(120, 170, 255); }
+.pc-card.unaffordable { -unity-background-image-tint-color: rgb(110, 110, 110); }
+.pc-card-icon { position: absolute; left: 6px; top: 4px; }
+.pc-card-text { left: 27px; top: 2px; width: 44px; height: 22px; font-size: 15px; color: var(--hoi4-gold); }
+.pc-card.unaffordable .pc-card-text { color: rgb(220, 80, 70); }

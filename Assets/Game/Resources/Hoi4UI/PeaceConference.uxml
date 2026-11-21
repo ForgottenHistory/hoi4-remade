@@ -1,34 +1,84 @@
 <ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <!-- HOI4 interface/peaceconferencewindow.gui, basic version (Take State only, one turn) -->
     <ui:VisualElement name="pc-root" class="pc-root" picking-mode="Ignore">
         <ui:VisualElement name="pc-cards" class="pc-cards" picking-mode="Ignore" />
 
-        <ui:VisualElement name="pc-top" class="spr pc-top" picking-mode="Position">
-            <ui:Label name="pc-title" class="hoi4-label center pc-title" picking-mode="Ignore" />
-            <ui:Label text="Make your Demands" class="hoi4-label center pc-subtitle" picking-mode="Ignore" />
-            <ui:Label name="pc-score" class="hoi4-label center gold pc-score" picking-mode="Ignore" />
+        <!-- peaceconference_top_window -->
+        <ui:VisualElement class="spr pc-top" picking-mode="Position">
+            <ui:Label name="pc-title" class="hoi4-label pc-title" picking-mode="Ignore" />
+            <ui:VisualElement name="pc-done" class="spr hoi4-button pc-done" picking-mode="Position">
+                <ui:Label text="Confirm and Exit" class="hoi4-label center pc-button-text" picking-mode="Ignore" />
+            </ui:VisualElement>
+        </ui:VisualElement>
+        <ui:VisualElement class="spr pc-top-art" picking-mode="Ignore" />
+
+        <!-- current_participant_window and bidphase_panel -->
+        <ui:VisualElement class="spr pc-turn" picking-mode="Position">
+            <ui:Label text="Make your Demands" class="hoi4-label center pc-turn-player" picking-mode="Ignore" />
+            <ui:VisualElement class="spr pc-icon pc-icon-participation pc-turn-part-icon" picking-mode="Ignore" />
+            <ui:Label name="pc-participation" class="hoi4-label pc-turn-part" picking-mode="Ignore" />
+            <ui:VisualElement class="spr pc-icon pc-icon-score pc-turn-score-icon" picking-mode="Ignore" />
+            <ui:Label name="pc-score" class="hoi4-label pc-turn-score" picking-mode="Ignore" enable-rich-text="true" />
+        </ui:VisualElement>
+        <ui:VisualElement class="spr pc-phase" picking-mode="Position">
+            <ui:Label text="Conference turn: &lt;color=#f7d45a&gt;1&lt;/color&gt;" class="hoi4-label pc-phase-turn" picking-mode="Ignore" enable-rich-text="true" />
+            <ui:VisualElement class="spr pc-icon pc-icon-score pc-phase-icon" picking-mode="Ignore" />
+            <ui:Label name="pc-spent" class="hoi4-label pc-phase-spent" picking-mode="Ignore" />
+            <ui:Label text="1/1" class="hoi4-label pc-phase-turns" picking-mode="Ignore" />
         </ui:VisualElement>
 
-        <ui:VisualElement name="pc-left" class="spr pc-side pc-left" picking-mode="Position">
+        <!-- peaceconference_select_action_window -->
+        <ui:VisualElement name="pc-select" class="spr pc-select" picking-mode="Position">
             <ui:VisualElement class="spr pc-header" picking-mode="Ignore" />
             <ui:Label text="MAKE DEMANDS" class="hoi4-label center pc-header-text" picking-mode="Ignore" />
-            <ui:Label text="Select the Demands you want to make." class="hoi4-label pc-hint" picking-mode="Ignore" />
-            <ui:Label text="Current action: Take State" class="hoi4-label pc-hint pc-action" picking-mode="Ignore" />
-            <ui:VisualElement name="pc-loser" class="pc-tile pc-loser" picking-mode="Ignore">
-                <ui:VisualElement name="pc-loser-flag" class="pc-flag" picking-mode="Ignore" />
-                <ui:Label name="pc-loser-name" class="hoi4-label pc-tile-name" picking-mode="Ignore" />
+            <ui:VisualElement class="spr pc-description" picking-mode="Ignore">
+                <ui:Label text="Select the Demands you want to make." class="hoi4-label pc-desc-line" picking-mode="Ignore" />
+                <ui:Label text="Current action:" class="hoi4-label pc-desc-line pc-desc-action" picking-mode="Ignore" />
+                <ui:VisualElement class="spr pc-desc-icon" picking-mode="Ignore" />
+                <ui:Label text="Take State" class="hoi4-label gold pc-desc-line pc-desc-take" picking-mode="Ignore" />
+            </ui:VisualElement>
+            <ui:VisualElement class="spr pc-bid-actions" picking-mode="Ignore">
+                <ui:Label text="Demands:" class="hoi4-label pc-bid-label" picking-mode="Ignore" />
+                <ui:VisualElement class="spr pc-action-button selected" picking-mode="Ignore">
+                    <ui:VisualElement class="spr pc-action-icon" picking-mode="Ignore" />
+                </ui:VisualElement>
+            </ui:VisualElement>
+        </ui:VisualElement>
+
+        <!-- peaceconference_actions_window: the loser and its states -->
+        <ui:VisualElement name="pc-actions" class="spr pc-actions" picking-mode="Position">
+            <ui:VisualElement class="spr pc-overlay" picking-mode="Ignore" />
+            <ui:VisualElement class="spr pc-country" picking-mode="Ignore">
+                <ui:VisualElement class="spr pc-flag-frame" picking-mode="Ignore">
+                    <ui:VisualElement name="pc-loser-flag" class="pc-flag" picking-mode="Ignore" />
+                </ui:VisualElement>
+                <ui:Label name="pc-loser-name" class="hoi4-label pc-country-name" picking-mode="Ignore" />
+                <ui:VisualElement class="spr pc-icon pc-icon-bids pc-country-icon" picking-mode="Ignore" />
+                <ui:Label name="pc-loser-states" class="hoi4-label pc-country-count" picking-mode="Ignore" />
             </ui:VisualElement>
             <ui:ScrollView name="pc-states" class="pc-list pc-states" />
-            <ui:VisualElement name="pc-reset" class="pc-button pc-reset" picking-mode="Position">
+        </ui:VisualElement>
+        <ui:VisualElement class="spr pc-bottom pc-bottom-left" picking-mode="Position">
+            <ui:VisualElement name="pc-reset" class="spr hoi4-button pc-reset" picking-mode="Position">
                 <ui:Label text="Reset" class="hoi4-label center pc-button-text" picking-mode="Ignore" />
             </ui:VisualElement>
         </ui:VisualElement>
 
-        <ui:VisualElement name="pc-right" class="spr pc-side pc-right" picking-mode="Position">
-            <ui:VisualElement class="spr pc-header" picking-mode="Ignore" />
-            <ui:Label text="VICTORS" class="hoi4-label center pc-header-text" picking-mode="Ignore" />
+        <!-- peaceconference_right_window: the victors and their demands -->
+        <ui:VisualElement name="pc-right" class="spr pc-right" picking-mode="Position">
+            <ui:VisualElement class="spr pc-tab" picking-mode="Ignore">
+                <ui:Label text="Victors" class="hoi4-label center pc-tab-text" picking-mode="Ignore" />
+            </ui:VisualElement>
+            <ui:VisualElement class="spr pc-history" picking-mode="Ignore">
+                <ui:VisualElement class="spr pc-overlay" picking-mode="Ignore" />
+            </ui:VisualElement>
+            <ui:VisualElement class="spr pc-header pc-right-header" picking-mode="Ignore" />
+            <ui:Label text="CURRENT DEMANDS" class="hoi4-label center pc-header-text pc-right-header-text" picking-mode="Ignore" />
             <ui:ScrollView name="pc-victors" class="pc-list pc-victors" />
-            <ui:VisualElement name="pc-confirm" class="pc-button pc-confirm" picking-mode="Position">
-                <ui:Label text="Confirm and Exit" class="hoi4-label center pc-button-text" picking-mode="Ignore" />
+        </ui:VisualElement>
+        <ui:VisualElement class="spr pc-bottom pc-bottom-right" picking-mode="Position">
+            <ui:VisualElement name="pc-submit" class="spr pc-submit" picking-mode="Position">
+                <ui:Label name="pc-submit-text" class="hoi4-label center pc-button-text" picking-mode="Ignore" />
             </ui:VisualElement>
         </ui:VisualElement>
     </ui:VisualElement>
