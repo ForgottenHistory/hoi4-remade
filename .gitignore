@@ -126,3 +126,7 @@ Packages/packages-lock.json
 
 # Hoi4Recorder output (play-mode recordings)
 /Recordings/
+
+# Prototype previews and caches (often rendered from HOI4 screenshots or textures: never commit)
+Tools/prototypes/**/*.png
+Tools/prototypes/**/*.pkl

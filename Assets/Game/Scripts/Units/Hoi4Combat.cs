@@ -12,8 +12,8 @@ namespace Hoi4.Units
     /// GAME: HOI4 land battles, reduced. Like HOI4, a battle is fought across a border, not inside a
     /// province: a division ordered into a province that holds divisions of a country at war with it
     /// is held in its own province (the engine's ArrivalBlocker) and attacks from there. Every game
-    /// hour the attackers of a target province fight its defenders, following the wiki's "Land battle"
-    /// (as ported in the reference workspace's battle.py): attacks vs defences give hits, hits take
+    /// hour the attackers of a target province fight its defenders, following the HOI4 wiki's "Land battle"
+    /// page: attacks vs defences give hits, hits take
     /// organisation and strength; divisions beyond the combat width wait in reserve. A defender at zero
     /// organisation retreats to a friendly neighbouring province (destroyed when there is none); an
     /// attacker at zero organisation drops its order. Once the target is empty the attackers walk in.
