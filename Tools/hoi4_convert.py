@@ -494,6 +494,8 @@ def convert(hoi4: Path, out: Path):
     convert_counter_gfx(hoi4, out, {t: c["ideology"] for t, c in oob_countries.items()}, main_types)
     convert_unit_panel(hoi4, out, main_types)
     convert_army_cards(hoi4, out)
+    convert_battleplan_gfx(hoi4, out)
+    convert_front_line(hoi4, out)
     convert_state_view(hoi4, out)
     convert_move_arrow(hoi4, out)
     write_country_stats(out, tags, country_stats, owner_manpower)
@@ -968,6 +970,20 @@ def convert_oob(hoi4: Path, out: Path, existing_tags, ruling_party):
 COUNTER_IDEOLOGIES = ["democratic", "communism", "fascism", "neutrality"]  # frame order of the ideology sprite
 
 
+def convert_front_line(hoi4: Path, out: Path):
+    """The battle plan front line (gfx/maparrows arrowType defence_line): mask and pattern as PNGs
+    (front_mask.png / front_pattern.png). The band is the top row (own side), the teeth point at the enemy."""
+    src = hoi4 / "gfx" / "maparrows"
+    dst = out / "gfx" / "maparrows"
+    dst.mkdir(parents=True, exist_ok=True)
+    Image.open(src / "defensive_line_mask.dds").convert("RGBA").save(dst / "front_mask.png")
+    Image.open(src / "defensive_line.dds").convert("RGBA").save(dst / "front_pattern.png")
+    # Unconfirmed line while drawing (arrowType magnet_line): the green dashes
+    Image.open(src / "stripe_mask.dds").convert("RGBA").save(dst / "preview_mask.png")
+    Image.open(src / "stripe_pattern.dds").convert("RGBA").save(dst / "preview_pattern.png")
+    print("Front line textures")
+
+
 def convert_move_arrow(hoi4: Path, out: Path, arrow_name="move_thick"):
     """HOI4's unit move arrow (gfx/maparrows/maparrows.txt arrowType move_thick): mask and pattern
     textures as PNGs under gfx/maparrows/ plus its shape parameters in move_arrow.json5.
@@ -1198,6 +1214,24 @@ def convert_army_cards(hoi4: Path, out: Path):
         "// Generated from HOI4 interface/leadergroups.gui sprites: [w, h]" + chr(10)
         + json.dumps(sizes, indent=1) + chr(10), encoding="utf-8")
     print(f"Army cards: {len(sizes)} sprites")
+
+
+def convert_battleplan_gfx(hoi4: Path, out: Path):
+    """Sprites of the Battle Plans window (interface/battleplantools.gui) under gfx/interface/battleplans/:
+    the window background and the draw offence / draw defence / delete buttons (2 frames each: idle, pressed)."""
+    import hoi4_gui as gui
+    dst = out / "gfx" / "interface" / "battleplans"
+    dst.mkdir(parents=True, exist_ok=True)
+    sprites = gui.load_sprites(hoi4)
+    for name, spr in (("bg", "GFX_BPT_bg"), ("offence", "GFX_BPT_order_draw_offence_btn"),
+                      ("defence", "GFX_BPT_order_draw_defence_btn"), ("delete", "GFX_BPT_order_delete_btn")):
+        frames = gui.sprite_frames(hoi4, sprites, spr)
+        if not frames:
+            print(f"  battle plans: no sprite {spr}")
+            continue
+        for i, fr in enumerate(frames):
+            fr.save(dst / (f"{name}.png" if len(frames) == 1 else f"{name}_{i}.png"))
+    print("Battle plan sprites written")
 
 
 # State view (interface/countrystateview.gui) sprites: name -> GFX sprite

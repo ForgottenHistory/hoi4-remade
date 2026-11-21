@@ -33,6 +33,9 @@ namespace Hoi4.Units
 
         public IReadOnlyList<Hoi4Army> All => armies;
 
+        /// <summary>The army's colour: a fixed hue per army number (golden-ratio spacing keeps neighbours apart).</summary>
+        public static Color ColorOf(int armyId, float value = 0.5f) => Color.HSVToRGB((armyId * 0.382f) % 1f, 0.75f, value);
+
         public Hoi4Army ArmyOf(ushort unitId) => armyOf.TryGetValue(unitId, out var a) ? a : null;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]

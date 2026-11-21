@@ -189,10 +189,51 @@ float4 ArchonOcean(ArchonMapContext ctx)
     return Hoi4Render(ctx.uv, ctx.positionWS, 0);
 }
 
+// Battle plan tool (Hoi4BattlePlans): province-indexed RGBA, rgb = colour, a = 0 none / 0.5 striped /
+// 1 the province under the cursor. Striped diagonally, the cursor's province brighter.
+TEXTURE2D(_Hoi4PlanTex);
+float _Hoi4PlanActive;
+
+float3 Hoi4PlanOverlay(float3 rgb, ArchonMapContext ctx)
+{
+    if (_Hoi4PlanActive < 0.5 || ctx.provinceID == 0u) return rgb;
+    uint w, h;
+    _ProvinceOwnerTexture.GetDimensions(w, h);
+    float2 texel = 1.0 / float2(w, h);
+
+    // The province id texture is hard-edged and pixelated; blur the coverage over a small disc so the
+    // striped region has soft edges like HOI4's
+    float cover = 0.0, hot = 0.0;
+    float3 tint = 0.0;
+    const float radius = 1.0; // map px: a European province is ~9 px across
+    [unroll] for (int i = 0; i < 13; i++)
+    {
+        float ang = i * 2.39996;
+        float r = i == 0 ? 0.0 : radius * sqrt(i / 12.0);
+        float2 uv = ctx.uv + float2(cos(ang), -sin(ang)) * r * texel;
+        uint id = SampleProvinceID(uv);
+        float4 plan = LOAD_TEXTURE2D(_Hoi4PlanTex, int2(id % 256u, id / 256u));
+        float m = plan.a > 0.01 ? 1.0 : 0.0;
+        cover += m;
+        hot += plan.a > 0.75 ? 1.0 : 0.0;
+        tint += plan.rgb * m;
+    }
+    if (cover < 0.5) return rgb;
+    tint /= cover;
+    cover /= 13.0;
+    hot /= 13.0;
+
+    float2 mapPx = float2(ctx.uv.x * w, (1.0 - ctx.uv.y) * h);
+    float stripe = smoothstep(-0.35, 0.35, sin((mapPx.x + mapPx.y) * 6.2832 / 3.4));
+    float k = cover * lerp(0.10, 0.42, stripe) + hot * 0.18;
+    return lerp(rgb, tint, k) + hot * 0.05;
+}
+
 // Hoi4Render already lit the pixel
 #define ARCHON_OVERRIDE_LIGHTING
 float4 ArchonLighting(float4 color, ArchonMapContext ctx)
 {
+    color.rgb = Hoi4PlanOverlay(color.rgb, ctx);
     return color;
 }
 

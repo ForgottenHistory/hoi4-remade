@@ -120,7 +120,8 @@ namespace Hoi4.Units
         void Update()
         {
             if (gameState == null) return;
-            if (Input.GetKeyDown(KeyCode.Escape) && selection.Count > 0)
+            bool drawing = Hoi4BattlePlans.Instance != null && Hoi4BattlePlans.Instance.Active;
+            if (Input.GetKeyDown(KeyCode.Escape) && selection.Count > 0 && !drawing)
                 Clear();
             if (Input.GetKeyDown(KeyCode.S) && !Input.GetKey(KeyCode.LeftControl) && !Input.GetKey(KeyCode.RightControl))
                 Hoi4DivisionPresenter.SelectHalf(this);
@@ -144,6 +145,7 @@ namespace Hoi4.Units
         void UpdateBox()
         {
             if (selector == null) return;
+            if (Hoi4BattlePlans.Instance != null && Hoi4BattlePlans.Instance.Active) return; // drawing a plan: no box selection
             if (selector.IsLeftDragging && !boxActive)
             {
                 boxActive = true;
@@ -192,6 +194,7 @@ namespace Hoi4.Units
 
         bool OnClick(int button, Vector2 screen)
         {
+            if (Hoi4BattlePlans.Instance != null && Hoi4BattlePlans.Instance.OnClick(button, screen)) return true;
             var counters = Hoi4UnitCounters.Instance;
             if (button == 0)
             {

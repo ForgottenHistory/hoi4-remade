@@ -599,7 +599,7 @@ namespace Hoi4.Units
             if (s.Action >= 2 && s.ArmyId != 0)
             {
                 // The strip shows which army the division belongs to, not what it is doing
-                var army = Color.HSVToRGB((s.ArmyId * 0.382f) % 1f, 0.75f, 0.5f);
+                var army = Hoi4Armies.ColorOf(s.ArmyId);
                 var fill = (Color32)army;
                 var edgeCol = (Color32)(army * 0.4f);
                 for (int sy = 1; sy < CounterH - 2; sy++)

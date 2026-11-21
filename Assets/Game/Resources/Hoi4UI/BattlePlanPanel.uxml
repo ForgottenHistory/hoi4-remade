@@ -1,0 +1,10 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <ui:VisualElement name="bp-labels" class="bp-labels" picking-mode="Ignore" />
+    <ui:VisualElement name="bp-window" class="bp-window" picking-mode="Position">
+        <ui:VisualElement name="bp-bg" class="bp-bg" picking-mode="Ignore" />
+        <ui:Label name="bp-title" class="bp-title" text="Battle Plans" picking-mode="Ignore" />
+        <ui:VisualElement name="bp-offence" class="bp-btn bp-offence" picking-mode="Ignore" />
+        <ui:VisualElement name="bp-front" class="bp-btn bp-front hoi4-button" picking-mode="Position" />
+        <ui:VisualElement name="bp-delete" class="bp-btn bp-delete hoi4-button" picking-mode="Position" />
+    </ui:VisualElement>
+</ui:UXML>
