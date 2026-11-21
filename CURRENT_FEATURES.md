@@ -8,13 +8,13 @@
 
 **Map:** Clausewitz-style terrain, water, coasts, smooth mesh borders in HOI4 classes, rivers, country labels, haze, clouds, day/night with city lights
 
-**Units:** 1936 armies, on-map counters, click and box selection, HOI4 movement rules, move arrows
+**Units:** 1936 armies, on-map counters, click and box selection, HOI4 movement rules, move arrows (red when attacking), hourly movement, province-to-province combat with retreat and overrun
 
 **UI:** Top bar, state panel and division panel (UI Toolkit: UXML + USS + C#), all sprites loaded at runtime from the converted data
 
 **Data:** One Python converter turns the HOI4 install into an Archon data directory
 
-**Not Implemented:** Combat, production, research, politics, AI, diplomacy UI, saving/loading of HOI4-specific state, multiplayer
+**Not Implemented:** Province capture, production, research, politics, AI (including enemy armies), saving/loading of HOI4-specific state, multiplayer
 
 The goal is to stress-test Archon-Engine, not to ship a game. Big visual wins are preferred over exact HOI4 fidelity.
 
@@ -50,6 +50,10 @@ The goal is to stress-test Archon-Engine, not to ship a game. Big visual wins ar
 - **Move orders** - Right-click a province with own divisions selected: path and move
 - **Movement rules** - Land only, no water, no impassable states, owner must be own country, ally, enemy or military access
 - **Move arrows** - HOI4's `move_thick` arrow ribbon along the route, travelled part in a lighter colour
+- **Hourly movement** - Divisions advance every game hour, so progress and arrows fill smoothly
+- **Combat** - Province-to-province battles from converted HOI4 equipment stats (attack, defence, breakthrough, hardness, armour, piercing). The attack starts when the move starts; the move into the province is held while an enemy is there. Battle markers sit on the border between the two provinces
+- **Retreat and overrun** - Broken defenders march to a friendly neighbouring province (a day); a retreater that arrives where an enemy stands is destroyed
+- **Attack arrows** - Move arrows turn red for attacks, with a lighter red for the travelled part
 - **Hover blocking** - No province hover or click through counters
 
 ---
