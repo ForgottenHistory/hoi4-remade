@@ -24,6 +24,21 @@ float _Hoi4CountryEdgeSoftness; // 1 = gradient over ~3-4 map px between countri
 TEXTURE2D(_Hoi4DiplomacyColors);
 float _Hoi4DiplomacyActive;
 
+// Occupation (Hoi4Occupation): one texel per province ID, 0 = not occupied, else the controlling country.
+// HOI4 paints an occupied province in the controller's colour, so the country blend uses it instead of the owner.
+TEXTURE2D(_Hoi4ControllerTex);
+
+uint Hoi4Controller(uint provinceID)
+{
+    return (uint)(LOAD_TEXTURE2D(_Hoi4ControllerTex, int2(provinceID % 256, provinceID / 256)).r + 0.5);
+}
+
+uint Hoi4ColorOwner(int2 pixel, uint owner)
+{
+    uint controller = Hoi4Controller(DecodeProvinceID(LOAD_TEXTURE2D(_ProvinceIDTexture, pixel).rg));
+    return controller != 0u ? controller : owner;
+}
+
 float4 Hoi4OwnerColor(uint owner)
 {
     if (_Hoi4DiplomacyActive > 0.5)
@@ -64,7 +79,8 @@ float4 Hoi4CountryColor(float2 uv)
             float2 tent = saturate(1.5 - abs((float2)pixel - q) / 1.25);
             float weight = tent.x * tent.y;
             if (weight <= 0) continue;
-            uint owner = (uint)(LOAD_TEXTURE2D(_ProvinceOwnerTexture, clamp(pixel, int2(0, 0), maxI)).r + 0.5);
+            int2 cp = clamp(pixel, int2(0, 0), maxI);
+            uint owner = Hoi4ColorOwner(cp, (uint)(LOAD_TEXTURE2D(_ProvinceOwnerTexture, cp).r + 0.5));
 
             bool placed = false;
             [unroll]

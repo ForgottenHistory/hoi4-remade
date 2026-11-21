@@ -28,6 +28,10 @@ namespace Hoi4.Map
             MapRendererRegistry.LabelSource = new Hoi4MapLabelSource();
         }
 
+        /// <summary>Occupied land counts towards the occupier's label, like its colour.</summary>
+        public override ushort GetLabelHolder(ushort province, ushort owner, Core.GameState gameState) =>
+            Hoi4.Units.Hoi4Occupation.ControllerOf(gameState, province);
+
         public override ushort GetCapitalProvince(ushort countryId, CountrySystem countries)
         {
             EnsureLoaded();

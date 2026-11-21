@@ -16,7 +16,7 @@ namespace Hoi4.Units
     /// organisation and strength; divisions beyond the combat width wait in reserve. A defender at zero
     /// organisation retreats to a friendly neighbouring province (destroyed when there is none); an
     /// attacker at zero organisation drops its order. Once the target is empty the attackers walk in.
-    /// Left out: terrain, rivers, entrenchment, forts, planning, generals, supply, province capture.
+    /// Left out: terrain, rivers, entrenchment, forts, planning, generals, supply. Occupation is Hoi4Occupation.
     /// </summary>
     public sealed class Hoi4Combat : MonoBehaviour
     {
@@ -269,7 +269,7 @@ namespace Hoi4.Units
             var neighbours = gameState.Adjacencies.GetNeighborsWhere(from, p =>
             {
                 if (Hoi4Regions.IsWater(p) || Hoi4Regions.IsImpassable(p)) return false;
-                ushort owner = gameState.Provinces.GetProvinceOwner(p);
+                ushort owner = Hoi4Occupation.ControllerOf(gameState, p); // occupied ground is not friendly
                 if (owner != country && !diplomacy.AreAllied(country, owner)) return false;
                 if (byProvince.TryGetValue(p, out var list))
                     foreach (ushort other in list)
@@ -281,7 +281,7 @@ namespace Hoi4.Units
             });
             foreach (ushort p in neighbours)
             {
-                bool own = gameState.Provinces.GetProvinceOwner(p) == country;
+                bool own = Hoi4Occupation.ControllerOf(gameState, p) == country;
                 if (best == 0 || (own && !bestOwn)) { best = p; bestOwn = own; }
             }
 
