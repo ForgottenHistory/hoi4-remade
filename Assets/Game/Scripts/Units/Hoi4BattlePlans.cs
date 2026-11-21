@@ -490,6 +490,7 @@ namespace Hoi4.Units
         {
             if (!simReady) return;
             borderDirty = true;
+            UpdatePlanning();
         }
 
         /// <summary>Hoi4EnemyAI takes a division off its line to attack; it rejoins when the attack is over.</summary>

@@ -304,6 +304,36 @@ namespace Hoi4.Units
                 planPixels[hoverProvince] = new Color32(green.r, green.g, green.b, 96);
         }
 
+        // --- Planning bonus ---------------------------------------------------------------------------
+
+        static readonly Core.Data.FixedPoint64 PlanningGain = Core.Data.FixedPoint64.FromFraction(2, 100);  // HOI4 PLANNING_GAIN, per day
+        static readonly Core.Data.FixedPoint64 PlanningDecay = Core.Data.FixedPoint64.FromFraction(1, 100); // HOI4 PLANNING_DECAY, per day
+        static readonly Core.Data.FixedPoint64 PlanningMax = Core.Data.FixedPoint64.FromFraction(3, 10);    // HOI4 PLANNING_MAX (techs can raise it)
+        public static Core.Data.FixedPoint64 MaxPlanning => PlanningMax;
+
+        /// <summary>Daily: a division on an offensive that stands still on its front line gains planning; one that
+        /// moves, or has no offensive, loses it.</summary>
+        void UpdatePlanning()
+        {
+            var divisions = Hoi4Divisions.Instance;
+            if (divisions == null) return;
+            var units = gameState.Units;
+            var queue = units.MovementQueue;
+            var ids = new List<ushort>(divisions.All.Keys);
+            ids.Sort();
+            foreach (ushort u in ids)
+            {
+                var d = divisions.Get(u);
+                if (d == null || !units.HasUnit(u)) continue;
+                bool planning = offensiveOf.ContainsKey(u) && !queue.IsUnitMoving(u)
+                    && planOf.TryGetValue(u, out var plan) && plan.FrontProvinces != null
+                    && plan.FrontProvinces.Contains(units.GetUnit(u).provinceID);
+                d.Planning = planning
+                    ? Core.Data.FixedPoint64.Min(PlanningMax, d.Planning + PlanningGain)
+                    : Core.Data.FixedPoint64.Max(Core.Data.FixedPoint64.Zero, d.Planning - PlanningDecay);
+            }
+        }
+
         // --- Executing (HOI4 COrderExecuteCommand: the army's play / stop buttons) ---------------------
 
         readonly SortedSet<int> executing = new SortedSet<int>(); // army ids whose plans run

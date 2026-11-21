@@ -91,6 +91,8 @@ namespace Hoi4.Units
             Hoi4Sprites.Apply(icon, iconPath);
             card.Add(icon);
             card.Add(Hoi4Sprites.Make("dv-level"));
+            // unitview.gui bar_prepare: the planning bonus, of its maximum
+            card.Add(Bar("dv-bar-plan", d != null ? d.Planning.ToFloat() / Hoi4BattlePlans.MaxPlanning.ToFloat() : 0f));
 
             card.Add(Text("dv-name", d?.Name ?? $"Unit {id}"));
             card.Add(Text("dv-status", Status(id, unit, gameState)));
