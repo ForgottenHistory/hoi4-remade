@@ -45,13 +45,17 @@ namespace Hoi4.Units
         {
             Hoi4Combat.Instance?.SimulateHour();
             Hoi4BattlePlans.Instance?.SimulateHour();
-            Hoi4EnemyAI.Instance?.SimulateHour();
+            if (RunsAI) Hoi4EnemyAI.Instance?.SimulateHour();
         }
 
         void OnDay(int day)
         {
             Hoi4BattlePlans.Instance?.SimulateDay();
-            Hoi4EnemyAI.Instance?.SimulateDay();
+            if (RunsAI) Hoi4EnemyAI.Instance?.SimulateDay();
         }
+
+        /// <summary>Archon's lockstep model: the AI decides on the host only and its decisions reach the other
+        /// clients as commands. Everything else here is deterministic simulation that every client runs.</summary>
+        static bool RunsAI => Engine.ArchonEngine.Instance?.GameState?.CommandProcessor?.IsAuthoritative ?? true;
     }
 }

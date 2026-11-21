@@ -3,7 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using Core;
 using Core.Systems;
-using StarterKit.Commands;
+
 using Hoi4.Map;
 using Map.Rendering.Border;
 using UnityEngine;
@@ -20,11 +20,12 @@ namespace Hoi4.Units
         public bool IsAI;                           // made by the AI: not drawn, no army
         public int ArmyId;                          // the player's army (0 for AI plans)
         public ushort Country;                      // the country the line is drawn against
+        // Presentation only (the player's plans): the traced border the line is drawn along
         public List<BorderArc> Arcs;                // the border arcs the line follows
         public List<List<Vector3>> Chains;          // the arcs joined into continuous polylines, enemy side on the left of travel
         public readonly HashSet<ushort> Units = new HashSet<ushort>();
         public List<ushort> FrontProvinces;         // own provinces along the line, in line order (all fronts)
-        public List<List<ushort>> Fronts;           // the same per separate stretch of the line (a pocket is its own front)
+        public List<List<ushort>> Fronts;           // the same per separate stretch of the line (a pocket is its own front); simulation, from adjacency
         public readonly Dictionary<ushort, ushort> Slot = new Dictionary<ushort, ushort>(); // unit -> the front province it holds
         public readonly Dictionary<(ushort, int), bool> Reach = new Dictionary<(ushort, int), bool>(); // (province, front) reachable by land; cleared with the fronts
         public Vector3 LabelWorld, LabelAhead;      // text anchor on the line and a point a little further along it
@@ -43,7 +44,10 @@ namespace Hoi4.Units
     /// AI countries get the same front lines without drawing them (EnsureAIPlans): one per enemy they
     /// border, holding all their divisions. Hoi4EnemyAI decides attacks itself and borrows a division
     /// off its line for an attack (Borrow); when the attack is over the division rejoins the line.
-    /// Lines are ribbons built from the engine's traced border arcs (IBorderArcSource), drawn by Hoi4/PlanLine.
+    /// Simulation and presentation are separate: which provinces form a front and in what order comes from
+    /// the province adjacency graph with integer maths only (FrontsAgainst), so it is the same on every
+    /// client and doesn't depend on the renderer. The drawn line is presentation: ribbons built from the
+    /// engine's traced border arcs (IBorderArcSource), drawn by Hoi4/PlanLine, for the player's plans only.
     /// The province stripes come from a province-indexed texture (_Hoi4PlanTex) read in Hoi4MapModes.hlsl.
     /// </summary>
     public sealed class Hoi4BattlePlans : MonoBehaviour
@@ -83,7 +87,10 @@ namespace Hoi4.Units
         readonly HashSet<ushort> dirtyCountries = new HashSet<ushort>();   // controllers that gained or lost land since the last refresh
         readonly HashSet<ushort> borrowed = new HashSet<ushort>();         // AI divisions off their line while they attack
         readonly HashSet<Hoi4BattlePlan> dirtyPlans = new HashSet<Hoi4BattlePlan>(); // lost a division: spread again this hour
-        ushort[] arcCtrlA, arcCtrlB;                                       // controllers of each arc's two provinces, per refresh
+        bool simReady;                                                     // adjacency loaded: plans work even when drawing them fails
+        ushort[] landProvinces;                                            // sorted
+        ushort[][] landNeighbours;                                         // per province id: land neighbours, sorted
+        ushort[] ctrl;                                                     // controller per province id, snapshot during a refresh
 
         // Hover preview
         ushort hoverProvince, hoverCountry;
@@ -135,10 +142,26 @@ namespace Hoi4.Units
 
         IEnumerator Start()
         {
-            while (Hoi4UnitSelection.Instance == null || Hoi4UnitCounters.Instance == null || !Hoi4UnitCounters.Instance.IsReady)
+            // Simulation: needs only the game state and the province graph
+            while (Engine.ArchonEngine.Instance == null || Engine.ArchonEngine.Instance.GameState == null
+                   || Engine.ArchonEngine.Instance.GameState.Adjacencies == null
+                   || Engine.ArchonEngine.Instance.GameState.Pathfinding == null
+                   || !Engine.ArchonEngine.Instance.GameState.Pathfinding.IsInitialized)
                 yield return null;
             var engine = Engine.ArchonEngine.Instance;
             gameState = engine.GameState;
+            BuildLandGraph();
+            subscriptions = new[]
+            {
+                gameState.EventBus.Subscribe<ProvinceControllerChangedEvent>(e => MarkBorder(e.OldController, e.NewController)),
+                gameState.EventBus.Subscribe<ProvinceOwnershipChangedEvent>(e => MarkBorder(e.OldOwner, e.NewOwner)),
+            };
+            borderDirty = true; // first hour: the AI draws its lines for the wars already going
+            simReady = true;
+
+            // Presentation: the tool and the drawn lines
+            while (Hoi4UnitSelection.Instance == null || Hoi4UnitCounters.Instance == null || !Hoi4UnitCounters.Instance.IsReady)
+                yield return null;
 
             var shader = Shader.Find("Hoi4/PlanLine");
             if (shader == null)
@@ -183,14 +206,42 @@ namespace Hoi4.Units
             planTex.Apply(false);
             Shader.SetGlobalTexture(PlanTexId, planTex);
             Shader.SetGlobalFloat(PlanActiveId, 0f);
-            subscriptions = new[]
-            {
-                gameState.EventBus.Subscribe<ProvinceControllerChangedEvent>(e => MarkBorder(e.OldController, e.NewController)),
-                gameState.EventBus.Subscribe<ProvinceOwnershipChangedEvent>(e => MarkBorder(e.OldOwner, e.NewOwner)),
-            };
-            borderDirty = true; // first hour: the AI draws its lines for the wars already going
             ready = true;
+            foreach (var plan in plans) if (!plan.IsAI) TraceLine(plan); // placed before drawing was ready
+            dirtyMesh = true;
         }
+
+        /// <summary>Land provinces and their land neighbours, sorted (the engine's adjacency map has no fixed order).</summary>
+        void BuildLandGraph()
+        {
+            var ids = gameState.Provinces.GetAllProvinceIds(Unity.Collections.Allocator.Temp);
+            var land = new List<ushort>(ids.Length);
+            int max = 0;
+            foreach (ushort id in ids)
+            {
+                max = Mathf.Max(max, id);
+                if (id != 0 && !Hoi4Regions.IsWater(id)) land.Add(id);
+            }
+            ids.Dispose();
+            land.Sort();
+            landProvinces = land.ToArray();
+            landNeighbours = new ushort[max + 1][];
+            var buffer = new List<ushort>();
+            foreach (ushort p in landProvinces)
+            {
+                buffer.Clear();
+                var n = gameState.Adjacencies.GetNeighbors(p, Unity.Collections.Allocator.Temp);
+                foreach (ushort q in n) if (q != 0 && q <= max && !Hoi4Regions.IsWater(q)) buffer.Add(q);
+                n.Dispose();
+                buffer.Sort();
+                landNeighbours[p] = buffer.ToArray();
+            }
+        }
+
+        ushort Ctrl(ushort province) => ctrl != null ? ctrl[province] : Hoi4Occupation.ControllerOf(gameState, province);
+
+        ushort[] Neighbours(ushort province) =>
+            province < landNeighbours.Length && landNeighbours[province] != null ? landNeighbours[province] : Array.Empty<ushort>();
 
         void MarkBorder(ushort a, ushort b)
         {
@@ -314,24 +365,23 @@ namespace Hoi4.Units
         }
 
         /// <summary>True when the owner controls land next to land the country controls.</summary>
-        public bool HasBorder(ushort owner, ushort country) => country != 0 && country != owner && BorderWith(owner, country, new HashSet<ushort>()).Count > 0;
+        public bool HasBorder(ushort owner, ushort country) => simReady && country != 0 && country != owner && FrontsAgainst(owner, country).Count > 0;
 
         /// <summary>PlaceBattlePlanCommand: the owner's front line against the country, traced from the
         /// current border, held by these divisions (those already on another plan stay there).</summary>
         public Hoi4BattlePlan CreatePlan(ushort owner, int armyId, ushort country, List<ushort> unitIds)
         {
-            var own = new HashSet<ushort>();
-            var arcs = BorderWith(owner, country, own);
-            if (arcs.Count == 0) return null;
-            var plan = new Hoi4BattlePlan { Id = nextId++, Owner = owner, ArmyId = armyId, Country = country, Arcs = arcs };
-            plan.Chains = BuildChains(arcs, country);
+            if (!simReady) return null;
+            var fronts = FrontsAgainst(owner, country);
+            if (fronts.Count == 0) return null;
+            var plan = new Hoi4BattlePlan { Id = nextId++, Owner = owner, ArmyId = armyId, Country = country };
+            SetFronts(plan, fronts);
             foreach (ushort u in unitIds)
             {
                 manualOrders.Remove(u);
                 if (!planOf.ContainsKey(u)) { plan.Units.Add(u); planOf[u] = plan; }
             }
-            ComputeLabelAnchor(plan);
-            SetFronts(plan, own);
+            TraceLine(plan);
             plans.Add(plan);
             Distribute(plan);
             dirtyMesh = true;
@@ -368,7 +418,7 @@ namespace Hoi4.Units
         /// </summary>
         public void SimulateHour()
         {
-            if (!ready) return;
+            if (!simReady) return;
             if (borderDirty) RefreshPlans();
             if (plans.Count == 0) return;
             var units = gameState.Units;
@@ -408,7 +458,7 @@ namespace Hoi4.Units
         /// lines are checked on the next hour.</summary>
         public void SimulateDay()
         {
-            if (!ready) return;
+            if (!simReady) return;
             borderDirty = true;
         }
 
@@ -445,12 +495,8 @@ namespace Hoi4.Units
                 {
                     if (planOf.ContainsKey(u) || borrowed.Contains(u) || queue.IsUnitMoving(u)) continue;
                     Hoi4BattlePlan best = null;
-                    float bestLoad = float.MaxValue;
                     foreach (var plan in kv.Value)
-                    {
-                        float load = plan.Units.Count / (float)Mathf.Max(plan.FrontProvinces?.Count ?? 1, 1);
-                        if (load < bestLoad) { bestLoad = load; best = plan; }
-                    }
+                        if (best == null || LessLoaded(plan, best)) best = plan;
                     if (best == null) break;
                     best.Units.Add(u);
                     planOf[u] = best;
@@ -471,13 +517,8 @@ namespace Hoi4.Units
                 {
                     if (planOf.ContainsKey(u) || manualOrders.Contains(u)) continue;
                     Hoi4BattlePlan best = null;
-                    float bestLoad = float.MaxValue;
                     foreach (var plan in plans)
-                    {
-                        if (plan.IsAI || plan.ArmyId != army.Id) continue;
-                        float load = plan.Units.Count / (float)Mathf.Max(plan.FrontProvinces?.Count ?? 1, 1);
-                        if (load < bestLoad) { bestLoad = load; best = plan; }
-                    }
+                        if (!plan.IsAI && plan.ArmyId == army.Id && (best == null || LessLoaded(plan, best))) best = plan;
                     if (best == null) break; // this army has no plan
                     best.Units.Add(u);
                     planOf[u] = best;
@@ -485,6 +526,13 @@ namespace Hoi4.Units
                     any = true;
                 }
             return any;
+        }
+
+        /// <summary>Fewer divisions per front province than b (integer cross-multiplication; ties keep b, the earlier plan).</summary>
+        static bool LessLoaded(Hoi4BattlePlan a, Hoi4BattlePlan b)
+        {
+            long pa = Math.Max(a.FrontProvinces?.Count ?? 1, 1), pb = Math.Max(b.FrontProvinces?.Count ?? 1, 1);
+            return a.Units.Count * pb < b.Units.Count * pa;
         }
 
         bool EnsureArcs()
@@ -540,9 +588,8 @@ namespace Hoi4.Units
             previewChains = BuildChains(arcs, country);
         }
 
-        /// <summary>The arcs between provinces the owner controls and provinces the country controls; the
-        /// owner's provinces along them go into ownSide. Uses the controllers of the current refresh when
-        /// there are any (one pass over the arcs for all plans).</summary>
+        /// <summary>Presentation: the traced arcs between provinces the owner controls and provinces the country
+        /// controls (the drawn line); the owner's provinces along them go into ownSide (the preview stripes).</summary>
         List<BorderArc> BorderWith(ushort owner, ushort country, HashSet<ushort> ownSide)
         {
             var arcs = new List<BorderArc>();
@@ -550,8 +597,8 @@ namespace Hoi4.Units
             for (int i = 0; i < allArcs.Count; i++)
             {
                 var arc = allArcs[i];
-                ushort a = arcCtrlA != null ? arcCtrlA[i] : Hoi4Occupation.ControllerOf(gameState, arc.ProvinceA);
-                ushort b = arcCtrlB != null ? arcCtrlB[i] : Hoi4Occupation.ControllerOf(gameState, arc.ProvinceB);
+                ushort a = Hoi4Occupation.ControllerOf(gameState, arc.ProvinceA);
+                ushort b = Hoi4Occupation.ControllerOf(gameState, arc.ProvinceB);
                 if (a == owner && b == country) ownSide.Add(arc.ProvinceA);
                 else if (b == owner && a == country) ownSide.Add(arc.ProvinceB);
                 else continue;
@@ -560,28 +607,37 @@ namespace Hoi4.Units
             return arcs;
         }
 
-        /// <summary>Every AI country at war gets a front line against each enemy it borders; lines against
-        /// countries it is no longer at war with go. Countries without divisions get none.</summary>
+        /// <summary>Every AI country at war gets a front line against each enemy it borders by land; lines
+        /// against countries it is no longer at war with, or no longer borders, go. Countries without
+        /// divisions get none.</summary>
         void EnsureAIPlans()
         {
             ushort player = Player;
             var diplomacy = gameState.Diplomacy;
-            if (diplomacy == null || arcCtrlA == null) return;
+            if (diplomacy == null) return;
             var hasUnits = new Dictionary<ushort, bool>();
             bool HasUnits(ushort c)
             {
                 if (!hasUnits.TryGetValue(c, out bool h)) hasUnits[c] = h = gameState.Units.GetCountryUnitCount(c) > 0;
                 return h;
             }
+            var atWar = new Dictionary<(ushort, ushort), bool>();
             var pairs = new SortedSet<(ushort owner, ushort enemy)>();
-            for (int i = 0; i < arcCtrlA.Length; i++)
+            foreach (ushort p in landProvinces)
             {
-                ushort a = arcCtrlA[i], b = arcCtrlB[i];
-                if (a == b || a == 0 || b == 0) continue;
-                if (Hoi4Regions.IsWater(allArcs[i].ProvinceA) || Hoi4Regions.IsWater(allArcs[i].ProvinceB)) continue;
-                if (!diplomacy.IsAtWar(a, b)) continue;
-                if (a != player && HasUnits(a)) pairs.Add((a, b));
-                if (b != player && HasUnits(b)) pairs.Add((b, a));
+                ushort a = Ctrl(p);
+                if (a == 0) continue;
+                foreach (ushort q in Neighbours(p))
+                {
+                    if (q < p) continue; // each border once
+                    ushort b = Ctrl(q);
+                    if (b == 0 || b == a) continue;
+                    var key = a < b ? (a, b) : (b, a);
+                    if (!atWar.TryGetValue(key, out bool war)) atWar[key] = war = diplomacy.IsAtWar(a, b);
+                    if (!war) continue;
+                    if (a != player && HasUnits(a)) pairs.Add((a, b));
+                    if (b != player && HasUnits(b)) pairs.Add((b, a));
+                }
             }
             var existing = new HashSet<(ushort, ushort)>();
             foreach (var plan in new List<Hoi4BattlePlan>(plans))
@@ -593,14 +649,132 @@ namespace Hoi4.Units
             foreach (var (owner, enemy) in pairs)
             {
                 if (existing.Contains((owner, enemy))) continue;
-                var own = new HashSet<ushort>();
-                var arcs = BorderWith(owner, enemy, own);
-                if (arcs.Count == 0) continue;
-                var plan = new Hoi4BattlePlan { Id = nextId++, Owner = owner, IsAI = true, Country = enemy, Arcs = arcs };
-                plan.Chains = BuildChains(arcs, enemy);
-                SetFronts(plan, own);
+                var fronts = FrontsAgainst(owner, enemy);
+                if (fronts.Count == 0) continue; // only impassable land along it
+                var plan = new Hoi4BattlePlan { Id = nextId++, Owner = owner, IsAI = true, Country = enemy };
+                SetFronts(plan, fronts);
                 plans.Add(plan); // divisions join on this hour's AutoAssignAI
             }
+        }
+
+        /// <summary>
+        /// Simulation: the owner's provinces facing the country, as separate fronts each in order along the
+        /// line. A front province is owner land (not impassable) next to land the country controls. Two of
+        /// them belong to the same front when they are neighbours or face the same enemy province (that
+        /// bridges a gap such as a lake on our side); an enemy pocket is then a front of its own. The order
+        /// along a front runs from one end (the farthest province from the lowest id) by hop distance.
+        /// Integer graph maths only, in id order, so every client gets the same fronts.
+        /// </summary>
+        List<List<ushort>> FrontsAgainst(ushort owner, ushort country)
+        {
+            var result = new List<List<ushort>>();
+            if (owner == 0 || country == 0 || owner == country) return result;
+            var front = new List<ushort>();
+            foreach (ushort p in landProvinces)
+            {
+                if (Ctrl(p) != owner || Hoi4Regions.IsImpassable(p)) continue;
+                foreach (ushort q in Neighbours(p))
+                    if (Ctrl(q) == country) { front.Add(p); break; }
+            }
+            if (front.Count == 0) return result;
+
+            // Links: own neighbours, and own provinces facing the same enemy province
+            var index = new Dictionary<ushort, int>(front.Count);
+            for (int i = 0; i < front.Count; i++) index[front[i]] = i;
+            var links = new List<int>[front.Count];
+            for (int i = 0; i < front.Count; i++) links[i] = new List<int>();
+            var facing = new SortedDictionary<ushort, List<int>>();
+            for (int i = 0; i < front.Count; i++)
+                foreach (ushort q in Neighbours(front[i]))
+                {
+                    if (index.TryGetValue(q, out int j)) { if (j > i) { links[i].Add(j); links[j].Add(i); } }
+                    else if (Ctrl(q) == country)
+                    {
+                        if (!facing.TryGetValue(q, out var list)) facing[q] = list = new List<int>();
+                        list.Add(i);
+                    }
+                }
+            foreach (var list in facing.Values)
+                for (int a = 0; a < list.Count; a++)
+                    for (int b = a + 1; b < list.Count; b++)
+                        if (!links[list[a]].Contains(list[b])) { links[list[a]].Add(list[b]); links[list[b]].Add(list[a]); }
+            foreach (var l in links) l.Sort();
+
+            // Components in order of their lowest province id (front is sorted, so the first unvisited)
+            var dist = new int[front.Count];
+            var seen = new bool[front.Count];
+            for (int s = 0; s < front.Count; s++)
+            {
+                if (seen[s]) continue;
+                var members = Bfs(s, links, dist);
+                foreach (int m in members) seen[m] = true;
+                int end = Farthest(members, dist);            // one end of the front
+                Bfs(end, links, dist);
+                members.Sort((x, y) => dist[x] != dist[y] ? dist[x].CompareTo(dist[y]) : x.CompareTo(y));
+                var ordered = new List<ushort>(members.Count);
+                foreach (int m in members) ordered.Add(front[m]);
+                result.Add(ordered);
+            }
+            return result;
+        }
+
+        /// <summary>Breadth-first from start over the links: fills dist (hops) and returns the members reached.</summary>
+        static List<int> Bfs(int start, List<int>[] links, int[] dist)
+        {
+            var members = new List<int> { start };
+            var queue = new Queue<int>();
+            var visited = new HashSet<int> { start };
+            dist[start] = 0;
+            queue.Enqueue(start);
+            while (queue.Count > 0)
+            {
+                int c = queue.Dequeue();
+                foreach (int n in links[c])
+                    if (visited.Add(n))
+                    {
+                        dist[n] = dist[c] + 1;
+                        members.Add(n);
+                        queue.Enqueue(n);
+                    }
+            }
+            return members;
+        }
+
+        static int Farthest(List<int> members, int[] dist)
+        {
+            int best = members[0];
+            foreach (int m in members)
+                if (dist[m] > dist[best] || (dist[m] == dist[best] && m < best)) best = m;
+            return best;
+        }
+
+        static bool SameFronts(List<List<ushort>> a, List<List<ushort>> b)
+        {
+            if (b == null || a.Count != b.Count) return false;
+            for (int i = 0; i < a.Count; i++)
+            {
+                if (a[i].Count != b[i].Count) return false;
+                for (int k = 0; k < a[i].Count; k++) if (a[i][k] != b[i][k]) return false;
+            }
+            return true;
+        }
+
+        void SetFronts(Hoi4BattlePlan plan, List<List<ushort>> fronts)
+        {
+            plan.Fronts = fronts;
+            plan.FrontProvinces = new List<ushort>();
+            foreach (var f in fronts) plan.FrontProvinces.AddRange(f);
+            plan.Reach.Clear();
+        }
+
+        /// <summary>Presentation: the drawn line and its label from the traced border (player plans only).
+        /// Empty when the border renderer exposes no arcs; the plan works the same without it.</summary>
+        void TraceLine(Hoi4BattlePlan plan)
+        {
+            if (!ready) { plan.Arcs = new List<BorderArc>(); plan.Chains = new List<List<Vector3>>(); return; }
+            plan.Arcs = BorderWith(plan.Owner, plan.Country, new HashSet<ushort>());
+            plan.Chains = plan.Arcs.Count > 0 ? BuildChains(plan.Arcs, plan.Country) : new List<List<Vector3>>();
+            ComputeLabelAnchor(plan);
         }
 
         /// <summary>Provinces changed hands: every line follows the new border with its country and its
@@ -608,15 +782,9 @@ namespace Hoi4.Units
         void RefreshPlans()
         {
             borderDirty = false;
-            if (!EnsureArcs()) return;
-            // One pass: the controllers of every arc's provinces, shared by all plans this hour
-            arcCtrlA = new ushort[allArcs.Count];
-            arcCtrlB = new ushort[allArcs.Count];
-            for (int i = 0; i < allArcs.Count; i++)
-            {
-                arcCtrlA[i] = Hoi4Occupation.ControllerOf(gameState, allArcs[i].ProvinceA);
-                arcCtrlB[i] = Hoi4Occupation.ControllerOf(gameState, allArcs[i].ProvinceB);
-            }
+            // One snapshot of every land province's controller, shared by all plans this hour
+            ctrl = new ushort[landNeighbours.Length];
+            foreach (ushort p in landProvinces) ctrl[p] = Hoi4Occupation.ControllerOf(gameState, p);
             var changedCountries = new HashSet<ushort>(dirtyCountries);
             dirtyCountries.Clear();
             bool any = false;
@@ -624,32 +792,21 @@ namespace Hoi4.Units
             {
                 // Only a country that gained or lost land can move this line (all of them on the daily pass)
                 if (changedCountries.Count > 0 && !changedCountries.Contains(plan.Owner) && !changedCountries.Contains(plan.Country)) continue;
-                var own = new HashSet<ushort>();
-                var arcs = BorderWith(plan.Owner, plan.Country, own);
-                if (arcs.Count == 0) { RemovePlan(plan); any |= !plan.IsAI; continue; } // nothing left to hold against
-                if (SameArcs(arcs, plan.Arcs)) continue;              // a change somewhere else on the map
-                any |= !plan.IsAI;
-                plan.Arcs = arcs;
-                plan.Chains = BuildChains(arcs, plan.Country);
-                SetFronts(plan, own);
-                if (!plan.IsAI) ComputeLabelAnchor(plan);
+                var fronts = FrontsAgainst(plan.Owner, plan.Country);
+                if (fronts.Count == 0) { RemovePlan(plan); any |= !plan.IsAI; continue; } // nothing left to hold against
+                if (SameFronts(fronts, plan.Fronts)) continue;                        // a change somewhere else on the map
+                SetFronts(plan, fronts);
+                if (!plan.IsAI) { TraceLine(plan); any = true; }
                 Distribute(plan);
             }
             EnsureAIPlans();
-            arcCtrlA = arcCtrlB = null; // the preview reads live controllers
+            ctrl = null; // outside a refresh, read live controllers
             if (Active) SetPreview(hoverProvince);
             if (any)
             {
                 dirtyMesh = true;
                 Changed?.Invoke();
             }
-        }
-
-        static bool SameArcs(List<BorderArc> a, List<BorderArc> b)
-        {
-            if (b == null || a.Count != b.Count) return false;
-            for (int i = 0; i < a.Count; i++) if (!ReferenceEquals(a[i], b[i])) return false; // same order: both walk allArcs
-            return true;
         }
 
         void RebuildTexture()
@@ -724,50 +881,6 @@ namespace Hoi4.Units
             Changed?.Invoke();
         }
 
-        /// <summary>The own provinces along the line, grouped by the stretch of line (chain) they are closest to
-        /// and sorted along it. An encirclement splits the border into several chains (the pocket is a loop),
-        /// so each becomes its own front. Impassable provinces are left out.</summary>
-        void SetFronts(Hoi4BattlePlan plan, IEnumerable<ushort> provinces)
-        {
-            var chains = plan.Chains;
-            var keyed = new List<(int chain, float run, ushort p)>();
-            var counters = Hoi4UnitCounters.Instance;
-            foreach (ushort p in provinces)
-            {
-                if (Hoi4Regions.IsImpassable(p) || Hoi4Regions.IsWater(p)) continue;
-                int chain = 0;
-                float at = 0f;
-                if (counters != null && counters.TryGetProvincePoint(p, out var c))
-                {
-                    float best = float.MaxValue;
-                    for (int ci = 0; ci < chains.Count; ci++)
-                    {
-                        float run = 0f;
-                        var pts = chains[ci];
-                        for (int i = 0; i < pts.Count; i++)
-                        {
-                            if (i > 0) run += Vector3.Distance(pts[i - 1], pts[i]);
-                            float dx = pts[i].x - c.x, dz = pts[i].z - c.z;
-                            float d = dx * dx + dz * dz;
-                            if (d < best) { best = d; chain = ci; at = run; }
-                        }
-                    }
-                }
-                keyed.Add((chain, at, p));
-            }
-            keyed.Sort((x, y) => x.chain != y.chain ? x.chain.CompareTo(y.chain) : x.run != y.run ? x.run.CompareTo(y.run) : x.p.CompareTo(y.p));
-            plan.Reach.Clear();
-            plan.FrontProvinces = new List<ushort>(keyed.Count);
-            plan.Fronts = new List<List<ushort>>();
-            int last = -1;
-            foreach (var k in keyed)
-            {
-                if (k.chain != last) { plan.Fronts.Add(new List<ushort>()); last = k.chain; }
-                plan.Fronts[plan.Fronts.Count - 1].Add(k.p);
-                plan.FrontProvinces.Add(k.p);
-            }
-        }
-
         /// <summary>
         /// Spread the plan's divisions evenly over its front provinces, like HOI4: with fewer divisions than
         /// provinces they take evenly spaced provinces along the line, with more every province gets its
@@ -819,12 +932,11 @@ namespace Hoi4.Units
             while (left > 0)
             {
                 int best = -1;
-                float bestScore = -1f;
                 foreach (int i in order)
                 {
                     if (alloc[i] >= reachers[i]) continue;
-                    float score = fronts[i].Count / (float)(alloc[i] + 1);
-                    if (score > bestScore) { bestScore = score; best = i; }
+                    // Most provinces per division after one more: count_i/(alloc_i+1) > count_best/(alloc_best+1)
+                    if (best < 0 || (long)fronts[i].Count * (alloc[best] + 1) > (long)fronts[best].Count * (alloc[i] + 1)) best = i;
                 }
                 if (best < 0) break;
                 alloc[best]++;
@@ -842,27 +954,24 @@ namespace Hoi4.Units
                 for (int i = 0; i < p; i++)
                     for (int k = 0; k < each; k++) slots.Add((front[i], f));
                 for (int k = 0; k < extra; k++)
-                    slots.Add((front[Mathf.Min((int)((k + 0.5f) * p / extra), p - 1)], f));
+                    slots.Add((front[Math.Min((2 * k + 1) * p / (2 * extra), p - 1)], f)); // (k + 0.5) * p / extra
             }
 
-            // Each slot to the nearest free division that can reach it (greedy on distance)
-            var counters = Hoi4UnitCounters.Instance;
-            var pairs = new List<(float d, ushort unit, int slot)>(ids.Count * slots.Count);
+            // Each slot to the nearest free division that can reach it (greedy on land hops)
+            var slotProvinces = new HashSet<ushort>();
+            foreach (var s in slots) slotProvinces.Add(s.province);
+            var hopsFrom = new Dictionary<ushort, Dictionary<ushort, int>>();
+            var pairs = new List<(int d, ushort unit, int slot)>(ids.Count * slots.Count);
             foreach (ushort u in ids)
             {
                 // A division already marching counts from where it is going, so a redistribution keeps it on course
                 ushort heading = HeadingTo(u);
                 ushort at = heading != 0 ? heading : units.GetUnit(u).provinceID;
-                Vector3 from = default;
-                bool hasFrom = counters != null && counters.TryGetProvincePoint(at, out from);
+                if (!hopsFrom.TryGetValue(at, out var hops)) hopsFrom[at] = hops = Hops(at, slotProvinces);
                 for (int s = 0; s < slots.Count; s++)
                 {
                     if (!Reaches(u, slots[s].front)) continue;
-                    float d = 0f;
-                    if (at != slots[s].province && hasFrom && counters.TryGetProvincePoint(slots[s].province, out var to))
-                        d = (to - from).sqrMagnitude + 1e-6f;
-                    else if (at != slots[s].province) d = 1e9f;
-                    pairs.Add((d, u, s));
+                    pairs.Add((hops.TryGetValue(slots[s].province, out int d) ? d : int.MaxValue, u, s));
                 }
             }
             pairs.Sort((x, y) => x.d != y.d ? x.d.CompareTo(y.d) : x.unit != y.unit ? x.unit.CompareTo(y.unit) : x.slot.CompareTo(y.slot));
@@ -884,6 +993,32 @@ namespace Hoi4.Units
                     ArchonLogger.LogWarning($"Hoi4BattlePlans: plan {plan.Id}: unit {u} in province {unit.provinceID} can reach none of the {fronts.Count} fronts", "game_units");
                 }
             Hold(plan, force: true);
+        }
+
+        /// <summary>Land hops from a province to each of the targets (breadth-first, stops when all are found
+        /// or after MaxHops). Missing = farther than that.</summary>
+        Dictionary<ushort, int> Hops(ushort from, HashSet<ushort> targets)
+        {
+            const int MaxHops = 64;
+            var found = new Dictionary<ushort, int>();
+            var dist = new Dictionary<ushort, int> { [from] = 0 };
+            var queue = new Queue<ushort>();
+            queue.Enqueue(from);
+            if (targets.Contains(from)) found[from] = 0;
+            while (queue.Count > 0 && found.Count < targets.Count)
+            {
+                ushort c = queue.Dequeue();
+                int d = dist[c];
+                if (d >= MaxHops) break;
+                foreach (ushort n in Neighbours(c))
+                {
+                    if (dist.ContainsKey(n)) continue;
+                    dist[n] = d + 1;
+                    if (targets.Contains(n)) found[n] = d + 1;
+                    queue.Enqueue(n);
+                }
+            }
+            return found;
         }
 
         /// <summary>Send every division of the plan that is idle and away from its province back to it.</summary>
@@ -945,15 +1080,12 @@ namespace Hoi4.Units
                 return false;
             }
             if (dryRun) return true;
+            // Not a command: holding the line is simulation that every client runs the same way (lockstep).
+            // Only decisions (placing a plan, a manual order, an AI attack) are commands; sending these
+            // moves as commands too would apply them twice on the other clients and in a replay.
             var type = StarterKit.Initializer.Instance?.UnitSystem?.GetUnitType(unit.unitTypeID);
-            var command = new QueueUnitMovementCommand
-            {
-                UnitId = unitId,
-                Path = new List<ushort>(path),
-                MovementDays = type?.Speed ?? 3,
-                CountryId = unit.countryID,
-            };
-            return gameState.TryExecuteCommand(command, out _);
+            gameState.Units.MovementQueue.StartMovement(unitId, path[1], type?.Speed ?? 3, new List<ushort>(path));
+            return true;
         }
 
         // --- Line geometry (prototype: Tools/prototypes/battleplan/battleplan_line.py) ---------------

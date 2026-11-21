@@ -80,8 +80,8 @@ namespace Hoi4.Units
             if (!isSelected) bg.AddToClassList("dv-card-bg-off"); // dark: listed but not selected
             card.Add(bg);
 
-            card.Add(Bar("dv-bar-org", d != null && d.MaxOrganisation > 0 ? d.Organisation / d.MaxOrganisation : 1f));
-            card.Add(Bar("dv-bar-str", d != null && d.MaxStrength > 0 ? d.Strength / d.MaxStrength : 1f));
+            card.Add(Bar("dv-bar-org", d != null && d.MaxOrganisation.ToFloat() > 0 ? d.Organisation.ToFloat() / d.MaxOrganisation.ToFloat() : 1f));
+            card.Add(Bar("dv-bar-str", d != null && d.MaxStrength.ToFloat() > 0 ? d.Strength.ToFloat() / d.MaxStrength.ToFloat() : 1f));
 
             card.Add(Hoi4Sprites.Make("dv-info"));
             var icon = Hoi4Sprites.Make("dv-icon");

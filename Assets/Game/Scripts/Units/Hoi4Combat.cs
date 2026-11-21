@@ -4,6 +4,7 @@ using Core;
 using Core.Units;
 using Hoi4.Map;
 using UnityEngine;
+using FP = Core.Data.FixedPoint64;
 
 namespace Hoi4.Units
 {
@@ -17,15 +18,21 @@ namespace Hoi4.Units
     /// organisation retreats to a friendly neighbouring province (destroyed when there is none); an
     /// attacker at zero organisation drops its order. Once the target is empty the attackers walk in.
     /// Left out: terrain, rivers, entrenchment, forts, planning, generals, supply. Occupation is Hoi4Occupation.
+    /// All maths is FixedPoint64 and every loop runs in id order, so a battle ends the same on every machine.
     /// </summary>
     public sealed class Hoi4Combat : MonoBehaviour
     {
         // Tuning: HOI4 keeps organisation in thousands internally; ours is the displayed value, and
         // these scales make an even infantry fight last a few days.
-        const float OrgScale = 10f;
-        const float HpScale = 3f;
-        const float RecoveryPerHour = 0.01f; // of max organisation, out of battle
-        const float Width = 80f;             // base combat width of a province
+        static readonly FP OrgScale = FP.FromInt(10);
+        static readonly FP HpScale = FP.FromInt(3);
+        static readonly FP RecoveryPerHour = FP.FromFraction(1, 100); // of max organisation, out of battle
+        static readonly FP Width = FP.FromInt(80);                    // base combat width of a province
+        static readonly FP OrgPerHit = FP.FromFraction(53, 1000);     // wiki: 0.053 org per hit, times the die
+        static readonly FP HpPerHit = FP.FromFraction(9, 100);        // wiki: 0.06 hp per hit, times a 1.5 die
+        static readonly FP ArmouredDie = FP.FromFraction(7, 2), Die = FP.FromFraction(5, 2);
+        static readonly FP HitsWhileDefended = FP.FromFraction(1, 10), HitsBeyond = FP.FromFraction(4, 10);
+        static readonly FP MinRate = FP.FromFraction(1, 10000);
         const int RetreatDays = 1;
 
         public sealed class Battle
@@ -166,7 +173,7 @@ namespace Hoi4.Units
             // Divisions out of contact slowly regain organisation
             foreach (var d in divisions.All.Values)
                 if (!fighting.Contains(d.UnitId) && !retreating.Contains(d.UnitId) && d.Organisation < d.MaxOrganisation)
-                    d.Organisation = Mathf.Min(d.MaxOrganisation, d.Organisation + d.MaxOrganisation * RecoveryPerHour);
+                    d.Organisation = FP.Min(d.MaxOrganisation, d.Organisation + d.MaxOrganisation * RecoveryPerHour);
 
             foreach (ushort id in destroyed)
                 Destroy(id, divisions);
@@ -215,7 +222,7 @@ namespace Hoi4.Units
             {
                 var d = divisions.Get(id);
                 var u = units.GetUnit(id);
-                if (d.Organisation <= 0f) { units.MovementQueue.CancelMovement(id); continue; } // broken: drops its order
+                if (d.Organisation <= FP.Zero) { units.MovementQueue.CancelMovement(id); continue; } // broken: drops its order
                 attackers.Add(d);
                 attackerCountries.Add(u.countryID);
                 origins[u.provinceID] = origins.TryGetValue(u.provinceID, out int n) ? n + 1 : 1;
@@ -225,7 +232,7 @@ namespace Hoi4.Units
             // Defenders: everyone in the target at war with an attacker; the broken ones retreat first
             var defending = new List<Hoi4Division>();
             if (byProvince.TryGetValue(target, out var present))
-                foreach (ushort id in new List<ushort>(present))
+                foreach (ushort id in Sorted(present))
                 {
                     var d = divisions.Get(id);
                     if (d == null) continue;
@@ -233,7 +240,7 @@ namespace Hoi4.Units
                     bool enemy = false;
                     foreach (ushort a in attackerCountries) if (a != c && diplomacy.IsAtWar(a, c)) { enemy = true; break; }
                     if (!enemy) continue;
-                    if (d.Organisation <= 0f) { Retreat(d, target, attackerCountries, diplomacy, divisions); continue; }
+                    if (d.Organisation <= FP.Zero) { Retreat(d, target, attackerCountries, diplomacy, divisions); continue; }
                     defending.Add(d);
                 }
             if (defending.Count == 0) return; // nobody left: the gate opens at the next daily tick
@@ -242,41 +249,41 @@ namespace Hoi4.Units
             foreach (var d in defending) fighting.Add(d.UnitId);
 
             ushort from = 0; int most = 0;
-            foreach (var kv in origins) if (kv.Value > most) { most = kv.Value; from = kv.Key; }
+            foreach (var kv in origins) if (kv.Value > most || (kv.Value == most && kv.Key < from)) { most = kv.Value; from = kv.Key; }
 
             var aFront = LineUp(attackers, d => d.SoftAttack * Frac(d));
             var dFront = LineUp(defending, d => d.Defense * Frac(d));
 
-            Sums(aFront, out float aSoft, out float aHard, out float aDef, out float aBrk, out float aHardness, out float aArmor, out float aPierce);
-            Sums(dFront, out float dSoft, out float dHard, out float dDef, out float dBrk, out float dHardness, out float dArmor, out float dPierce);
-            float aPierceFactor = PierceFactor(aPierce, dArmor), dPierceFactor = PierceFactor(dPierce, aArmor);
-            float aDie = aArmor > dPierce ? 3.5f : 2.5f, dDie = dArmor > aPierce ? 3.5f : 2.5f;
+            Sums(aFront, out FP aSoft, out FP aHard, out FP aDef, out FP aBrk, out FP aHardness, out FP aArmor, out FP aPierce);
+            Sums(dFront, out FP dSoft, out FP dHard, out FP dDef, out FP dBrk, out FP dHardness, out FP dArmor, out FP dPierce);
+            FP aPierceFactor = PierceFactor(aPierce, dArmor), dPierceFactor = PierceFactor(dPierce, aArmor);
+            FP aDie = aArmor > dPierce ? ArmouredDie : Die, dDie = dArmor > aPierce ? ArmouredDie : Die;
 
             // Attacks per hour, then hits: 10% while defences last, 40% beyond
-            float aAttacks = (aSoft * (1f - dHardness) + aHard * dHardness) / 10f;
-            float dAttacks = (dSoft * (1f - aHardness) + dHard * aHardness) / 10f;
-            float onD = Hits(aAttacks, dDef / 10f) * aPierceFactor;
-            float onA = Hits(dAttacks, aBrk / 10f) * dPierceFactor;
+            FP aAttacks = (aSoft * (FP.One - dHardness) + aHard * dHardness) / 10;
+            FP dAttacks = (dSoft * (FP.One - aHardness) + dHard * aHardness) / 10;
+            FP onD = Hits(aAttacks, dDef / 10) * aPierceFactor;
+            FP onA = Hits(dAttacks, aBrk / 10) * dPierceFactor;
 
-            Hurt(dFront, onD * 0.053f * dDie * OrgScale, onD * 0.06f * 1.5f * HpScale);
-            Hurt(aFront, onA * 0.053f * aDie * OrgScale, onA * 0.06f * 1.5f * HpScale);
+            Hurt(dFront, onD * OrgPerHit * dDie * OrgScale, onD * HpPerHit * HpScale);
+            Hurt(aFront, onA * OrgPerHit * aDie * OrgScale, onA * HpPerHit * HpScale);
 
-            float aOrg = 0, aMax = 0, dOrg = 0, dMax = 0;
+            FP aOrg = FP.Zero, aMax = FP.Zero, dOrg = FP.Zero, dMax = FP.Zero;
             foreach (var d in attackers) { aOrg += d.Organisation; aMax += d.MaxOrganisation; }
             foreach (var d in defending) { dOrg += d.Organisation; dMax += d.MaxOrganisation; }
-            float af = aMax > 0 ? aOrg / aMax : 0f, df = dMax > 0 ? dOrg / dMax : 0f;
+            FP af = aMax > FP.Zero ? aOrg / aMax : FP.Zero, df = dMax > FP.Zero ? dOrg / dMax : FP.Zero;
             Battles.Add(new Battle
             {
                 From = from,
                 To = target,
-                AttackerPercent = af + df > 0f ? Mathf.RoundToInt(100f * af / (af + df)) : 50,
+                AttackerPercent = af + df > FP.Zero ? FP.Round(FP.Hundred * af / (af + df)).ToInt() : 50,
             });
 
             // Broken attackers drop their order; broken defenders retreat now
             foreach (var d in attackers)
-                if (d.Organisation <= 0f && d.Strength > 0f) units.MovementQueue.CancelMovement(d.UnitId);
+                if (d.Organisation <= FP.Zero && d.Strength > FP.Zero) units.MovementQueue.CancelMovement(d.UnitId);
             foreach (var d in defending)
-                if (d.Organisation <= 0f && d.Strength > 0f) Retreat(d, target, attackerCountries, diplomacy, divisions);
+                if (d.Organisation <= FP.Zero && d.Strength > FP.Zero) Retreat(d, target, attackerCountries, diplomacy, divisions);
         }
 
         /// <summary>Move a broken division to a friendly neighbouring province free of enemies; destroyed when there is none.</summary>
@@ -300,6 +307,7 @@ namespace Hoi4.Units
                     }
                 return true;
             });
+            neighbours.Sort(); // the engine's adjacency map has no fixed order
             foreach (ushort p in neighbours)
             {
                 bool own = Hoi4Occupation.ControllerOf(gameState, p) == country;
@@ -319,30 +327,41 @@ namespace Hoi4.Units
         /// other's organisation. Above 1 the attackers should break the defenders first. Ignores combat width,
         /// armour and reserves; infinite when nobody defends.
         /// </summary>
-        public static float Odds(List<Hoi4Division> attackers, List<Hoi4Division> defenders)
+        public static FP Odds(List<Hoi4Division> attackers, List<Hoi4Division> defenders)
         {
-            if (defenders.Count == 0) return float.PositiveInfinity;
-            if (attackers.Count == 0) return 0f;
-            Sums(attackers, out float aSoft, out float aHard, out _, out float aBrk, out _, out _, out _);
-            Sums(defenders, out float dSoft, out float dHard, out float dDef, out _, out _, out _, out _);
-            float aOrg = 0f, dOrg = 0f;
+            if (defenders.Count == 0) return FP.MaxValue;
+            if (attackers.Count == 0) return FP.Zero;
+            Sums(attackers, out FP aSoft, out FP aHard, out _, out FP aBrk, out _, out _, out _);
+            Sums(defenders, out FP dSoft, out FP dHard, out FP dDef, out _, out _, out _, out _);
+            FP aOrg = FP.Zero, dOrg = FP.Zero;
             foreach (var d in attackers) aOrg += d.Organisation;
             foreach (var d in defenders) dOrg += d.Organisation;
-            float aRate = Hits(aSoft + aHard, dDef) / Mathf.Max(dOrg, 1f);  // share of the defenders' org lost per hour
-            float dRate = Hits(dSoft + dHard, aBrk) / Mathf.Max(aOrg, 1f);  // share of the attackers' org lost per hour
-            return aRate / Mathf.Max(dRate, 1e-4f);
+            FP aRate = Hits(aSoft + aHard, dDef) / FP.Max(dOrg, FP.One);  // share of the defenders' org lost per hour
+            FP dRate = Hits(dSoft + dHard, aBrk) / FP.Max(aOrg, FP.One);  // share of the attackers' org lost per hour
+            return aRate / FP.Max(dRate, MinRate);
         }
 
-        static float Frac(Hoi4Division d) => d.MaxStrength > 0 ? Mathf.Clamp01(d.Strength / d.MaxStrength) : 1f;
+        static List<ushort> Sorted(List<ushort> ids)
+        {
+            var copy = new List<ushort>(ids);
+            copy.Sort();
+            return copy;
+        }
 
-        /// <summary>Divisions that fit the combat width, best first; broken ones (no organisation) stay out.</summary>
-        static List<Hoi4Division> LineUp(List<Hoi4Division> members, System.Func<Hoi4Division, float> key)
+        static FP Frac(Hoi4Division d) => d.MaxStrength > FP.Zero ? FP.Clamp(d.Strength / d.MaxStrength, FP.Zero, FP.One) : FP.One;
+
+        /// <summary>Divisions that fit the combat width, best first (ties: lower id); broken ones (no organisation) stay out.</summary>
+        static List<Hoi4Division> LineUp(List<Hoi4Division> members, System.Func<Hoi4Division, FP> key)
         {
             var live = new List<Hoi4Division>();
-            foreach (var d in members) if (d.Organisation > 0f) live.Add(d);
-            live.Sort((x, y) => key(y).CompareTo(key(x)));
+            foreach (var d in members) if (d.Organisation > FP.Zero) live.Add(d);
+            live.Sort((x, y) =>
+            {
+                int c = key(y).CompareTo(key(x));
+                return c != 0 ? c : x.UnitId.CompareTo(y.UnitId);
+            });
             var front = new List<Hoi4Division>();
-            float used = 0f;
+            FP used = FP.Zero;
             foreach (var d in live)
             {
                 if (front.Count > 0 && used + d.CombatWidth > Width) continue; // in reserve
@@ -352,44 +371,48 @@ namespace Hoi4.Units
             return front;
         }
 
-        static void Sums(List<Hoi4Division> front, out float soft, out float hard, out float def, out float brk,
-            out float hardness, out float armor, out float pierce)
+        static readonly FP P3 = FP.FromFraction(3, 10), P7 = FP.FromFraction(7, 10);
+
+        static void Sums(List<Hoi4Division> front, out FP soft, out FP hard, out FP def, out FP brk,
+            out FP hardness, out FP armor, out FP pierce)
         {
-            soft = hard = def = brk = hardness = pierce = 0f;
-            float armorMax = 0f, armorSum = 0f;
+            soft = hard = def = brk = hardness = pierce = FP.Zero;
+            FP armorMax = FP.Zero, armorSum = FP.Zero;
             foreach (var d in front)
             {
-                float hp = Frac(d); // damage output shrinks with strength
+                FP hp = Frac(d); // damage output shrinks with strength
                 soft += d.SoftAttack * hp; hard += d.HardAttack * hp;
                 def += d.Defense * hp; brk += d.Breakthrough * hp;
                 hardness += d.Hardness; pierce += d.Piercing;
-                armorMax = Mathf.Max(armorMax, d.Armor); armorSum += d.Armor;
+                armorMax = FP.Max(armorMax, d.Armor); armorSum += d.Armor;
             }
-            int n = Mathf.Max(1, front.Count);
+            int n = System.Math.Max(1, front.Count);
             hardness /= n; pierce /= n;
-            armor = 0.3f * armorMax + 0.7f * armorSum / n;
+            armor = P3 * armorMax + P7 * armorSum / n;
         }
 
-        static float Hits(float attacks, float defences) =>
-            attacks <= defences ? 0.1f * attacks : 0.1f * defences + 0.4f * (attacks - defences);
+        static FP Hits(FP attacks, FP defences) =>
+            attacks <= defences ? HitsWhileDefended * attacks : HitsWhileDefended * defences + HitsBeyond * (attacks - defences);
 
-        static float PierceFactor(float piercing, float armor)
+        static readonly FP Pierce80 = FP.FromFraction(8, 10), Pierce65 = FP.FromFraction(65, 100);
+
+        static FP PierceFactor(FP piercing, FP armor)
         {
-            if (armor <= 0f || piercing >= armor) return 1f;
-            float r = piercing / armor;
-            return r >= 0.75f ? 0.8f : r >= 0.5f ? 0.65f : 0.5f;
+            if (armor <= FP.Zero || piercing >= armor) return FP.One;
+            // piercing / armor >= 0.75, >= 0.5, without dividing
+            return piercing * 4 >= armor * 3 ? Pierce80 : piercing * 2 >= armor ? Pierce65 : FP.Half;
         }
 
         /// <summary>Spread a side's damage evenly over its front divisions.</summary>
-        void Hurt(List<Hoi4Division> front, float org, float hp)
+        void Hurt(List<Hoi4Division> front, FP org, FP hp)
         {
             if (front.Count == 0) return;
-            float orgEach = org / front.Count, hpEach = hp / front.Count;
+            FP orgEach = org / front.Count, hpEach = hp / front.Count;
             foreach (var d in front)
             {
-                d.Organisation = Mathf.Max(0f, d.Organisation - orgEach);
-                d.Strength = Mathf.Max(0f, d.Strength - hpEach);
-                if (d.Strength <= 0f) destroyed.Add(d.UnitId);
+                d.Organisation = FP.Max(FP.Zero, d.Organisation - orgEach);
+                d.Strength = FP.Max(FP.Zero, d.Strength - hpEach);
+                if (d.Strength <= FP.Zero) destroyed.Add(d.UnitId);
             }
         }
     }

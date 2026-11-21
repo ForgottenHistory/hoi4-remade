@@ -427,8 +427,8 @@ namespace Hoi4.Units
                 s.Types[type] = s.Types.TryGetValue(type, out int n) ? n + 1 : 1;
                 if (d != null)
                 {
-                    s.Org += d.Organisation; s.MaxOrg += d.MaxOrganisation;
-                    s.Str += d.Strength; s.MaxStr += d.MaxStrength;
+                    s.Org += d.Organisation.ToFloat(); s.MaxOrg += d.MaxOrganisation.ToFloat();
+                    s.Str += d.Strength.ToFloat(); s.MaxStr += d.MaxStrength.ToFloat();
                 }
             }
 

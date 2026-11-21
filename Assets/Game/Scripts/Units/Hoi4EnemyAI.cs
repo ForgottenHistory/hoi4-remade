@@ -6,6 +6,7 @@ using Hoi4.Map;
 using StarterKit.Commands;
 using Unity.Collections;
 using UnityEngine;
+using FP = Core.Data.FixedPoint64;
 
 namespace Hoi4.Units
 {
@@ -23,13 +24,13 @@ namespace Hoi4.Units
     /// </summary>
     public sealed class Hoi4EnemyAI : MonoBehaviour
     {
-        const float MinOrganisation = 0.7f;   // of max: tired divisions rest before attacking again
-        const float MinStrength = 0.5f;       // of max: battered divisions don't attack at all
-        const float GoodOdds = 1.0f;          // attack when the attackers should break the defenders first
-        const float BoldOdds = 0.6f;          // uneven fights: taken sometimes (BoldChance), never below this
-        const float BoldChance = 0.25f;
-        const float BreakOffOrganisation = 0.3f; // of max: an attacker this worn down breaks off
-        const float BreakOffStrength = 0.35f;
+        static readonly FP MinOrganisation = FP.FromFraction(7, 10);     // of max: tired divisions rest before attacking again
+        static readonly FP MinStrength = FP.Half;                        // of max: battered divisions don't attack at all
+        static readonly FP GoodOdds = FP.One;                            // attack when the attackers should break the defenders first
+        static readonly FP BoldOdds = FP.FromFraction(6, 10);            // uneven fights: taken sometimes (BoldChance), never below this
+        const int BoldChance = 16384;                                    // out of 65536 (a quarter)
+        static readonly FP BreakOffOrganisation = FP.FromFraction(3, 10); // of max: an attacker this worn down breaks off
+        static readonly FP BreakOffStrength = FP.FromFraction(35, 100);
         const int BreakOffPercent = 25;       // or when its side holds less than this share of the battle's organisation
 
         public static Hoi4EnemyAI Instance { get; private set; }
@@ -111,12 +112,12 @@ namespace Hoi4.Units
                 gameState.TryExecuteCommand(new HaltUnitsCommand { CountryId = kv.Key, UnitIds = kv.Value });
         }
 
-        /// <summary>Deterministic "dice" per country, province and day (same game, same choices).</summary>
-        static float Roll(ushort country, ushort province, int day)
+        /// <summary>Deterministic "dice" per country, province and day (same game, same choices): 0..65535.</summary>
+        static int Roll(ushort country, ushort province, int day)
         {
             uint h = (uint)country * 73856093u ^ (uint)province * 19349663u ^ (uint)day * 83492791u;
             h ^= h >> 13; h *= 0x5bd1e995u; h ^= h >> 15;
-            return (h & 0xFFFF) / 65535f;
+            return (int)(h & 0xFFFF);
         }
 
         static ushort PlayerCountry
@@ -142,9 +143,9 @@ namespace Hoi4.Units
                     Attack(country);
         }
 
-        float Strength(ushort country)
+        FP Strength(ushort country)
         {
-            float total = 0f;
+            FP total = FP.Zero;
             foreach (ushort id in gameState.Units.GetCountryUnits(country))
             {
                 var d = Hoi4Divisions.Instance.Get(id);
@@ -174,10 +175,10 @@ namespace Hoi4.Units
             if (fronts.Count == 0) return;
 
             ushort target = 0;
-            float best = -1f;
+            FP best = FP.NegativeOne;
             foreach (var kv in fronts)
             {
-                float s = Strength(kv.Key);
+                FP s = Strength(kv.Key);
                 if (s > best || (s == best && kv.Key < target)) { best = s; target = kv.Key; } // ties: lowest id
             }
             var targets = fronts[target];
@@ -240,7 +241,7 @@ namespace Hoi4.Units
                     if (tried >= 4 || (bestPath != null && load[t] > bestLoad)) break;
                     // Odds with this division joining the ones already on the way
                     var side = new List<Hoi4Division>(attackersOf[t]) { self };
-                    float odds = Hoi4Combat.Odds(side, defendersOf[t]);
+                    FP odds = Hoi4Combat.Odds(side, defendersOf[t]);
                     if (odds < GoodOdds && (odds < BoldOdds || Roll(country, t, today) >= BoldChance)) continue;
                     tried++;
                     var path = gameState.Pathfinding.FindPath(unit.provinceID, t, country);
