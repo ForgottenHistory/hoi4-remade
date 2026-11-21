@@ -1358,6 +1358,9 @@ def convert_counter_gfx(hoi4: Path, out: Path, tag_ideology, main_types):
     Image.open(gi / "onmap_unit_counter.dds").convert("RGBA").save(dst / "plate.png")       # 3 frames
     Image.open(gi / "onmap_unit_counter_selected.dds").convert("RGBA").save(dst / "selected.png")
     Image.open(gi / "onmap_unit_counter_ideology.dds").convert("RGBA").save(dst / "ideology.png")  # 4 frames
+    act = Image.open(gi / "onmap_action_icon.dds").convert("RGBA")  # 14 frames
+    for name, i in (("defend", 2), ("move", 4), ("attack", 5)):
+        frame(act, i, 14).save(dst / f"action_{name}.png")
     for kind in ("org", "str"):
         bar = Image.open(gi / "mapicons" / f"mapicon_bar_{kind}_sprite.dds").convert("RGBA")
         bar.rotate(90, expand=True).save(dst / f"bar_{kind}.png")  # 17x3, full end on the left

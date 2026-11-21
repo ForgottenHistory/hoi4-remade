@@ -6,7 +6,7 @@ using UnityEngine;
 
 namespace Hoi4.Units
 {
-    /// <summary>One army: a named group of up to Hoi4Armies.MaxUnits divisions.</summary>
+    /// <summary>One army: a named group of divisions.</summary>
     public sealed class Hoi4Army
     {
         public int Id;
@@ -15,14 +15,12 @@ namespace Hoi4.Units
     }
 
     /// <summary>
-    /// GAME: armies, HOI4's grouping of divisions (up to 24 each). A division belongs to at most one army.
+    /// GAME: armies, HOI4's grouping of divisions. There is no size limit; a general's limit (debuffs past it) is not modelled yet. A division belongs to at most one army.
     /// Armies are created from the player's selection and can take more divisions later; an army that
     /// loses its last division disappears. The bottom-of-screen cards are Hoi4ArmyPanel.
     /// </summary>
     public sealed class Hoi4Armies : MonoBehaviour
     {
-        public const int MaxUnits = 24;
-
         public static Hoi4Armies Instance { get; private set; }
 
         readonly List<Hoi4Army> armies = new List<Hoi4Army>();
@@ -62,7 +60,7 @@ namespace Hoi4.Units
             destroyedSub?.Dispose();
         }
 
-        /// <summary>A new army from these divisions (the first MaxUnits, taken out of any army they were in). Null when none.</summary>
+        /// <summary>A new army from these divisions (taken out of any army they were in). Null when none.</summary>
         public Hoi4Army Create(IEnumerable<ushort> units)
         {
             var army = new Hoi4Army { Id = nextId++ };
@@ -70,7 +68,6 @@ namespace Hoi4.Units
             int added = 0;
             foreach (ushort u in units)
             {
-                if (added >= MaxUnits) break;
                 Detach(u);
                 army.Units.Add(u);
                 armyOf[u] = army;
@@ -83,14 +80,13 @@ namespace Hoi4.Units
             return army;
         }
 
-        /// <summary>Move divisions into an army, as many as fit. Returns how many were added.</summary>
+        /// <summary>Move divisions into an army. Returns how many were added.</summary>
         public int Add(Hoi4Army army, IEnumerable<ushort> units)
         {
             int added = 0;
             foreach (ushort u in units)
             {
                 if (armyOf.TryGetValue(u, out var current) && current == army) continue;
-                if (army.Units.Count >= MaxUnits) break;
                 Detach(u);
                 army.Units.Add(u);
                 armyOf[u] = army;

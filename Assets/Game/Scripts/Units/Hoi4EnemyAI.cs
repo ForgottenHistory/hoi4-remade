@@ -103,7 +103,7 @@ namespace Hoi4.Units
                 bool border = false;
                 foreach (ushort n in gameState.Adjacencies.GetNeighborsWhere(p, q => !Hoi4Regions.IsWater(q)))
                     if (Hoi4Occupation.ControllerOf(gameState, n) == country) { border = true; break; }
-                if (!border) continue;
+                if (!border || Hoi4Combat.IsAttackedFrom(gameState, country, p)) continue;
                 if (!fronts.TryGetValue(holder, out var list)) fronts[holder] = list = new List<ushort>();
                 list.Add(p);
             }

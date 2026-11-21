@@ -87,6 +87,17 @@ namespace Hoi4.Units
         }
 
         /// <summary>Engine arrival gate: a division may not enter a province held by a country at war with it.</summary>
+        /// <summary>
+        /// True while enemies in this province are attacking a province of this country: it can't be
+        /// attacked back, the way HOI4 doesn't let you attack the province you are being attacked from.
+        /// </summary>
+        public static bool IsAttackedFrom(Core.GameState gameState, ushort country, ushort province)
+        {
+            foreach (var b in Battles)
+                if (b.From == province && Hoi4Occupation.ControllerOf(gameState, b.To) == country) return true;
+            return false;
+        }
+
         /// <summary>True while this division's move is an attack: its target province holds an enemy.</summary>
         public bool IsAttacking(ushort unitId)
         {

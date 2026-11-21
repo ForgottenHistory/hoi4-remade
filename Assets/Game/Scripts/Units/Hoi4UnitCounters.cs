@@ -31,6 +31,8 @@ namespace Hoi4.Units
         const int CounterW = 66, CounterH = 27, SlotW = 68, SlotH = 29;
         const int AtlasWidth = 2048;
         const float StackSpacingPx = 70f;
+        const float BaseYPx = -CounterH * 1.5f; // the lowest counter is centred on the province, not standing on it
+        const float RowSpacingPx = CounterH; // different templates of a country pile up flush, one counter above the other
 
         // Zoom is measured like the border fades: screen pixels per map (province bitmap) pixel
         [Tooltip("Screen pixels per counter pixel at full size")]
@@ -45,8 +47,6 @@ namespace Hoi4.Units
         public float fadeVisibleZoom = 5f;
         [Tooltip("Counter centre height above the terrain, in world units")]
         public float liftAboveTerrain = 0f;
-        [Tooltip("Plate brightness (HOI4's plate is grey; 0 = black)")]
-        [Range(0f, 1f)] public float plateBrightness = 0.22f;
 
         static readonly int AtlasId = Shader.PropertyToID("_MainTex");
         static readonly int HeightmapId = Shader.PropertyToID("_HeightmapTexture");
@@ -74,7 +74,14 @@ namespace Hoi4.Units
             public float Org, MaxOrg, Str, MaxStr;
             public readonly Dictionary<string, int> Types = new Dictionary<string, int>();
             public Vector3 Anchor;
-            public int IndexInProvince, StacksInProvince;
+            public int IndexInProvince, StacksInProvince; // column among the countries in the province
+            public string Template;
+            public int GroupCount; // divisions of the template in the province, also when opened into single counters (keeps the pile's order)
+            public int Battle; // battle bubble: 0 not the player's fight, 1 the player is losing, 2 winning
+            public int ArmyId; // the army of its first division, 0 when unassigned: colours the strip behind the action icon
+            public int Action; // 0 idle, 1 moving, 2 defending a battle, 3 attacking
+            public Color32 Color; // the country's map colour, the counter's background
+            public int Row; // templates of one country stack upwards
             public bool IsBattle; // a battle marker on a border, not a division counter (Count = attacker %)
         }
 
@@ -88,6 +95,7 @@ namespace Hoi4.Units
         // Composed counters by content: a counter that did not change is copied, not re-composed
         readonly Dictionary<string, Color32[]> composed = new Dictionary<string, Color32[]>();
 
+        Sprite actionMove, actionDefend, actionAttack; // optional: the arrow, shield and double chevron on a counter's right edge
         Sprite plate, selectedFrame, ideologyStrip, barOrg, barStr, digits;
         List<Stack> stacks = new List<Stack>();
         Texture2D heightmap;
@@ -288,7 +296,7 @@ namespace Hoi4.Units
             float zoom = worldPerMapPixel / worldPerScreenPx;
             if (zoom < fadeHiddenZoom) return false; // counters are hidden at this zoom
             float scale = pixelScale * Mathf.Clamp(zoom / Mathf.Max(fullSizeZoom, 0.01f), Mathf.Clamp01(minSizeFraction), 1f);
-            rect = new Rect(anchorScreen.x + s.X0 * scale, anchorScreen.y + (SlotH - CounterH - 1) * scale,
+            rect = new Rect(anchorScreen.x + s.X0 * scale, anchorScreen.y + (BaseYPx + s.Row * RowSpacingPx + SlotH - CounterH - 1) * scale,
                 CounterW * scale, (CounterH + 1) * scale);
             return true;
         }
@@ -303,6 +311,9 @@ namespace Hoi4.Units
             barOrg = LoadSprite("gfx/counters/bar_org.png");
             barStr = LoadSprite("gfx/counters/bar_str.png");
             digits = LoadSprite("gfx/counters/digits.png");
+            actionMove = LoadSprite("gfx/counters/action_move.png");
+            actionDefend = LoadSprite("gfx/counters/action_defend.png");
+            actionAttack = LoadSprite("gfx/counters/action_attack.png");
             if (plate == null || ideologyStrip == null || barOrg == null || barStr == null || digits == null)
             {
                 ArchonLogger.LogWarning("Hoi4UnitCounters: counter sprites missing under gfx/counters (rerun Tools/hoi4_convert.py)", "game_units");
@@ -367,25 +378,51 @@ namespace Hoi4.Units
 
         List<Stack> CollectStacks()
         {
-            var byKey = new Dictionary<uint, Stack>();
+            var byKey = new Dictionary<(uint, string), Stack>();
             var units = gameState.Units;
+            // A counter of several divisions with any of them selected opens up into one counter per
+            // division (stacked like different templates), so single divisions can be picked out.
+            var defended = new HashSet<ushort>();
+            foreach (var battle in Hoi4Combat.Battles) defended.Add(battle.To);
+            var queue = units.MovementQueue;
+            var groupSize = new Dictionary<(uint, string), int>();
+            var groupSelected = new HashSet<(uint, string)>();
             foreach (ushort id in units.GetAllUnits())
             {
                 var u = units.GetUnit(id);
-                uint key = ((uint)u.provinceID << 16) | u.countryID;
+                var d = Hoi4Divisions.Instance != null ? Hoi4Divisions.Instance.Get(id) : null;
+                var gk = (((uint)u.provinceID << 16) | u.countryID, d?.MainType ?? "infantry"); // grouped by icon, not template
+                groupSize[gk] = groupSize.TryGetValue(gk, out int gn) ? gn + 1 : 1;
+                if (Selection != null && Selection.Contains(id)) groupSelected.Add(gk);
+            }
+            foreach (ushort id in units.GetAllUnits())
+            {
+                var u = units.GetUnit(id);
+                var d = Hoi4Divisions.Instance != null ? Hoi4Divisions.Instance.Get(id) : null;
+                string template = d?.MainType ?? "infantry"; // the counter shows the icon, so divisions with the same icon share one
+                var groupKey = (((uint)u.provinceID << 16) | u.countryID, template);
+                if (groupSize[groupKey] > 1 && groupSelected.Contains(groupKey)) template += "#" + id.ToString("D5");
+                var key = (((uint)u.provinceID << 16) | u.countryID, template);
                 if (!byKey.TryGetValue(key, out var s))
                 {
                     byKey[key] = s = new Stack
                     {
+                        Template = template,
+                        GroupCount = groupSize[groupKey],
+                        Color = gameState.Countries.GetCountryColor(u.countryID),
                         Province = u.provinceID,
                         Country = u.countryID,
                         Tag = gameState.Countries.GetCountryTag(u.countryID),
                     };
                 }
                 s.Count++;
+                int action = Hoi4Combat.Instance != null && Hoi4Combat.Instance.IsAttacking(id) ? 3
+                    : defended.Contains(u.provinceID) ? 2
+                    : queue != null && queue.IsUnitMoving(id) ? 1 : 0;
+                if (action > s.Action) s.Action = action;
+                if (s.ArmyId == 0) s.ArmyId = Hoi4Armies.Instance?.ArmyOf(id)?.Id ?? 0;
                 s.Units.Add(id);
                 if (Selection != null && Selection.Contains(id)) s.Selected = true;
-                var d = Hoi4Divisions.Instance != null ? Hoi4Divisions.Instance.Get(id) : null;
                 string type = d?.MainType ?? "infantry";
                 s.Types[type] = s.Types.TryGetValue(type, out int n) ? n + 1 : 1;
                 if (d != null)
@@ -407,17 +444,32 @@ namespace Hoi4.Units
             }
             foreach (var list in perProvince.Values)
             {
-                list.Sort((a, b) => b.Count.CompareTo(a.Count));
-                for (int i = 0; i < list.Count; i++)
+                // Countries side by side, each country's templates piled up (biggest at the bottom)
+                list.Sort((a, b) => a.Country != b.Country ? a.Country.CompareTo(b.Country)
+                    : b.GroupCount != a.GroupCount ? b.GroupCount.CompareTo(a.GroupCount) : string.CompareOrdinal(a.Template, b.Template));
+                int column = -1, row = 0;
+                ushort last = 0;
+                var columns = new List<ushort>();
+                foreach (var s in list) if (columns.Count == 0 || columns[columns.Count - 1] != s.Country) columns.Add(s.Country);
+                foreach (var s in list)
                 {
-                    list[i].IndexInProvince = i;
-                    list[i].StacksInProvince = list.Count;
+                    if (column < 0 || s.Country != last) { column++; row = 0; last = s.Country; }
+                    s.IndexInProvince = column;
+                    s.StacksInProvince = columns.Count;
+                    s.Row = row++;
                 }
             }
             foreach (var b in Hoi4Combat.Battles)
             {
                 if (!centers.TryGetProvinceCenter(b.From, out var p0) || !centers.TryGetProvinceCenter(b.To, out var p1)) continue;
-                result.Add(new Stack { IsBattle = true, Count = b.AttackerPercent, Anchor = (p0 + p1) * 0.5f, StacksInProvince = 1 });
+                // From the player's side: defending when the player holds the attacked province, attacking when
+                // the player holds the attackers' province; other countries' fights stay red
+                var playerState = StarterKit.Initializer.Instance?.PlayerState;
+                ushort player = playerState != null && playerState.HasPlayerCountry ? playerState.PlayerCountryId : (ushort)0;
+                int share = b.AttackerPercent, side = 0;
+                if (player != 0 && Hoi4Occupation.ControllerOf(gameState, b.To) == player) { share = 100 - share; side = share >= 50 ? 2 : 1; }
+                else if (player != 0 && Hoi4Occupation.ControllerOf(gameState, b.From) == player) side = share >= 50 ? 2 : 1;
+                result.Add(new Stack { IsBattle = true, Count = share, Battle = side, Anchor = (p0 + p1) * 0.5f, StacksInProvince = 1 });
             }
             // North first so southern counters draw on top (they are nearer the camera)
             result.Sort((a, b) => b.Anchor.z.CompareTo(a.Anchor.z));
@@ -467,7 +519,7 @@ namespace Hoi4.Units
                 float shift = (s.IndexInProvince - (s.StacksInProvince - 1) * 0.5f) * StackSpacingPx;
                 float x0 = -SlotW * 0.5f + shift, x1 = SlotW * 0.5f + shift;
                 s.X0 = x0; s.X1 = x1;
-                float y0 = 0f, y1 = SlotH; // bottom edge on the anchor (shader stands it up)
+                float y0 = BaseYPx + s.Row * RowSpacingPx, y1 = y0 + SlotH; // bottom edge on the anchor (shader stands it up)
 
                 int v = i * 4;
                 for (int k = 0; k < 4; k++) verts[v + k] = s.Anchor;
@@ -496,14 +548,14 @@ namespace Hoi4.Units
 
         string Signature(Stack s)
         {
-            if (s.IsBattle) return "b" + s.Count;
+            if (s.IsBattle) return "b" + s.Count + "|" + s.Battle;
             string type = "infantry";
             int best = -1;
             foreach (var kv in s.Types)
                 if (kv.Value > best) { best = kv.Value; type = kv.Key; }
             int org = Mathf.RoundToInt(barOrg.Width * Mathf.Clamp01(s.MaxOrg > 0 ? s.Org / s.MaxOrg : 1f));
             int str = Mathf.RoundToInt(barStr.Width * Mathf.Clamp01(s.MaxStr > 0 ? s.Str / s.MaxStr : 1f));
-            return string.Concat(s.Tag, "|", type, "|", s.Count.ToString(), "|", org.ToString(), "|", str.ToString(), s.Selected ? "|s" : "");
+            return string.Concat(s.Tag, "|", s.Color.r.ToString(), ",", s.Color.g.ToString(), ",", s.Color.b.ToString(), "|", type, "|a", s.Action.ToString(), "|m", s.ArmyId.ToString(), "|", s.Count.ToString(), "|", org.ToString(), "|", str.ToString(), s.Selected ? "|s" : "");
         }
 
         void ComposeCached(Stack s, int ox, int oy)
@@ -528,14 +580,11 @@ namespace Hoi4.Units
         {
             if (s.IsBattle) { ComposeBattle(s, ox, oy); return; }
             // Layout from HOI4 interface/mapicons.gui (unit_counter)
-            byte pb = (byte)Mathf.RoundToInt(Mathf.Clamp01(plateBrightness) * 255f);
-            Blit(plate, 0, 0, CounterW, CounterH, ox, oy, new Color32(pb, pb, pb, 255));
+            BlitPlate(s.Color, ox, oy);
+            // Dark box behind the icon, flag and bars (the count box on the right is part of the plate)
+            DarkBox(ox + 1, oy + 1, 32, 24);
             if (s.Selected && selectedFrame != null)
                 Blit(selectedFrame, 0, 0, selectedFrame.Width, selectedFrame.Height, ox, oy);
-            string ideology = countryIdeology.TryGetValue(s.Tag ?? "", out var ide) ? ide : "neutrality";
-            int frame = ideologyFrame.TryGetValue(ideology, out int f) ? f : 3;
-            int ideoW = ideologyStrip.Width / Mathf.Max(ideologyFrame.Count, 1);
-            Blit(ideologyStrip, frame * ideoW, 0, ideoW, ideologyStrip.Height, ox + 37, oy);
 
             var flag = s.Tag != null ? Flag(s.Tag) : null;
             if (flag != null) Blit(flag, 0, 0, flag.Width, flag.Height, ox + 5, oy + 15);
@@ -546,6 +595,24 @@ namespace Hoi4.Units
                 if (kv.Value > best) { best = kv.Value; type = kv.Key; }
             var icon = Icon(type) ?? Icon("infantry");
             if (icon != null) Blit(icon, 0, 0, icon.Width, icon.Height, ox + 3, oy + 2);
+
+            if (s.Action >= 2 && s.ArmyId != 0)
+            {
+                // The strip shows which army the division belongs to, not what it is doing
+                var army = Color.HSVToRGB((s.ArmyId * 0.382f) % 1f, 0.75f, 0.5f);
+                var fill = (Color32)army;
+                var edgeCol = (Color32)(army * 0.4f);
+                for (int sy = 1; sy < CounterH - 2; sy++)
+                    for (int sx = 57; sx < CounterW - 1; sx++)
+                    {
+                        bool edge = sx == 57 || sy == 1 || sy == CounterH - 3 || sx == CounterW - 2;
+                        float shade = 1f - 0.3f * (sy / (float)CounterH);
+                        Over(ox + sx, oy + sy, edge ? edgeCol
+                            : new Color32((byte)(fill.r * shade), (byte)(fill.g * shade), (byte)(fill.b * shade), 255));
+                    }
+            }
+            var action = s.Action == 3 ? actionAttack : s.Action == 2 ? actionDefend : s.Action == 1 ? actionMove : null;
+            if (action != null) BlitScaled(action, 9, ox + 57, oy + 9); // fits the strip right of the count box
 
             Bar(barOrg, s.MaxOrg > 0 ? s.Org / s.MaxOrg : 1f, ox + 16, oy + 16);
             Bar(barStr, s.MaxStr > 0 ? s.Str / s.MaxStr : 1f, ox + 16, oy + 19);
@@ -573,12 +640,20 @@ namespace Hoi4.Units
                 {
                     float d = Mathf.Sqrt(x * x + y * y);
                     if (d > r + 0.5f) continue;
-                    Over(cx + x, cy + y, d > r - 2f ? new Color32(120, 18, 16, 255) : new Color32(205, 42, 36, 255));
+                    Over(cx + x, cy + y, s.Battle == 2
+                        ? (d > r - 2f ? new Color32(24, 100, 28, 255) : new Color32(52, 170, 58, 255))
+                        : (d > r - 2f ? new Color32(120, 18, 16, 255) : new Color32(205, 42, 36, 255)));
                 }
             string text = s.Count.ToString();
             const int advance = 7;
             int textW = (text.Length - 1) * advance + digitW;
-            int tx = cx - textW / 2, ty = cy - digitH / 2;
+            int tx = cx - textW / 2 + 1, ty = cy - digitH / 2 + 1; // +1: the disc's centre is one pixel right and below the glyph cell's
+            // Dark box behind the number, like the count box of a division counter
+            bool win = s.Battle == 2;
+            int boxW = Mathf.Min(textW + 2, 19) | 1, boxH = digitH; // odd width so it centres on the disc; stays inside it
+            DarkBox(cx - boxW / 2, ty, boxW, boxH,
+                win ? new Color32(10, 38, 12, 255) : new Color32(46, 8, 7, 255),
+                win ? new Color32(4, 20, 6, 255) : new Color32(24, 4, 4, 255));
             foreach (char c in text)
             {
                 Blit(digits, (c - '0') * digitW, 0, digitW, digitH, tx, ty, new Color32(255, 245, 235, 255));
@@ -599,6 +674,58 @@ namespace Hoi4.Units
             for (int y = 0; y < h; y++)
                 for (int x = 0; x < w; x++)
                     Over(dx + x, dy + y, c);
+        }
+
+        /// <summary>
+        /// The plate in the country's colour: the plate's grey shading modulates the colour (keeping its
+        /// hue, unlike a per-channel multiply that clips), and its dark parts become a dark shade of it.
+        /// </summary>
+        void BlitPlate(Color32 col, int dx, int dy)
+        {
+            for (int y = 0; y < CounterH && y < plate.Height; y++)
+                for (int x = 0; x < CounterW && x < plate.Width; x++)
+                {
+                    var c = plate.Pixels[y * plate.Width + x];
+                    if (c.a == 0) continue;
+                    float lum = (c.r + c.g + c.b) / 3f;
+                    float k = lum / 135f; // the plate's average grey (~105) maps to ~80 % of the plain colour
+                    float r = col.r * k, g = col.g * k, b = col.b * k;
+                    float m = Mathf.Max(r, Mathf.Max(g, b));
+                    if (m > 255f) { float f = 255f / m; r *= f; g *= f; b *= f; }
+                    if (lum < 80f) { r = col.r * 0.22f; g = col.g * 0.22f; b = col.b * 0.22f; } // count box and outline: a dark shade of the colour
+                    Over(dx + x, dy + y, new Color32((byte)r, (byte)g, (byte)b, c.a));
+                }
+        }
+
+        // Box-filtered downscale of a square sprite to size x size pixels
+        void BlitScaled(Sprite src, int size, int dx, int dy)
+        {
+            float step = (float)src.Width / size;
+            for (int y = 0; y < size; y++)
+                for (int x = 0; x < size; x++)
+                {
+                    float r = 0, g = 0, b = 0, a = 0; int n = 0;
+                    for (int sy = (int)(y * step); sy < Mathf.Min(src.Height, Mathf.CeilToInt((y + 1) * step)); sy++)
+                        for (int sx = (int)(x * step); sx < Mathf.Min(src.Width, Mathf.CeilToInt((x + 1) * step)); sx++)
+                        {
+                            var c = src.Pixels[sy * src.Width + sx];
+                            r += c.r * c.a; g += c.g * c.a; b += c.b * c.a; a += c.a; n++;
+                        }
+                    if (n == 0 || a <= 0f) continue;
+                    Over(dx + x, dy + y, new Color32((byte)(r / a), (byte)(g / a), (byte)(b / a), (byte)(a / n)));
+                }
+        }
+
+        void DarkBox(int x0, int y0, int w, int h, Color32? fillColor = null, Color32? edgeColor = null)
+        {
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++)
+                {
+                    bool edge = x == 0 || y == 0 || x == w - 1 || y == h - 1;
+                    bool corner = (x == 0 || x == w - 1) && (y == 0 || y == h - 1);
+                    if (corner) continue;
+                    Over(x0 + x, y0 + y, edge ? (edgeColor ?? new Color32(30, 28, 26, 255)) : (fillColor ?? new Color32(64, 61, 57, 255)));
+                }
         }
 
         void Blit(Sprite src, int sx, int sy, int w, int h, int dx, int dy, Color32? tint = null)

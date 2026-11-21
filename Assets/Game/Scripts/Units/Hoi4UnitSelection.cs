@@ -47,6 +47,14 @@ namespace Hoi4.Units
         public event Action Changed;
 
         public IReadOnlyList<ushort> Selected => ordered;
+
+        /// <summary>
+        /// The divisions the panel lists: the selection, widened to the whole army when the selection sits
+        /// inside one. Splitting an army's selection (S, select-half) keeps the army listed, with the
+        /// deselected divisions dark; unassigned divisions drop out of the panel once deselected.
+        /// </summary>
+        public IReadOnlyList<ushort> Context => context;
+        readonly List<ushort> context = new List<ushort>();
         public bool IsSelected(ushort unitId) => selection.Contains(unitId);
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -102,7 +110,7 @@ namespace Hoi4.Units
 
             subscriptions = new[]
             {
-                gameState.EventBus.Subscribe<UnitDestroyedEvent>(e => { if (selection.Remove(e.UnitID)) { ordered.Remove(e.UnitID); OnSelectionChanged(); } }),
+                gameState.EventBus.Subscribe<UnitDestroyedEvent>(e => { context.Remove(e.UnitID); if (selection.Remove(e.UnitID)) { ordered.Remove(e.UnitID); OnSelectionChanged(true); } else Changed?.Invoke(); }),
                 gameState.EventBus.Subscribe<UnitMovedEvent>(e => { if (selection.Contains(e.UnitID)) Changed?.Invoke(); }),
                 gameState.EventBus.Subscribe<HourlyTickEvent>(_ => { if (selection.Count > 0) Changed?.Invoke(); }),
             };
@@ -114,6 +122,8 @@ namespace Hoi4.Units
             if (gameState == null) return;
             if (Input.GetKeyDown(KeyCode.Escape) && selection.Count > 0)
                 Clear();
+            if (Input.GetKeyDown(KeyCode.S) && !Input.GetKey(KeyCode.LeftControl) && !Input.GetKey(KeyCode.RightControl))
+                Hoi4DivisionPresenter.SelectHalf(this);
             UpdateBox();
         }
 
@@ -210,6 +220,11 @@ namespace Hoi4.Units
                 return 0;
             ushort country = player.PlayerCountryId;
 
+            if (Hoi4Combat.IsAttackedFrom(gameState, country, target))
+            {
+                ArchonLogger.Log($"Hoi4UnitSelection: province {target} is attacking us, it can't be attacked back", "game_units");
+                return 0;
+            }
             var paths = new Dictionary<ushort, List<ushort>>(); // per start province
             int issued = 0, noPath = 0;
             foreach (ushort id in ordered)
@@ -247,6 +262,7 @@ namespace Hoi4.Units
                     : " (unreachable)";
             }
             ArchonLogger.Log($"Hoi4UnitSelection: {issued} divisions ordered to province {target}" + (noPath > 0 ? $", {noPath} without a path{why}" : ""), "game_units");
+            Hoi4UnitCounters.Instance?.MarkDirty(); // the counters show a move arrow now
             Changed?.Invoke();
             return issued;
         }
@@ -260,6 +276,15 @@ namespace Hoi4.Units
             OnSelectionChanged();
         }
 
+        /// <summary>Change the selection to a subset of the listed divisions, keeping the panel's context.</summary>
+        public void SelectSubset(IEnumerable<ushort> units)
+        {
+            ClearSilently();
+            foreach (var u in units)
+                if (selection.Add(u)) ordered.Add(u);
+            OnSelectionChanged(true);
+        }
+
         /// <summary>Select exactly these units (e.g. from the division panel).</summary>
         public void Select(IEnumerable<ushort> units)
         {
@@ -269,14 +294,25 @@ namespace Hoi4.Units
             OnSelectionChanged();
         }
 
+        void RebuildContext()
+        {
+            context.Clear();
+            if (ordered.Count == 0) return;
+            var army = Hoi4Armies.Instance?.ArmyOf(ordered[0]);
+            foreach (ushort u in ordered)
+                if (Hoi4Armies.Instance?.ArmyOf(u) != army) { army = null; break; }
+            context.AddRange(army != null ? army.Units : ordered);
+        }
+
         void ClearSilently()
         {
             selection.Clear();
             ordered.Clear();
         }
 
-        void OnSelectionChanged()
+        void OnSelectionChanged(bool _ = false)
         {
+            RebuildContext(); // an army stays listed whole; unassigned divisions are listed only while selected
             Hoi4UnitCounters.Instance?.MarkDirty();
             Changed?.Invoke();
         }

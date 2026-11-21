@@ -26,12 +26,17 @@ namespace Hoi4.Units
                 return false;
 
             var selected = selection.Selected;
+            var context = selection.Context; // selection plus the army mates / split-off divisions
             int count = selected.Count;
-            int cards = Mathf.Min(count, MaxCards);
+            int total = context.Count;
+            int cards = Mathf.Min(total, MaxCards);
+            var army = total > 0 ? Hoi4Armies.Instance?.ArmyOf(context[0]) : null;
+            if (army != null)
+                foreach (ushort u in context) if (Hoi4Armies.Instance.ArmyOf(u) != army) { army = null; break; }
             int shown = Mathf.Min(cards, VisibleCards);
 
-            panel.Q<Label>("header").text = count == 1
-                ? (divisions.Get(selected[0])?.Name ?? "Division")
+            panel.Q<Label>("header").text = army != null ? army.Name
+                : count == 1 && total == 1 ? (divisions.Get(selected[0])?.Name ?? "Division")
                 : $"<color=#8fd96b>{count}</color> Divisions";
 
             var list = panel.Q<ScrollView>("list");
@@ -39,14 +44,15 @@ namespace Hoi4.Units
             list.style.height = shown * CardHeight;
             for (int i = 0; i < cards; i++)
             {
-                ushort id = selected[i];
-                list.Add(Card(id, divisions.Get(id), gameState.Units.GetUnit(id), gameState, selection));
+                ushort id = context[i];
+                list.Add(Card(id, selection.IsSelected(id), divisions.Get(id), gameState.Units.GetUnit(id), gameState, selection));
             }
 
             float footerY = ListTop + shown * CardHeight + 8;
             panel.Q("footer").style.top = footerY;
-            panel.Q<Label>("note").text = count > cards
-                ? $"+{count - cards} more divisions selected"
+            panel.Q<Label>("note").text = total > cards
+                ? $"+{total - cards} more divisions"
+                : army != null ? ""
                 : "These Divisions are unassigned. Right-Click an existing Army or create a new one to assign them.";
             panel.style.height = footerY + FooterHeight + 8;
             return true;
@@ -59,18 +65,19 @@ namespace Hoi4.Units
             if (selected.Count == 0) return;
             var half = new List<ushort>();
             for (int i = 0; i < (selected.Count + 1) / 2; i++) half.Add(selected[i]);
-            selection.Select(half);
+            selection.SelectSubset(half);
         }
 
         // --- Pieces ---------------------------------------------------------------------------
 
-        static VisualElement Card(ushort id, Hoi4Division d, Core.Units.UnitState unit, Core.GameState gameState, Hoi4UnitSelection selection)
+        static VisualElement Card(ushort id, bool isSelected, Hoi4Division d, Core.Units.UnitState unit, Core.GameState gameState, Hoi4UnitSelection selection)
         {
             var card = new VisualElement { pickingMode = PickingMode.Position };
             card.AddToClassList("dv-card");
 
             var bg = Hoi4Sprites.Make("dv-card-bg");
             bg.pickingMode = PickingMode.Position;
+            if (!isSelected) bg.AddToClassList("dv-card-bg-off"); // dark: listed but not selected
             card.Add(bg);
 
             card.Add(Bar("dv-bar-org", d != null && d.MaxOrganisation > 0 ? d.Organisation / d.MaxOrganisation : 1f));
@@ -94,12 +101,12 @@ namespace Hoi4.Units
             {
                 var rest = new List<ushort>();
                 foreach (ushort other in selection.Selected) if (other != id) rest.Add(other);
-                if (rest.Count == 0) selection.Clear(); else selection.Select(rest);
+                if (rest.Count == 0) selection.Clear(); else selection.SelectSubset(rest);
                 e.StopPropagation();
             });
             card.Add(close);
 
-            card.RegisterCallback<ClickEvent>(_ => selection.Select(new[] { id }));
+            card.RegisterCallback<ClickEvent>(_ => selection.SelectSubset(new[] { id }));
             return card;
         }
 
