@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Hoi4Settings
   m_EditorClassIdentifier: 
   editorDataDirectory: Hoi4Data
-  startYear: 0
+  startYear: 1936
   startMonth: 1
   startDay: 1
   EnableParallelLoading: 1
