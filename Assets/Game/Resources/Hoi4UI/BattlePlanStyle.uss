@@ -1,6 +1,6 @@
 /* Battle Plans window (interface/battleplantools.gui), HOI4 pixels. The 641x79 bar holds the button slots;
    buttons are 35x34 at HOI4's coordinates (+36, the bar starts 36 left of the window). */
-.bp-window { position: absolute; left: 50%; translate: -50% 0; bottom: 122px; width: 641px; height: 79px; }
+.bp-window { position: absolute; left: 50%; translate: -50% 0; bottom: 146px; width: 641px; height: 79px; } /* above the army cards and their play / stop buttons */
 .bp-bg { position: absolute; left: 0; top: 0; width: 641px; height: 79px; }
 .bp-title { position: absolute; left: 14px; top: 1px; height: 22px; font-size: 16px; color: rgb(255, 255, 255); -unity-text-align: middle-left; }
 .bp-btn { position: absolute; top: 33px; width: 35px; height: 34px; }

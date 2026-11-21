@@ -449,6 +449,7 @@ namespace Hoi4.Units
             enemyLand.Clear();
             if (borderDirty) RefreshPlans();
             PruneOffensives();
+            PruneExecuting();
             if (plans.Count == 0) return;
             var units = gameState.Units;
             var queue = units.MovementQueue;

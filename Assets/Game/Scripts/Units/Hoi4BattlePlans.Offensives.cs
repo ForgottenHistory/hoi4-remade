@@ -304,6 +304,34 @@ namespace Hoi4.Units
                 planPixels[hoverProvince] = new Color32(green.r, green.g, green.b, 96);
         }
 
+        // --- Executing (HOI4 COrderExecuteCommand: the army's play / stop buttons) ---------------------
+
+        readonly SortedSet<int> executing = new SortedSet<int>(); // army ids whose plans run
+
+        /// <summary>The army's plans run (its play button is on).</summary>
+        public bool IsExecuting(int armyId) => executing.Contains(armyId);
+
+        /// <summary>The army has a front line: its play / stop buttons show.</summary>
+        public bool HasFrontLine(int armyId)
+        {
+            foreach (var p in plans) if (!p.IsAI && p.ArmyId == armyId) return true;
+            return false;
+        }
+
+        /// <summary>ExecuteBattlePlanCommand.</summary>
+        public void SetExecuting(ushort owner, int armyId, bool on)
+        {
+            if (on ? !executing.Add(armyId) : !executing.Remove(armyId)) return;
+            Core.Recording.SessionRecorder.Note("plans", on ? "execute" : "stop", owner, 0, 0, 0, $"army {armyId}");
+            Changed?.Invoke();
+        }
+
+        /// <summary>Hourly: an army without a front line has nothing to run.</summary>
+        void PruneExecuting()
+        {
+            if (executing.RemoveWhere(a => !HasFrontLine(a)) > 0) Changed?.Invoke();
+        }
+
         // --- Plans (commands) -----------------------------------------------------------------------
 
         /// <summary>All the targets are valid for the army, none twice.</summary>

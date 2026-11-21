@@ -4,7 +4,15 @@
 .army-list { flex-direction: row; align-items: flex-end; }
 .army-slot { width: 84px; height: 117px; flex-shrink: 0; }
 
-.army-card { width: 84px; height: 117px; flex-shrink: 0; }
+/* A card is 22px taller than the frame: the strip above it holds the battle plan play / stop buttons
+   (leadergroups.gui: positions relative to the frame, which sits at x-1 y-12 of the group) */
+.army-card { width: 84px; height: 139px; flex-shrink: 0; }
+.ac-body { position: absolute; left: 0; top: 22px; width: 84px; height: 117px; }
+.ac-exec-bg { position: absolute; left: 5px; top: 0; width: 78px; height: 26px; }
+.ac-stop { position: absolute; left: 7px; top: 2px; width: 28px; height: 23px; }
+.ac-play { position: absolute; left: 37px; top: 2px; width: 43px; height: 23px; }
+.ac-play-anim { position: absolute; left: 37px; top: 3px; width: 44px; height: 20px; }
+.ac-plan-value { position: absolute; left: 38px; top: 3px; width: 15px; height: 21px; }
 .ac-portrait { position: absolute; left: 9px; top: 7px; width: 61px; height: 82px; background-size: 61px 82px; }
 .ac-frame { position: absolute; left: 0; top: 0; width: 84px; height: 117px; }
 .ac-count { position: absolute; left: 0; top: 86px; width: 84px; height: 16px; font-size: 15px; -unity-text-align: middle-center; color: rgb(235, 235, 225); }

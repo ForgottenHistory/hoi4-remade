@@ -275,4 +275,25 @@ namespace Hoi4.Units
         public override void Serialize(BinaryWriter w) { w.Write(CountryId); w.Write(OffensiveId); }
         public override void Deserialize(BinaryReader r) { CountryId = r.ReadUInt16(); OffensiveId = r.ReadInt32(); }
     }
+
+    /// <summary>Run or stop an army's battle plans (HOI4 COrderExecuteCommand: 1 execute, 0 stop): the play and
+    /// stop buttons above its card. Only for an army with a front line.</summary>
+    public sealed class ExecuteBattlePlanCommand : BaseCommand
+    {
+        public ushort CountryId;
+        public int ArmyId;
+        public bool Run;                // true execute, false stop
+
+        public override bool Validate(GameState gameState)
+        {
+            var army = Hoi4Armies.Instance?.Get(ArmyId);
+            return army != null && army.Units.Count > 0 && Hoi4CommandIo.Owned(gameState, CountryId, new List<ushort> { army.Units[0] })
+                && Hoi4BattlePlans.Instance != null && (!Run || Hoi4BattlePlans.Instance.HasFrontLine(ArmyId));
+        }
+
+        public override void Execute(GameState gameState) => Hoi4BattlePlans.Instance.SetExecuting(CountryId, ArmyId, Run);
+        public override void Undo(GameState gameState) { }
+        public override void Serialize(BinaryWriter w) { w.Write(CountryId); w.Write(ArmyId); w.Write(Run); }
+        public override void Deserialize(BinaryReader r) { CountryId = r.ReadUInt16(); ArmyId = r.ReadInt32(); Run = r.ReadBoolean(); }
+    }
 }

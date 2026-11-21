@@ -1190,7 +1190,8 @@ def convert_unit_panel(hoi4: Path, out: Path, main_types):
 def convert_army_cards(hoi4: Path, out: Path):
     """Sprites of the army cards at the bottom of the screen (interface/leadergroups.gui) as PNGs under
     gfx/interface/armies/: the card frame states, the 'new army' plus button (and a grey copy for when
-    nothing is selected), the unknown-leader portrait and the disband button."""
+    nothing is selected), the unknown-leader portrait, the disband button and the battle plan execute / stop
+    buttons above the card."""
     import hoi4_gui as gui
     from PIL import Image
     dst = out / "gfx" / "interface" / "armies"
@@ -1212,10 +1213,18 @@ def convert_army_cards(hoi4: Path, out: Path):
         r, g, b, a = rgba.split()
         grey = Image.merge("RGB", (r, g, b)).convert("L").point(lambda v: int(v * 0.8))
         save("add_grey", Image.merge("RGBA", (grey, grey, grey, a)))
-    for name, spr in (("portrait", "GFX_leader_unknown"), ("disband", "GFX_LG_disband_group_btn")):
+    for name, spr in (("portrait", "GFX_leader_unknown"), ("disband", "GFX_LG_disband_group_btn"),
+                      ("exec_bg", "GFX_execute_stop_small_bg")):
         fr = gui.sprite_frames(hoi4, sprites, spr)
         if fr:
             save(name, fr[0])
+    # Battle plan execute / stop buttons above the card (4 frames each) and the scrolling chevrons over the
+    # execute button while the plan runs (12 frames, 24 fps)
+    for name, spr in (("exec_play", "GFX_execute_button_play_small"), ("exec_stop", "GFX_execute_button_stop_small"),
+                      ("exec_anim", "GFX_active_battleplan_anim"),
+                      ("plan_value", "GFX_plan_value_strip")):   # plan grade over the play button: -, !, :, tick
+        for i, fr in enumerate(gui.sprite_frames(hoi4, sprites, spr)):
+            save(f"{name}_{i}", fr)
     (dst / "armies.json5").write_text(
         "// Generated from HOI4 interface/leadergroups.gui sprites: [w, h]" + chr(10)
         + json.dumps(sizes, indent=1) + chr(10), encoding="utf-8")

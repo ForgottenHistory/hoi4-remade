@@ -10,7 +10,9 @@ namespace Hoi4.Units
     /// GAME: the army cards at the bottom of the screen (HOI4's leader group row, without field
     /// marshals). One card per army of the player's: left-click selects its divisions, right-click adds the
     /// selected divisions to it, the small cross disbands it. The plus card after them makes a new army
-    /// from the selected divisions, and is grey while none of the player's are selected.
+    /// from the selected divisions, and is grey while none of the player's are selected. An army with a front
+    /// line gets HOI4's battle plan stop / play buttons above its card (ExecuteBattlePlanCommand); while its
+    /// plans run, chevrons scroll over the play button.
     /// View of the UI Presenter pattern: structure is Resources/Hoi4UI/ArmyPanel.uxml, look is
     /// ArmyPanelStyle.uss + Hoi4Theme.uss; the cards themselves are built here, one per army.
     /// </summary>
@@ -21,6 +23,8 @@ namespace Hoi4.Units
         UIDocument document;
         VisualElement bar, list, add;
         bool dirty = true;
+        readonly List<VisualElement> anims = new List<VisualElement>(); // play-button chevrons of running armies
+        int animFrame = -1;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Spawn()
@@ -33,7 +37,7 @@ namespace Hoi4.Units
 
         IEnumerator Start()
         {
-            while (Hoi4UnitSelection.Instance == null || Hoi4Armies.Instance == null)
+            while (Hoi4UnitSelection.Instance == null || Hoi4Armies.Instance == null || Hoi4BattlePlans.Instance == null)
                 yield return null;
 
             var tree = Resources.Load<VisualTreeAsset>("Hoi4UI/ArmyPanel");
@@ -74,6 +78,7 @@ namespace Hoi4.Units
 
             Hoi4UnitSelection.Instance.Changed += OnChanged;
             Hoi4Armies.Instance.Changed += OnChanged;
+            Hoi4BattlePlans.Instance.Changed += OnChanged;
         }
 
         void OnChanged() => dirty = true;
@@ -82,6 +87,7 @@ namespace Hoi4.Units
         {
             if (Hoi4UnitSelection.Instance != null) Hoi4UnitSelection.Instance.Changed -= OnChanged;
             if (Hoi4Armies.Instance != null) Hoi4Armies.Instance.Changed -= OnChanged;
+            if (Hoi4BattlePlans.Instance != null) Hoi4BattlePlans.Instance.Changed -= OnChanged;
             Hoi4UiHover.Remove(this);
         }
 
@@ -112,9 +118,18 @@ namespace Hoi4.Units
             bar.style.display = player == 0 ? DisplayStyle.None : DisplayStyle.Flex;
             Hoi4UiHover.Report(this, bar);
             if (player == 0) return;
-            if (!dirty) return;
-            dirty = false;
-            Refresh(player);
+            if (dirty)
+            {
+                dirty = false;
+                Refresh(player);
+            }
+            // HOI4 GFX_active_battleplan_anim: 12 frames at 24 fps
+            int frame = Mathf.FloorToInt(Time.unscaledTime * 24f) % 12;
+            if (frame != animFrame && anims.Count > 0)
+            {
+                animFrame = frame;
+                foreach (var a in anims) Hoi4Sprites.Apply(a, Dir + $"exec_anim_{frame}.png");
+            }
         }
 
         void Refresh(ushort player)
@@ -123,6 +138,8 @@ namespace Hoi4.Units
             var armies = Hoi4Armies.Instance;
 
             list.Clear();
+            anims.Clear();
+            animFrame = -1;
             foreach (var army in armies.All)
             {
                 bool selected = army.Units.Count > 0;
@@ -138,8 +155,16 @@ namespace Hoi4.Units
 
         VisualElement Card(Hoi4Army army, bool selected)
         {
+            // The card's outer box includes the strip for the play / stop buttons (so the hover check that keeps
+            // clicks off the map covers them); the body is the HOI4 card below it
+            var outer = new VisualElement { pickingMode = PickingMode.Ignore };
+            outer.AddToClassList("army-card");
+            var plans = Hoi4BattlePlans.Instance;
+            if (plans != null && plans.HasFrontLine(army.Id)) AddExecuteButtons(outer, army, plans.IsExecuting(army.Id));
+
             var card = new VisualElement { pickingMode = PickingMode.Position };
-            card.AddToClassList("army-card");
+            card.AddToClassList("ac-body");
+            outer.Add(card);
 
             var portrait = new VisualElement { pickingMode = PickingMode.Ignore };
             portrait.AddToClassList("ac-portrait");
@@ -181,8 +206,50 @@ namespace Hoi4.Units
                 }
                 e.StopPropagation();
             });
-            return card;
+            return outer;
         }
+
+        /// <summary>leadergroups.gui btn_stop / btn_execute on their background. Idle: the play button's not-running
+        /// frame (1). Running: its plan-in-motion frame (0) over btn_execute_anim, the animated background (12
+        /// frames, 24 fps). plan_evaluation sits on the play button: HOI4 shows whether the general is confident in
+        /// the plan (! / : / tick); always the tick here.</summary>
+        void AddExecuteButtons(VisualElement outer, Hoi4Army army, bool running)
+        {
+            var bg = new VisualElement { pickingMode = PickingMode.Ignore };
+            bg.AddToClassList("ac-exec-bg");
+            Hoi4Sprites.Apply(bg, Dir + "exec_bg.png");
+            outer.Add(bg);
+
+            var stop = new VisualElement { pickingMode = PickingMode.Position };
+            stop.AddToClassList("ac-stop");
+            stop.AddToClassList("hoi4-button");
+            Hoi4Sprites.Apply(stop, Dir + (running ? "exec_stop_1.png" : "exec_stop_0.png"));
+            stop.RegisterCallback<PointerDownEvent>(e => { if (e.button == 0) Run(army, false); e.StopPropagation(); });
+            outer.Add(stop);
+
+            if (running)
+            {
+                var anim = new VisualElement { pickingMode = PickingMode.Ignore }; // under the arrow
+                anim.AddToClassList("ac-play-anim");
+                outer.Add(anim);
+                anims.Add(anim);
+            }
+
+            var play = new VisualElement { pickingMode = PickingMode.Position };
+            play.AddToClassList("ac-play");
+            play.AddToClassList("hoi4-button");
+            Hoi4Sprites.Apply(play, Dir + (running ? "exec_play_0.png" : "exec_play_1.png"));
+            play.RegisterCallback<PointerDownEvent>(e => { if (e.button == 0) Run(army, true); e.StopPropagation(); });
+            outer.Add(play);
+
+            var grade = new VisualElement { pickingMode = PickingMode.Ignore };
+            grade.AddToClassList("ac-plan-value");
+            Hoi4Sprites.Apply(grade, Dir + "plan_value_3.png");
+            outer.Add(grade);
+        }
+
+        static void Run(Hoi4Army army, bool run) =>
+            Engine.ArchonEngine.Instance.GameState.TryExecuteCommand(new ExecuteBattlePlanCommand { CountryId = Player, ArmyId = army.Id, Run = run }, out _);
 
         void OnAddPressed(PointerDownEvent e)
         {
