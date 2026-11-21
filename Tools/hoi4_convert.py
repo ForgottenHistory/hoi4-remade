@@ -986,6 +986,8 @@ def convert_front_line(hoi4: Path, out: Path):
     # Offensive plan objective line (arrowType offence_line): band in the bottom rows, a tooth pointing up
     Image.open(src / "offensive_line_mask.dds").convert("RGBA").save(dst / "offence_mask.png")
     Image.open(src / "offensive_line.dds").convert("RGBA").save(dst / "offence_pattern.png")
+    # offence_line's alternative mask: an offensive nobody is assigned to (hollow teeth)
+    Image.open(src / "offensive_line_unassigned_mask.dds").convert("RGBA").save(dst / "offence_unassigned_mask.png")
     # Dragging an offensive: the dotted line through the picked provinces (arrowType virtual_line)
     Image.open(src / "dot_mask.dds").convert("RGBA").save(dst / "dot_mask.png")
     Image.open(src / "dot_pattern.dds").convert("RGBA").save(dst / "dot_pattern.png")
@@ -1008,6 +1010,9 @@ def convert_move_arrow(hoi4: Path, out: Path, arrow_name="move_thick"):
     mask = values(get(arrow, "texture_masks"))[0]
     pattern = values(get(arrow, "texture_patterns"))[0]
     Image.open(hoi4 / mask).convert("RGBA").save(dst / "move_mask.png")
+    masks = values(get(arrow, "texture_masks"))
+    if len(masks) > 1:  # the alternative mask: an offensive arrow nobody is assigned to (hollow, striped)
+        Image.open(hoi4 / masks[1]).convert("RGBA").save(dst / "move_unassigned_mask.png")
     Image.open(hoi4 / pattern).convert("RGBA").save(dst / "move_pattern.png")
 
     def num(key, default):

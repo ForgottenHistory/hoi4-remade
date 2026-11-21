@@ -6,7 +6,8 @@
 //   with teeth pointing at the left of travel (the target), 3 = dotted line through the targets of an
 //   offensive being dragged (HOI4 virtual_line: dot textures, one dot per width), 4 = plain soft line (the
 //   rings at the dotted line's ends), 5 = a front line nobody holds (defence_line's unassigned mask: the
-//   teeth without the band).
+//   teeth without the band), 6 = the objective line of an offensive nobody is assigned to (offence_line's
+//   unassigned mask: hollow teeth).
 Shader "Hoi4/PlanLine"
 {
     Properties
@@ -18,6 +19,7 @@ Shader "Hoi4/PlanLine"
         _PreviewPatternTex ("Preview Pattern", 2D) = "white" {}
         _OffenceMaskTex ("Objective Line Mask", 2D) = "white" {}
         _OffencePatternTex ("Objective Line Pattern", 2D) = "white" {}
+        _OffenceUnassignedMaskTex ("Objective Line Unassigned Mask", 2D) = "white" {}
         _OffenceTile ("Objective line tooth spacing (widths)", Float) = 0.8
         _DotMaskTex ("Dot Mask", 2D) = "white" {}
         _DotPatternTex ("Dot Pattern", 2D) = "white" {}
@@ -64,6 +66,8 @@ Shader "Hoi4/PlanLine"
             TEXTURE2D(_OffenceMaskTex);
             SAMPLER(sampler_OffenceMaskTex);
             TEXTURE2D(_OffencePatternTex);
+            TEXTURE2D(_OffenceUnassignedMaskTex);
+            SAMPLER(sampler_OffenceUnassignedMaskTex);
             SAMPLER(sampler_OffencePatternTex);
             TEXTURE2D(_DotMaskTex);
             SAMPLER(sampler_DotMaskTex);
@@ -127,15 +131,17 @@ Shader "Hoi4/PlanLine"
 
             half4 frag(Varyings i) : SV_Target
             {
-                bool unassigned = i.style > 4.5;
-                if (i.style > 3.5 && !unassigned)
+                int s = (int)round(i.style);
+                bool unassigned = s == 5;          // front line nobody holds
+                bool objectiveUnassigned = s == 6; // objective line of an offensive nobody is assigned to
+                if (s == 4)
                 {
                     // Plain soft line
                     float k = saturate(1.0 - abs(i.uv.y - 0.5) * 2.0);
                     clip(k - 0.002);
                     return half4(i.color.rgb, k * k * i.color.a);
                 }
-                if (i.style > 2.5 && !unassigned)
+                if (s == 3)
                 {
                     // virtual_line: one dot per ribbon width
                     float2 duv = float2(frac(i.uv.x), saturate(i.uv.y));
@@ -145,8 +151,8 @@ Shader "Hoi4/PlanLine"
                     clip(dc - 0.002);
                     return half4(saturate(dp.rgb * i.color.rgb * 1.4), dc * i.color.a);
                 }
-                bool preview = i.style < 0.5;
-                bool objective = i.style > 1.5 && !unassigned;
+                bool preview = s == 0;
+                bool objective = s == 2 || objectiveUnassigned;
                 // HOI4 arrowTypes: unconfirmed = magnet_line (stripe textures, texture_loop 1), placed = defence_line
                 // (texture_loop 3.2: one tile spans 3.2 widths). The texture's top row (the band) is the own side, v = 0.
                 // Objective line = offence_line: band in the bottom rows at v = 0, the tooth tips (top rows) at v = 1.
@@ -156,7 +162,9 @@ Shader "Hoi4/PlanLine"
                 half4 mask, pattern;
                 if (objective)
                 {
-                    mask = SAMPLE_TEXTURE2D_LOD(_OffenceMaskTex, sampler_OffenceMaskTex, uv, 0);
+                    mask = objectiveUnassigned
+                        ? SAMPLE_TEXTURE2D_LOD(_OffenceUnassignedMaskTex, sampler_OffenceUnassignedMaskTex, uv, 0)
+                        : SAMPLE_TEXTURE2D_LOD(_OffenceMaskTex, sampler_OffenceMaskTex, uv, 0);
                     pattern = SAMPLE_TEXTURE2D_LOD(_OffencePatternTex, sampler_OffencePatternTex, uv, 0);
                 }
                 else if (preview)

@@ -17,6 +17,7 @@ Shader "Hoi4/PlanArrow"
     Properties
     {
         _MaskTex ("Arrow Mask", 2D) = "white" {}
+        _UnassignedMaskTex ("Arrow Unassigned Mask", 2D) = "white" {}
         _PatternTex ("Arrow Pattern", 2D) = "white" {}
         _HeightmapTexture ("Heightmap", 2D) = "gray" {}
         _HeightScale ("Height Scale", Float) = 10.0
@@ -53,6 +54,8 @@ Shader "Hoi4/PlanArrow"
 
             TEXTURE2D(_MaskTex);
             SAMPLER(sampler_MaskTex);
+            TEXTURE2D(_UnassignedMaskTex);
+            SAMPLER(sampler_UnassignedMaskTex);
             TEXTURE2D(_PatternTex);
             SAMPLER(sampler_PatternTex);
             TEXTURE2D(_HeightmapTexture);
@@ -91,6 +94,7 @@ Shader "Hoi4/PlanArrow"
                 float2 info : TEXCOORD1;
                 float shadow : TEXCOORD2;
                 float2 blur : TEXCOORD3;
+                float unassigned : TEXCOORD4; // move_thick's alternative mask: an offensive nobody is assigned to
             };
 
             float TerrainHeight(float2 xz)
@@ -111,6 +115,7 @@ Shader "Hoi4/PlanArrow"
                 o.uv = input.uv;
                 o.info = input.info;
                 o.shadow = input.kind.x;
+                o.unassigned = input.kind.y;
                 o.blur = input.blur;
                 return o;
             }
@@ -123,9 +128,11 @@ Shader "Hoi4/PlanArrow"
                     : float2(0.1 + 0.45 * frac(uv.x), (across - 0.5) * _ArrowParams.x + 0.5);
             }
 
-            float Coverage(float2 tuv)
+            float Coverage(float2 tuv, float unassigned)
             {
-                half4 m = SAMPLE_TEXTURE2D_LOD(_MaskTex, sampler_MaskTex, tuv, 0);
+                half4 m = unassigned > 0.5
+                    ? SAMPLE_TEXTURE2D_LOD(_UnassignedMaskTex, sampler_UnassignedMaskTex, tuv, 0)
+                    : SAMPLE_TEXTURE2D_LOD(_MaskTex, sampler_MaskTex, tuv, 0);
                 return saturate(m.r + m.g + m.b) * m.a;
             }
 
@@ -151,7 +158,7 @@ Shader "Hoi4/PlanArrow"
                         float2 tap = suv + float2(cos(ang), sin(ang)) * ring * _ShadowBlur * i.blur;
                         // The head's shadow takes only the head's own columns; the body's shadow covers the rest
                         float keep = isHead > 0.5 ? step(HeadX, tap.x) : 1.0;
-                        c += Coverage(tap) * keep * w;
+                        c += Coverage(tap, i.unassigned) * keep * w;
                         wsum += w;
                     }
                     c = c / wsum * fade;
@@ -159,7 +166,7 @@ Shader "Hoi4/PlanArrow"
                     return half4(_ShadowColor.rgb, c * _ShadowColor.a);
                 }
 
-                float coverage = Coverage(tuv) * fade;
+                float coverage = Coverage(tuv, i.unassigned) * fade;
                 clip(coverage - 0.002);
                 half4 pattern = SAMPLE_TEXTURE2D_LOD(_PatternTex, sampler_PatternTex, tuv, 0);
                 float lum = dot(pattern.rgb, float3(0.299, 0.587, 0.114));

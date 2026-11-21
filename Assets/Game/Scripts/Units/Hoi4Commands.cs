@@ -231,6 +231,7 @@ namespace Hoi4.Units
         public int ArmyId;
         public List<ushort> Targets;
         public List<ushort> UnitIds;
+        public ushort StartProvince; // a province of the front the arrow starts from (Tab while drawing); 0 = any facing the targets
 
         public override bool Validate(GameState gameState) =>
             Hoi4BattlePlans.Instance != null && Hoi4Armies.Instance?.Get(ArmyId) != null
@@ -238,7 +239,7 @@ namespace Hoi4.Units
             && Hoi4BattlePlans.Instance.AreOffensiveTargets(CountryId, ArmyId, Targets);
 
         public override void Execute(GameState gameState) =>
-            Hoi4BattlePlans.Instance.CreateOffensive(CountryId, ArmyId, Targets, UnitIds);
+            Hoi4BattlePlans.Instance.CreateOffensive(CountryId, ArmyId, Targets, UnitIds, StartProvince);
 
         public override void Undo(GameState gameState) { }
 
@@ -248,6 +249,7 @@ namespace Hoi4.Units
             w.Write(ArmyId);
             Hoi4CommandIo.WriteIds(w, Targets);
             Hoi4CommandIo.WriteIds(w, UnitIds);
+            w.Write(StartProvince);
         }
 
         public override void Deserialize(BinaryReader r)
@@ -256,6 +258,7 @@ namespace Hoi4.Units
             ArmyId = r.ReadInt32();
             Targets = Hoi4CommandIo.ReadIds(r);
             UnitIds = Hoi4CommandIo.ReadIds(r);
+            StartProvince = r.ReadUInt16();
         }
     }
 

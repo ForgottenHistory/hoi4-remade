@@ -510,6 +510,7 @@ namespace Hoi4.Units
                 if (touched.Contains(plan)) { Distribute(plan); playerTouched |= !plan.IsAI; }
                 else Hold(plan);
             }
+            AssignOffensives();
             Advance();
             if (playerTouched) Changed?.Invoke();
         }
@@ -758,8 +759,9 @@ namespace Hoi4.Units
         /// Simulation: the owner's provinces facing the country, as separate fronts each in order along the
         /// line. A front province is owner land (not impassable) next to land the country controls. Two of
         /// them belong to the same front when they are neighbours or face the same enemy province (that
-        /// bridges a gap such as a lake on our side), and face the same connected piece of the enemy's land;
-        /// so an own pocket and an enemy pocket are each a front of their own. The order
+        /// bridges a gap such as a lake on our side, but only within one connected piece of our land), and
+        /// face the same connected piece of the enemy's land; so an own pocket and an enemy pocket are each a
+        /// front of their own. The order
         /// along a front runs from one end (the farthest province from the lowest id) by hop distance.
         /// Integer graph maths only, in id order, so every client gets the same fronts.
         /// </summary>
@@ -784,6 +786,21 @@ namespace Hoi4.Units
             var faces = new int[front.Count];
             for (int i = 0; i < front.Count; i++) faces[i] = PieceFaced(front[i], piece, pieceSize);
 
+            // Our own land in connected pieces (walkable: not impassable). Facing the same enemy province only
+            // bridges a gap within one piece (a lake on our side); an encircled pocket of ours is its own front.
+            var own = new Dictionary<ushort, int>();
+            int ownPieces = 0;
+            foreach (ushort p in front)
+            {
+                if (own.ContainsKey(p)) continue;
+                int id = ownPieces++;
+                var queue = new List<ushort> { p };
+                own[p] = id;
+                for (int k = 0; k < queue.Count; k++)
+                    foreach (ushort r in Neighbours(queue[k]))
+                        if (!own.ContainsKey(r) && Ctrl(r) == owner && !Hoi4Regions.IsImpassable(r)) { own[r] = id; queue.Add(r); }
+            }
+
             // Links (within one enemy piece): own neighbours, and own provinces facing the same enemy province
             var index = new Dictionary<ushort, int>(front.Count);
             for (int i = 0; i < front.Count; i++) index[front[i]] = i;
@@ -803,7 +820,8 @@ namespace Hoi4.Units
             foreach (var list in facing.Values)
                 for (int a = 0; a < list.Count; a++)
                     for (int b = a + 1; b < list.Count; b++)
-                        if (faces[list[a]] == faces[list[b]] && !links[list[a]].Contains(list[b])) { links[list[a]].Add(list[b]); links[list[b]].Add(list[a]); }
+                        if (faces[list[a]] == faces[list[b]] && own[front[list[a]]] == own[front[list[b]]]
+                            && !links[list[a]].Contains(list[b])) { links[list[a]].Add(list[b]); links[list[b]].Add(list[a]); }
             foreach (var l in links) l.Sort();
 
             // Components in order of their lowest province id (front is sorted, so the first unvisited)

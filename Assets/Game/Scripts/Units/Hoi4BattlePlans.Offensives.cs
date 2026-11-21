@@ -6,8 +6,9 @@ using UnityEngine.Rendering;
 
 namespace Hoi4.Units
 {
-    /// <summary>An offensive plan: an army's arrow from its front line to the provinces to take, with the
-    /// divisions assigned to it. Assigned divisions keep holding their front line until the plan runs.</summary>
+    /// <summary>An offensive plan: an army's arrow from its front line to the provinces to take. Its divisions are
+    /// the army's divisions on the fronts it starts from; with several on one front, the first placed takes
+    /// them (AssignOffensives). They keep holding the front line until the plan runs.</summary>
     public sealed class Hoi4Offensive
     {
         public int Id;
@@ -16,8 +17,8 @@ namespace Hoi4.Units
         public readonly List<ushort> Targets = new List<ushort>(); // the provinces to take, in the order they were dragged over
         public ushort Target;                       // the middle one: the arrow and the path go there
         public readonly HashSet<ushort> Units = new HashSet<ushort>();
-        // Simulation: the army's front provinces this offensive starts from, the fronts facing the piece of the
-        // enemy's land its target is in (not a pocket elsewhere). Refreshed when the borders move.
+        // Simulation: the provinces of the one front this offensive starts from (HOI4: the front line it was drawn
+        // from), a front facing the piece of the enemy's land its target is in. Followed as the borders move.
         public readonly HashSet<ushort> FrontSet = new HashSet<ushort>();
         // Presentation (rebuilt with the mesh). Path: HOI4 keeps an offensive line as province points, from an own
         // province on the front through the enemy's land to the target (the last); the arrow starts where it
@@ -38,8 +39,11 @@ namespace Hoi4.Units
     /// crosses (green), with HOI4's dashed cursor trail (magnet_line) and dotted line through the picked
     /// provinces (virtual_line); releasing places the plan: an arrow from the front line into the middle of the
     /// targets and an objective line along their far side, in the army's colour. A click without dragging picks
-    /// one province. The selected divisions of that army are assigned to it. They hold the front line; when the
-    /// army's play button runs its plans they attack from it towards the targets (Advance).
+    /// one province. An army can have several; the first placed from a front takes its divisions
+    /// (AssignOffensives), and one left without divisions is drawn with HOI4's unassigned masks. The divisions hold the front line;
+    /// when the army's play button runs its plans they attack from it towards the targets (Advance).
+    /// While placing, the arrow shows as it will be (on the hovered province, then on the dragged ones), and Tab
+    /// switches between the fronts facing the targets that it can start from (HOI4).
     /// Look: Tools/prototypes/battleplan/offensive.py and drag.py, against HOI4 screenshots (arrowType
     /// move_thick for the arrow, offence_line for the objective line).
     /// </summary>
@@ -79,6 +83,11 @@ namespace Hoi4.Units
         readonly List<Vector2> dragTrail = new List<Vector2>();
         readonly List<ushort> dragPicked = new List<ushort>();
         int nextOffensiveId = 1;
+        // Placing (presentation): the arrow as it would be placed, and the front it starts from (a province of it)
+        Hoi4Offensive previewOffensive;
+        ushort previewStart;   // the front picked with Tab (a province of it), 0 = the arrow's own choice
+        ushort previewFront;   // the front the preview starts from (a province of it): placed with it
+        string previewKey;
 
         Material arrowMaterial;
         Mesh arrowMesh;
@@ -108,6 +117,8 @@ namespace Hoi4.Units
         {
             var omask = LoadTexture("gfx/maparrows/offence_mask.png");
             var opattern = LoadTexture("gfx/maparrows/offence_pattern.png");
+            var oumask = LoadTexture("gfx/maparrows/offence_unassigned_mask.png");
+            if (omask != null) material.SetTexture("_OffenceUnassignedMaskTex", oumask != null ? oumask : omask);
             if (omask != null && opattern != null)
             {
                 material.SetTexture("_OffenceMaskTex", omask);
@@ -133,6 +144,8 @@ namespace Hoi4.Units
             amask.wrapMode = apattern.wrapMode = TextureWrapMode.Clamp;
             arrowMaterial = new Material(shader) { name = "Hoi4PlanArrow" };
             arrowMaterial.SetTexture("_MaskTex", amask);
+            var aumask = LoadTexture("gfx/maparrows/move_unassigned_mask.png");
+            arrowMaterial.SetTexture("_UnassignedMaskTex", aumask != null ? aumask : amask);
             arrowMaterial.SetTexture("_PatternTex", apattern);
             arrowMaterial.SetVector(BoundsId, bounds);
             if (counters.Heightmap != null) arrowMaterial.SetTexture(HeightmapId, counters.Heightmap);
@@ -167,6 +180,7 @@ namespace Hoi4.Units
             if (Active) Cancel();
             OffensiveActive = true;
             hoverProvince = 0;
+            previewStart = 0;
             EndDrag();
             RefreshOffensiveTargets();
             Changed?.Invoke();
@@ -178,6 +192,9 @@ namespace Hoi4.Units
             OffensiveActive = false;
             offensiveTargets.Clear();
             EndDrag();
+            if (previewOffensive != null) dirtyMesh = true;
+            previewOffensive = null;
+            previewKey = null;
             dirtyTex = true;
             RebuildTexture();
             Changed?.Invoke();
@@ -224,7 +241,55 @@ namespace Hoi4.Units
                 if (!Input.GetMouseButton(1)) { FinishDrag(); return; }
                 if (cam != null && TryCursorPixel(cam, out var px)) ExtendDrag(px);
             }
+            UpdatePreview(Input.GetKeyDown(KeyCode.Tab));
             RebuildTexture();
+        }
+
+        /// <summary>
+        /// The arrow as it would be placed: on the dragged provinces, or the hovered one before a drag. Tab moves its
+        /// start to the next front facing the targets (the fronts of the army's lines facing the piece of enemy land
+        /// the target is in); the choice holds while the targets stay in that piece.
+        /// </summary>
+        void UpdatePreview(bool nextFront)
+        {
+            List<ushort> targets = null;
+            if (dragging && dragPicked.Count > 0) targets = dragPicked;
+            else if (hoverProvince != 0 && offensiveTargets.Contains(hoverProvince)) targets = new List<ushort> { hoverProvince };
+            ArmySelection(out var army);
+            string key = targets == null || army == null ? null : army.Id + ":" + string.Join(",", targets);
+            if (key == previewKey && !nextFront) return;
+            previewKey = key;
+            dirtyMesh = true;
+            if (key == null) { previewOffensive = null; previewFront = 0; return; }
+
+            ushort target = targets[targets.Count / 2];
+            var fronts = OffensiveFrontList(Player, army.Id, target);
+            if (fronts.Count == 0)
+            {
+                previewOffensive = null;
+                previewFront = 0;
+                ArchonLogger.Log($"Hoi4BattlePlans: no preview arrow for target {target}: no front of army {army.Id} faces its piece of land", "game_units");
+                return;
+            }
+            int choice = previewStart != 0 ? fronts.FindIndex(f => f.Contains(previewStart)) : -1;
+            var o = new Hoi4Offensive { Owner = Player, ArmyId = army.Id, Target = target };
+            o.Targets.AddRange(targets);
+            if (choice < 0)
+            {
+                // Not chosen yet: the front the arrow would start from on its own
+                foreach (var f in fronts) o.FrontSet.UnionWith(f);
+                o.Path = OffensivePath(o);
+                choice = o.Path != null ? Math.Max(0, fronts.FindIndex(f => f.Contains(o.Path[0]))) : 0;
+            }
+            if (nextFront && fronts.Count > 1) choice = (choice + 1) % fronts.Count;
+            if (nextFront || previewStart != 0) previewStart = fronts[choice][0];
+            o.FrontSet.Clear();
+            o.FrontSet.UnionWith(fronts[choice]);
+            previewFront = fronts[choice][0];
+            o.Path = OffensivePath(o);
+            previewOffensive = o;
+            if (o.Path == null)
+                ArchonLogger.Log($"Hoi4BattlePlans: no preview arrow for target {target}: no path from front {choice + 1}/{fronts.Count} ({fronts[choice].Count} provinces)", "game_units");
         }
 
         /// <summary>The cursor on the map, in map px (y down). The engine's heightfield-corrected hit, the point
@@ -288,7 +353,9 @@ namespace Hoi4.Units
             CancelOffensive();
             if (selected == null || targets.Count == 0) return;
             selected.Sort();
-            gameState.TryExecuteCommand(new PlaceOffensiveCommand { CountryId = Player, ArmyId = army.Id, Targets = targets, UnitIds = selected }, out _);
+            // The front the preview showed (Tab may have picked it): the offensive starts from that one
+            ushort start = previewFront;
+            gameState.TryExecuteCommand(new PlaceOffensiveCommand { CountryId = Player, ArmyId = army.Id, Targets = targets, UnitIds = selected, StartProvince = start }, out _);
         }
 
         void EndDrag()
@@ -576,28 +643,22 @@ namespace Hoi4.Units
             return true;
         }
 
-        /// <summary>PlaceOffensiveCommand: the army's offensive on the targets, with these divisions (taken off
-        /// any other offensive; they keep holding their front line).</summary>
-        public Hoi4Offensive CreateOffensive(ushort owner, int armyId, List<ushort> targets, List<ushort> unitIds)
+        /// <summary>PlaceOffensiveCommand: the army's offensive on the targets. Its divisions are the army's on its
+        /// fronts (AssignOffensives); unitIds (the selection) is not used for that, like HOI4's army-wide arrows.</summary>
+        public Hoi4Offensive CreateOffensive(ushort owner, int armyId, List<ushort> targets, List<ushort> unitIds, ushort startProvince = 0)
         {
             if (!simReady || !AreOffensiveTargets(owner, armyId, targets)) return null;
             ushort target = targets[targets.Count / 2];
-            var fronts = OffensiveFronts(owner, armyId, target);
+            var fronts = OffensiveFrontList(owner, armyId, target);
             if (fronts.Count == 0) return null;
             var o = new Hoi4Offensive { Id = nextOffensiveId++, Owner = owner, ArmyId = armyId, Target = target };
             o.Targets.AddRange(targets);
-            o.FrontSet.UnionWith(fronts);
-            var armies = Hoi4Armies.Instance;
-            foreach (ushort u in unitIds)
-            {
-                if (armies?.ArmyOf(u)?.Id != armyId) continue;
-                if (offensiveOf.TryGetValue(u, out var old)) old.Units.Remove(u);
-                o.Units.Add(u);
-                offensiveOf[u] = o;
-            }
+            int chosen = startProvince != 0 ? fronts.FindIndex(f => f.Contains(startProvince)) : -1;
+            if (chosen < 0) chosen = NearestFront(fronts, target);
+            o.FrontSet.UnionWith(fronts[chosen]);
             offensives.Add(o);
-            offensives.RemoveAll(x => x != o && x.Units.Count == 0);
-            DirtyArmy(armyId); // spread again (a division taken off another offensive may be mid-attack)
+            AssignOffensives(); // the divisions on its fronts, unless an earlier offensive there has them
+            DirtyArmy(armyId); // spread again (a division moved to this offensive may be mid-attack for another)
             Core.Recording.SessionRecorder.Note("plans", "offensive", owner, 0, 0, target, $"offensive {o.Id} army {armyId}: {o.Units.Count} divisions, targets {string.Join(",", targets)}");
             dirtyMesh = true;
             Changed?.Invoke();
@@ -623,24 +684,15 @@ namespace Hoi4.Units
             Core.Recording.SessionRecorder.Note("plans", "offensive_removed", o.Owner, 0, 0, o.Target, $"offensive {o.Id}: {why}");
         }
 
-        /// <summary>Hourly: divisions that died or left the army drop off, targets taken (or no longer valid) drop
-        /// off; an offensive goes when no target is left, nobody is assigned, or (checked when the borders moved)
-        /// its target can no longer be reached from the army's front line.</summary>
+        /// <summary>Hourly: targets taken (or no longer valid) drop off; an offensive goes when no target is left or
+        /// (checked when the borders moved) its target can no longer be reached from the army's front line. One
+        /// without divisions stays, drawn unassigned.</summary>
         void PruneOffensives(bool bordersMoved)
         {
             if (offensives.Count == 0) return;
-            var units = gameState.Units;
-            var armies = Hoi4Armies.Instance;
             bool any = false;
             foreach (var o in new List<Hoi4Offensive>(offensives))
             {
-                int dropped = o.Units.RemoveWhere(u =>
-                {
-                    if (units.HasUnit(u) && armies?.ArmyOf(u)?.Id == o.ArmyId) return false;
-                    offensiveOf.Remove(u);
-                    return true;
-                });
-                any |= dropped > 0;
                 string why = null;
                 int lost = o.Targets.RemoveAll(p => !IsOffensiveTarget(o.Owner, o.ArmyId, p));
                 if (lost > 0)
@@ -653,10 +705,9 @@ namespace Hoi4.Units
                     }
                 }
                 if (o.Targets.Count == 0) why = "targets taken (or no front line against their holder)";
-                else if (o.Units.Count == 0) why = "no divisions";
                 else if (bordersMoved || lost > 0)
                 {
-                    var fronts = OffensiveFronts(o.Owner, o.ArmyId, o.Target);
+                    var fronts = OffensiveStartFronts(o);
                     if (fronts.Count == 0) why = "no route to the target";
                     else if (!o.FrontSet.SetEquals(fronts)) { o.FrontSet.Clear(); o.FrontSet.UnionWith(fronts); any = true; }
                 }
@@ -675,9 +726,9 @@ namespace Hoi4.Units
         /// (FrontsAgainst splits fronts by enemy piece). Empty: no route to the target. Adjacency only, the
         /// same on every machine.
         /// </summary>
-        List<ushort> OffensiveFronts(ushort owner, int armyId, ushort target)
+        List<List<ushort>> OffensiveFrontList(ushort owner, int armyId, ushort target)
         {
-            var result = new List<ushort>();
+            var result = new List<List<ushort>>();
             ushort holder = Ctrl(target);
             if (holder == 0 || holder == owner) return result;
             foreach (var plan in plans)
@@ -687,10 +738,86 @@ namespace Hoi4.Units
                 var piece = EnemyPieces(plan.FrontProvinces, holder, sizes);
                 if (!piece.TryGetValue(target, out int tp)) continue; // the target's piece borders none of this line
                 foreach (var front in plan.Fronts)
-                    if (front.Count > 0 && PieceFaced(front[0], piece, sizes) == tp) result.AddRange(front);
+                    if (front.Count > 0 && PieceFaced(front[0], piece, sizes) == tp) result.Add(front);
             }
+            return result;
+        }
+
+        /// <summary>
+        /// Simulation, as the borders move: the front the offensive starts from now. Of the fronts facing its
+        /// target, the one sharing the most provinces with the front it had (ties: the first); when none does
+        /// (or it had several, from before offensives kept one), the one nearest the target.
+        /// </summary>
+        List<ushort> OffensiveStartFronts(Hoi4Offensive o)
+        {
+            var fronts = OffensiveFrontList(o.Owner, o.ArmyId, o.Target);
+            var result = new List<ushort>();
+            if (fronts.Count == 0) return result;
+            int best = -1, bestShared = 0, had = 0;
+            for (int i = 0; i < fronts.Count; i++)
+            {
+                int shared = 0;
+                foreach (ushort p in fronts[i]) if (o.FrontSet.Contains(p)) shared++;
+                if (shared > 0) had++;
+                if (shared > bestShared) { best = i; bestShared = shared; }
+            }
+            if (best < 0 || had > 1) best = NearestFront(fronts, o.Target);
+            result.AddRange(fronts[best]);
             result.Sort();
             return result;
+        }
+
+        /// <summary>The front nearest the target in land hops through its holder's land (ties: the first).</summary>
+        int NearestFront(List<List<ushort>> fronts, ushort target)
+        {
+            ushort holder = Ctrl(target);
+            var dist = new Dictionary<ushort, int> { [target] = 0 };
+            Bfs(dist, new List<ushort> { target }, p => Ctrl(p) == holder && !Hoi4Regions.IsImpassable(p));
+            int best = 0, bestD = int.MaxValue;
+            for (int i = 0; i < fronts.Count; i++)
+                foreach (ushort fp in fronts[i])
+                    foreach (ushort q in Neighbours(fp))
+                        if (dist.TryGetValue(q, out int d) && d + 1 < bestD) { bestD = d + 1; best = i; }
+            return best;
+        }
+
+        /// <summary>
+        /// Hourly (and when one is placed): who follows which offensive, like HOI4. A division of a player plan
+        /// slotted on an offensive's fronts follows the first offensive placed from there; a later one on the same
+        /// front gets nobody (drawn unassigned) until the earlier one ends. Divisions on a manual order or on no
+        /// offensive's front follow none. Adjacency only, the same on every machine.
+        /// </summary>
+        void AssignOffensives()
+        {
+            var next = new Dictionary<ushort, Hoi4Offensive>();
+            if (offensives.Count > 0)
+            {
+                foreach (var plan in plans)
+                {
+                    if (plan.IsAI) continue;
+                    foreach (var kv in plan.Slot)
+                    {
+                        ushort u = kv.Key, slot = kv.Value;
+                        if (manualOrders.ContainsKey(u)) continue;
+                        foreach (var o in offensives) // in the order they were placed
+                            if (o.ArmyId == plan.ArmyId && o.FrontSet.Contains(slot)) { next[u] = o; break; }
+                    }
+                }
+            }
+            bool changed = next.Count != offensiveOf.Count;
+            if (!changed)
+                foreach (var kv in next)
+                    if (!offensiveOf.TryGetValue(kv.Key, out var was) || was != kv.Value) { changed = true; break; }
+            if (!changed) return;
+            offensiveOf.Clear();
+            foreach (var o in offensives) o.Units.Clear();
+            foreach (var kv in next)
+            {
+                offensiveOf[kv.Key] = kv.Value;
+                kv.Value.Units.Add(kv.Key);
+            }
+            dirtyMesh = true; // an offensive may have gained or lost all its divisions (unassigned look)
+            Changed?.Invoke();
         }
 
         /// <summary>Presentation: the offensive's divisions slotted on its fronts (its label's count).</summary>
@@ -773,6 +900,41 @@ namespace Hoi4.Units
             return path[path.Count - 1] == target ? path : null;
         }
 
+        /// <summary>One offensive's objective line (plan line mesh) and arrow with its shadow (arrow mesh).</summary>
+        void DrawOffensive(Hoi4Offensive o, Hoi4UnitCounters counters, bool unassigned)
+        {
+            if (counters == null || !counters.TryGetProvincePoint(o.Target, out var target)) return;
+            target.y = 0f;
+            // Several targets: the arrow goes into the middle of the line through their centres
+            var spine = o.Targets.Count > 1 ? TargetSpine(o.Targets, counters) : null;
+            if (spine != null) target = PixelToWorld(spine[spine.Count / 2]);
+            if (!ArrowControls(o, counters, target, out var root, out var bend)) return;
+            var back = bend - target; // where the arrow comes in from: the objective line stays open there
+            back.y = 0f;
+            if (back.sqrMagnitude < 1e-10f) return;
+            back.Normalize();
+            var color = Hoi4Armies.ColorOf(o.ArmyId, 0.95f);
+            var fill = Color.Lerp(color, Color.white, 0.35f);
+
+            o.Objective = spine != null ? ObjectiveFarSide(o.Targets, spine, WorldToPixel(root)) : ObjectiveLine(o.Target, target, back);
+            if (o.Objective != null && o.Objective.Count >= 2)
+            {
+                AddRibbon(o.Objective, color, unassigned ? 6f : 2f);
+                int mid = o.Objective.Count / 2;
+                o.LabelWorld = o.Objective[mid];
+                o.LabelAhead = o.Objective[Mathf.Min(mid + 1, o.Objective.Count - 1)];
+                o.LabelWorld.y = counters.TerrainHeight(o.LabelWorld);
+                o.LabelAhead.y = counters.TerrainHeight(o.LabelAhead);
+                float len = 0f;
+                for (int k = 1; k < o.Objective.Count; k++) len += Vector3.Distance(o.Objective[k - 1], o.Objective[k]);
+                o.LabelPath = LabelPath(o.Objective, len * 0.5f, out o.LabelAnchor);
+            }
+            if (arrowMaterial == null) return;
+            var shadow = new Vector3(offensiveShadowPx.x * worldPerPxX, 0f, -offensiveShadowPx.y * worldPerPxZ);
+            AddOffensiveArrow(root + shadow, bend + shadow, target + shadow, fill, true, unassigned);
+            AddOffensiveArrow(root, bend, target, fill, false, unassigned);
+        }
+
         /// <summary>A province's centre in integer map px (0,0 before the map is drawn: ties then go by id).</summary>
         Vector2Int ProvinceCentre(ushort province)
         {
@@ -801,37 +963,10 @@ namespace Hoi4.Units
             foreach (var o in offensives)
             {
                 if (!PathHolds(o) || !o.FrontSet.Contains(o.Path[0])) o.Path = OffensivePath(o); // new, or the front moved
-                if (counters == null || !counters.TryGetProvincePoint(o.Target, out var target)) continue;
-                target.y = 0f;
-                // Several targets: the arrow goes into the middle of the line through their centres
-                var spine = o.Targets.Count > 1 ? TargetSpine(o.Targets, counters) : null;
-                if (spine != null) target = PixelToWorld(spine[spine.Count / 2]);
-                if (!ArrowControls(o, counters, target, out var root, out var bend)) continue;
-                var back = bend - target; // where the arrow comes in from: the objective line stays open there
-                back.y = 0f;
-                if (back.sqrMagnitude < 1e-10f) continue;
-                back.Normalize();
-                var color = Hoi4Armies.ColorOf(o.ArmyId, 0.95f);
-                var fill = Color.Lerp(color, Color.white, 0.35f);
-
-                o.Objective = spine != null ? ObjectiveFarSide(o.Targets, spine, WorldToPixel(root)) : ObjectiveLine(o.Target, target, back);
-                if (o.Objective != null && o.Objective.Count >= 2)
-                {
-                    AddRibbon(o.Objective, color, 2f);
-                    int mid = o.Objective.Count / 2;
-                    o.LabelWorld = o.Objective[mid];
-                    o.LabelAhead = o.Objective[Mathf.Min(mid + 1, o.Objective.Count - 1)];
-                    o.LabelWorld.y = counters.TerrainHeight(o.LabelWorld);
-                    o.LabelAhead.y = counters.TerrainHeight(o.LabelAhead);
-                    float len = 0f;
-                    for (int k = 1; k < o.Objective.Count; k++) len += Vector3.Distance(o.Objective[k - 1], o.Objective[k]);
-                    o.LabelPath = LabelPath(o.Objective, len * 0.5f, out o.LabelAnchor);
-                }
-                if (arrowMaterial == null) continue;
-                var shadow = new Vector3(offensiveShadowPx.x * worldPerPxX, 0f, -offensiveShadowPx.y * worldPerPxZ);
-                AddOffensiveArrow(root + shadow, bend + shadow, target + shadow, fill, true);
-                AddOffensiveArrow(root, bend, target, fill, false);
+                DrawOffensive(o, counters, o.Units.Count == 0);
             }
+            // The arrow being placed (its look is the placed one's)
+            if (previewOffensive != null && OffensiveActive) DrawOffensive(previewOffensive, counters, false);
             if (arrowMesh == null) return;
             arrowMesh.Clear();
             if (aVerts.Count == 0) return;
@@ -1066,8 +1201,9 @@ namespace Hoi4.Units
         /// tip; a straight head along the chord of its last stretch; the body a cubic from the root (still leaving
         /// towards bend) to the head's start, its end tangent the head's direction.
         /// Prototype: Tools/prototypes/battleplan/offensive.py (arrow_mesh).</summary>
-        void AddOffensiveArrow(Vector3 root, Vector3 bend, Vector3 tip, Color color, bool shadow)
+        void AddOffensiveArrow(Vector3 root, Vector3 bend, Vector3 tip, Color color, bool shadow, bool unassigned)
         {
+            arrowUnassigned = unassigned ? 1f : 0f;
             float px = worldPerPxX;
             root.y = bend.y = tip.y = 0f;
             const int N = 200;
@@ -1130,6 +1266,8 @@ namespace Hoi4.Units
             }
         }
 
+        float arrowUnassigned; // the arrow being built belongs to an offensive nobody is assigned to
+
         /// <summary>A cross-section: half width plus pad each side, uv.y 0..1 over the half width (past it on the pad).</summary>
         void AddArrowPair(Vector3 p, Vector3 dir, float half, float pad, float u, float isHead, float along, float kind, Vector2 blur, Color color, bool connect)
         {
@@ -1142,7 +1280,7 @@ namespace Hoi4.Units
                 aColors.Add(color);
                 aUvs.Add(new Vector2(u, s == 0 ? -vPad : 1f + vPad));
                 aInfos.Add(new Vector2(isHead, along));
-                aKinds.Add(new Vector2(kind, 0f));
+                aKinds.Add(new Vector2(kind, arrowUnassigned));
                 aCenters.Add(new Vector2(p.x, p.z));
                 aBlurs.Add(blur);
             }
