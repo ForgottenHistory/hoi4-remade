@@ -114,6 +114,7 @@ namespace Hoi4.Units
             if (cam != null)
                 foreach (var plan in plans.Plans)
                 {
+                    if (plan.IsAI) continue;
                     var a = cam.WorldToScreenPoint(plan.LabelWorld);
                     var b = cam.WorldToScreenPoint(plan.LabelAhead);
                     if (a.z <= 0f) continue;

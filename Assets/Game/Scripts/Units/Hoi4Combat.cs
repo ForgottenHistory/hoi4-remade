@@ -58,6 +58,9 @@ namespace Hoi4.Units
 
         void Awake() => Instance = this;
 
+        /// <summary>A broken division marching to safety (out of the fight; don't give it other orders).</summary>
+        public static bool IsRetreating(ushort unitId) => Instance != null && Instance.retreating.Contains(unitId);
+
         IEnumerator Start()
         {
             while (Hoi4Divisions.Instance == null || !Hoi4Divisions.Instance.IsLoaded
@@ -302,6 +305,25 @@ namespace Hoi4.Units
             retreating.Add(d.UnitId);
             units.MovementQueue.StartMovement(d.UnitId, best, RetreatDays);
             if (byProvince.TryGetValue(from, out var old)) old.Remove(d.UnitId);
+        }
+
+        /// <summary>
+        /// Rough odds of an attack, from the same hit formula as the battle: how fast each side wears down the
+        /// other's organisation. Above 1 the attackers should break the defenders first. Ignores combat width,
+        /// armour and reserves; infinite when nobody defends.
+        /// </summary>
+        public static float Odds(List<Hoi4Division> attackers, List<Hoi4Division> defenders)
+        {
+            if (defenders.Count == 0) return float.PositiveInfinity;
+            if (attackers.Count == 0) return 0f;
+            Sums(attackers, out float aSoft, out float aHard, out _, out float aBrk, out _, out _, out _);
+            Sums(defenders, out float dSoft, out float dHard, out float dDef, out _, out _, out _, out _);
+            float aOrg = 0f, dOrg = 0f;
+            foreach (var d in attackers) aOrg += d.Organisation;
+            foreach (var d in defenders) dOrg += d.Organisation;
+            float aRate = Hits(aSoft + aHard, dDef) / Mathf.Max(dOrg, 1f);  // share of the defenders' org lost per hour
+            float dRate = Hits(dSoft + dHard, aBrk) / Mathf.Max(aOrg, 1f);  // share of the attackers' org lost per hour
+            return aRate / Mathf.Max(dRate, 1e-4f);
         }
 
         static float Frac(Hoi4Division d) => d.MaxStrength > 0 ? Mathf.Clamp01(d.Strength / d.MaxStrength) : 1f;
