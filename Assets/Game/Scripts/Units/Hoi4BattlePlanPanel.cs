@@ -9,8 +9,8 @@ namespace Hoi4.Units
     /// <summary>
     /// GAME: the Battle Plans window (HOI4's battleplantools_window). It shows while a division of an army is
     /// selected; the front-line button turns the front line tool of Hoi4BattlePlans on, the offence button
-    /// (enabled once the army has a front line) the offensive tool, the bin removes the plans of the selected
-    /// divisions. Also writes the text on each placed line and objective line: "N Divs, army name", bent
+    /// (enabled once the army has a front line) the offensive tool, the bin the delete tool (click a line or an
+    /// offensive to remove it; shift + right click removes every order of the selected divisions' armies at once). Also writes the text on each placed line and objective line: "N Divs, army name", bent
     /// along the line like HOI4 (one element per letter), scaled and hidden with zoom by the unit counters'
     /// rules (Hoi4UnitCounters.ZoomRules).
     /// View of the UI Presenter pattern: structure BattlePlanPanel.uxml, look BattlePlanStyle.uss + Hoi4Theme.uss.
@@ -27,7 +27,7 @@ namespace Hoi4.Units
         const float BaseFontPx = 15f;                           // BattlePlanStyle.uss .bp-line-label at full size
         readonly List<Vector2> linePts = new List<Vector2>();
         readonly List<float> lineRun = new List<float>();
-        bool frontActive, offenceActive, offenceEnabled = true;
+        bool frontActive, offenceActive, deleteActive, offenceEnabled = true;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Spawn()
@@ -97,8 +97,10 @@ namespace Hoi4.Units
             });
             delete.RegisterCallback<PointerDownEvent>(e =>
             {
-                if (e.button != 0) return;
-                Hoi4BattlePlans.Instance.DeleteSelectedPlans();
+                var plans = Hoi4BattlePlans.Instance;
+                if (e.button == 1 && e.shiftKey) plans.DeleteSelectedPlans();   // HOI4: every order of the selected armies, at once
+                else if (e.button == 0) { if (plans.DeleteActive) plans.CancelDelete(); else plans.BeginDelete(); }
+                else return;
                 e.StopPropagation();
             });
             root.Add(labels);
@@ -111,13 +113,18 @@ namespace Hoi4.Units
         {
             if (window == null) return;
             var plans = Hoi4BattlePlans.Instance;
-            bool show = plans.Active || plans.OffensiveActive || plans.HasArmySelection;
+            bool show = plans.Active || plans.OffensiveActive || plans.DeleteActive || plans.HasArmySelection;
             window.style.display = show ? DisplayStyle.Flex : DisplayStyle.None;
             Hoi4UiHover.Report(this, window);
             if (show && frontActive != plans.Active)
             {
                 frontActive = plans.Active;
                 Hoi4Sprites.Apply(front, Dir + (frontActive ? "defence_1.png" : "defence_0.png"));
+            }
+            if (show && deleteActive != plans.DeleteActive)
+            {
+                deleteActive = plans.DeleteActive;
+                Hoi4Sprites.Apply(delete, Dir + (deleteActive ? "delete_1.png" : "delete_0.png"));
             }
             if (show && offenceActive != plans.OffensiveActive)
             {

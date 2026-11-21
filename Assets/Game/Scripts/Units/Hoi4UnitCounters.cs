@@ -205,6 +205,9 @@ namespace Hoi4.Units
             dirty = true;
         }
 
+        /// <summary>Not drawn and not pickable (the battle plan delete tool hides them, like HOI4).</summary>
+        public bool Hidden;
+
         void LateUpdate()
         {
             if (material == null) return;
@@ -217,7 +220,7 @@ namespace Hoi4.Units
 
             material.SetVector(ParamsId, new Vector4(pixelScale, fadeHiddenZoom, Mathf.Max(fadeVisibleZoom, fadeHiddenZoom + 0.01f), liftAboveTerrain));
             material.SetVector(SizeId, new Vector4(Mathf.Max(fullSizeZoom, 0.01f), Mathf.Clamp01(minSizeFraction), worldPerMapPixel, 0f));
-            if (mesh.vertexCount > 0)
+            if (mesh.vertexCount > 0 && !Hidden)
                 Graphics.DrawMesh(mesh, Matrix4x4.identity, material, 0);
         }
 
@@ -249,7 +252,7 @@ namespace Hoi4.Units
         {
             units = null;
             var cam = Camera.main;
-            if (cam == null || stacks.Count == 0) return false;
+            if (cam == null || stacks.Count == 0 || Hidden) return false;
             float p11 = Mathf.Abs(cam.projectionMatrix[1, 1]);
             // Drawn north to south, so the last hit is the one on top
             for (int i = stacks.Count - 1; i >= 0; i--)

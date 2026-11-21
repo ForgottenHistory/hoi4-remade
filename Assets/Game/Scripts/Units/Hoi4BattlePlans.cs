@@ -96,6 +96,9 @@ namespace Hoi4.Units
         public Color previewColor = new Color(0.36f, 0.92f, 0.32f, 1f);
         [Tooltip("A plan under the cursor: its front line, or an offensive's arrow and objective line, turn this colour (HOI4)")]
         public Color hoverColor = new Color(0.36f, 0.92f, 0.32f, 1f);
+        [Tooltip("The line or offensive under the cursor with the delete tool on")]
+        public Color deleteHoverColor = new Color(0.95f, 0.22f, 0.18f, 1f);
+        Color HotColor => DeleteActive ? deleteHoverColor : hoverColor;
         [Tooltip("Hovering: lines thinner than this on screen are still picked within it (screen px)")]
         public float hoverMinPx = 5f;
 
@@ -346,9 +349,53 @@ namespace Hoi4.Units
             return result;
         }
 
+        // --- Delete tool (HOI4): click a front line or offensive to remove it; counters hidden meanwhile ---------
+
+        public bool DeleteActive { get; private set; }
+        int toolEscapeFrame = -1;
+
+        /// <summary>A plan tool is on, or one was closed with Escape this frame (so Escape does not also clear the
+        /// selection).</summary>
+        public bool ToolOn => Active || OffensiveActive || DeleteActive || toolEscapeFrame == Time.frameCount;
+
+        public void BeginDelete()
+        {
+            if (!ready) return;
+            if (Active) Cancel();
+            if (OffensiveActive) CancelOffensive();
+            DeleteActive = true;
+            if (Hoi4UnitCounters.Instance != null) Hoi4UnitCounters.Instance.Hidden = true;
+            dirtyMesh = true;
+            Changed?.Invoke();
+        }
+
+        public void CancelDelete()
+        {
+            if (!DeleteActive) return;
+            DeleteActive = false;
+            if (Hoi4UnitCounters.Instance != null) Hoi4UnitCounters.Instance.Hidden = false;
+            dirtyMesh = true;
+            Changed?.Invoke();
+        }
+
+        /// <summary>The delete tool's click: removes the offensive or the front line under the cursor (the player's own).</summary>
+        bool OnDeleteClick(int button)
+        {
+            if (button == 1) { CancelDelete(); return true; }
+            if (button != 0) return true;
+            if (hoverOffensive != null && hoverOffensive.Owner == Player)
+                gameState.TryExecuteCommand(new DeleteOffensiveCommand { CountryId = Player, OffensiveId = hoverOffensive.Id }, out _);
+            else if (hoverPlan != null && !hoverPlan.IsAI && hoverPlan.Owner == Player)
+                gameState.TryExecuteCommand(new DeleteBattlePlanCommand { CountryId = Player, PlanId = hoverPlan.Id }, out _);
+            hoverPlan = null; hoverOffensive = null; hoverFront = -1;
+            dirtyMesh = true;
+            return true;
+        }
+
         public void BeginDrawing()
         {
             if (!ready || !HasArmySelection) return;
+            CancelDelete();
             if (OffensiveActive) CancelOffensive();
             Active = true;
             lineDrag = false;
@@ -366,29 +413,26 @@ namespace Hoi4.Units
             Changed?.Invoke();
         }
 
-        /// <summary>Remove the plans the selected divisions follow.</summary>
+        /// <summary>Shift + right click on the bin (HOI4): remove every order of the selected divisions' armies, all
+        /// their offensives and front lines.</summary>
         public void DeleteSelectedPlans()
         {
-            // Offensives first: the bin removes those of the selected divisions; with none, their front lines
+            var armyIds = new SortedSet<int>();
+            foreach (ushort id in Hoi4UnitSelection.Instance.Selected)
+            {
+                var army = Hoi4Armies.Instance?.ArmyOf(id);
+                if (army != null) armyIds.Add(army.Id);
+            }
+            if (armyIds.Count == 0) return;
             var offensiveIds = new SortedSet<int>();
-            foreach (ushort id in Hoi4UnitSelection.Instance.Selected)
-            {
-                var o = OffensiveOf(id);
-                if (o != null) offensiveIds.Add(o.Id);
-            }
-            if (offensiveIds.Count > 0)
-            {
-                foreach (int oid in offensiveIds)
-                    gameState.TryExecuteCommand(new DeleteOffensiveCommand { CountryId = Player, OffensiveId = oid }, out _);
-                return;
-            }
-            var ids = new SortedSet<int>();
-            foreach (ushort id in Hoi4UnitSelection.Instance.Selected)
-            {
-                var plan = PlanOf(id);
-                if (plan != null && !plan.IsAI) ids.Add(plan.Id);
-            }
-            foreach (int planId in ids)
+            foreach (var o in offensives)
+                if (o.Owner == Player && armyIds.Contains(o.ArmyId)) offensiveIds.Add(o.Id);
+            foreach (int oid in offensiveIds)
+                gameState.TryExecuteCommand(new DeleteOffensiveCommand { CountryId = Player, OffensiveId = oid }, out _);
+            var planIds = new SortedSet<int>();
+            foreach (var plan in plans)
+                if (!plan.IsAI && plan.Owner == Player && armyIds.Contains(plan.ArmyId)) planIds.Add(plan.Id);
+            foreach (int planId in planIds)
                 gameState.TryExecuteCommand(new DeleteBattlePlanCommand { CountryId = Player, PlanId = planId }, out _);
         }
 
@@ -416,6 +460,7 @@ namespace Hoi4.Units
         public bool OnClick(int button, Vector2 screen)
         {
             if (OffensiveActive) return OnOffensiveClick(button);
+            if (DeleteActive) return OnDeleteClick(button);
             if (!Active) return false;
             if (button == 0 && previewArcs != null && previewArcs.Count > 0) Place();
             else if (button == 1 && previewArcs != null && previewArcs.Count > 0 && !lineDrag)
@@ -486,8 +531,13 @@ namespace Hoi4.Units
             UpdateHover();
             if (dirtyMesh) { dirtyMesh = false; Rebuild(); }
             if (OffensiveActive) { UpdateOffensiveTool(); return; }
+            if (DeleteActive)
+            {
+                if (Input.GetKeyDown(KeyCode.Escape)) { toolEscapeFrame = Time.frameCount; CancelDelete(); }
+                return;
+            }
             if (!Active) return;
-            if (Input.GetKeyDown(KeyCode.Escape)) { Cancel(); return; }
+            if (Input.GetKeyDown(KeyCode.Escape)) { toolEscapeFrame = Time.frameCount; Cancel(); return; }
             if (!HasArmySelection) { Cancel(); return; }
 
             ushort province = 0;
@@ -1390,7 +1440,7 @@ namespace Hoi4.Units
                     int f = c < plan.ChainFront.Count ? plan.ChainFront[c] : -1;
                     bool held = f < 0 || f >= counts.Length || counts[f] > 0;
                     bool hot = plan == hoverPlan && f == hoverFront;
-                    AddRibbon(plan.Chains[c], hot ? hoverColor : color, held ? 1f : 5f);
+                    AddRibbon(plan.Chains[c], hot ? HotColor : color, held ? 1f : 5f);
                 }
             }
             RebuildOffensives();

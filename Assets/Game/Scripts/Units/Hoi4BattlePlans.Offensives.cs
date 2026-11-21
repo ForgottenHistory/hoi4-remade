@@ -179,6 +179,7 @@ namespace Hoi4.Units
         {
             if (!CanPlanOffensive) return;
             if (Active) Cancel();
+            CancelDelete();
             OffensiveActive = true;
             hoverProvince = 0;
             previewStart = 0;
@@ -915,7 +916,7 @@ namespace Hoi4.Units
             if (back.sqrMagnitude < 1e-10f) return;
             back.Normalize();
             // Hovered: the arrow and the objective line both turn green
-            var color = o == hoverOffensive ? hoverColor : Hoi4Armies.ColorOf(o.ArmyId, 0.95f);
+            var color = o == hoverOffensive ? HotColor : Hoi4Armies.ColorOf(o.ArmyId, 0.95f);
             var fill = Color.Lerp(color, Color.white, 0.35f);
             if (o.HitLine == null) o.HitLine = new List<Vector3>();
             o.HitLine.Clear();
