@@ -1,11 +1,13 @@
 # hoi4-remade
 
-An experimental remake of Hearts of Iron IV in Unity. It exists to stress-test [Archon Engine](https://github.com/ForgottenHistory/Archon-Engine), a grand strategy engine. The goal is to see how far the engine can go, not to ship a game.
+An experimental remake of Hearts of Iron IV in Unity
+
+Made from [Archon Engine](https://github.com/ForgottenHistory/Archon-Engine), a grand strategy engine
 
 So far it has:
 
-- **Map:** terrain, borders, rivers, labels, atmosphere, day/night.
-- **Armies:** divisions, armies, battle plans, combat and an enemy AI.
+- **Map:** terrain, borders, rivers, labels, atmosphere, day/night
+- **Armies:** divisions, armies, battle plans, combat and an enemy AI
 
 The full list is in `CURRENT_FEATURES.md`.
 
