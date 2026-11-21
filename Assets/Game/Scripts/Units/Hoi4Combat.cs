@@ -17,8 +17,14 @@ namespace Hoi4.Units
     /// organisation and strength; divisions beyond the combat width wait in reserve. A defender at zero
     /// organisation retreats to a friendly neighbouring province (destroyed when there is none); an
     /// attacker at zero organisation drops its order. Once the target is empty the attackers walk in.
-    /// Planning (Hoi4BattlePlans) raises a division's attack and breakthrough by the same percentage.
-    /// Left out: terrain, rivers, entrenchment, forts, generals, supply. Occupation is Hoi4Occupation.
+    /// The ground (Hoi4CombatTerrain): the target province's terrain sets the combat width (plus its support
+    /// width for each attack direction beyond the first) and the attackers' terrain penalty; attacking across a
+    /// river costs 30% (small) or 60% (large) for the divisions attacking over it.
+    /// Attacker modifiers (planning from Hoi4BattlePlans, terrain, river) and defender modifiers (entrenchment:
+    /// +2% per level, HOI4 DIG_IN_FACTOR) multiply each division's attack, defence and breakthrough, like
+    /// the wiki's combat factors. Entrenchment grows 1 a day (UNIT_DIGIN_SPEED) up to 5 (UNIT_DIGIN_CAP) for
+    /// a division standing still out of battle, and is lost as soon as it moves or attacks.
+    /// Left out: forts, generals, supply, night, stacking. Occupation is Hoi4Occupation.
     /// All maths is FixedPoint64 and every loop runs in id order, so a battle ends the same on every machine.
     /// </summary>
     public sealed class Hoi4Combat : MonoBehaviour
@@ -28,7 +34,10 @@ namespace Hoi4.Units
         static readonly FP OrgScale = FP.FromInt(10);
         static readonly FP HpScale = FP.FromInt(3);
         static readonly FP RecoveryPerHour = FP.FromFraction(1, 100); // of max organisation, out of battle
-        static readonly FP Width = FP.FromInt(80);                    // base combat width of a province
+        static readonly FP DigInFactor = FP.FromFraction(2, 100);     // HOI4 DIG_IN_FACTOR: +2% per entrenchment level
+        public static readonly FP DigInCap = FP.FromInt(5);           // HOI4 UNIT_DIGIN_CAP
+        static readonly FP DigInPerDay = FP.One;                      // HOI4 UNIT_DIGIN_SPEED
+        static readonly FP MinFactor = FP.FromFraction(1, 100);       // wiki: the combined factor is at least 1%
         static readonly FP OrgPerHit = FP.FromFraction(53, 1000);     // wiki: 0.053 org per hit, times the die
         static readonly FP HpPerHit = FP.FromFraction(9, 100);        // wiki: 0.06 hp per hit, times a 1.5 die
         static readonly FP ArmouredDie = FP.FromFraction(7, 2), Die = FP.FromFraction(5, 2);
@@ -40,6 +49,9 @@ namespace Hoi4.Units
         {
             public ushort From, To;       // the attackers' main province and the one attacked
             public int AttackerPercent;   // attackers' share of the two sides' remaining organisation
+            public int Width;             // combat width: the target's terrain, plus support width per extra direction
+            public int Directions;        // provinces the attack comes from
+            public int River;             // largest river crossed by an attacker: 0 none, 1 small, 2 large
             public List<ushort> Attackers, Defenders; // everyone in it, front line and reserve (recorder)
             public List<ushort> AttackerFront, DefenderFront; // the ones within the combat width
         }
@@ -184,10 +196,15 @@ namespace Hoi4.Units
                 Fight(target, attackersOf[target], diplomacy, divisions);
             }
 
-            // Divisions out of contact slowly regain organisation
+            // Divisions out of contact slowly regain organisation; a division on the move (marching, attacking or
+            // retreating) leaves its entrenchment behind
             foreach (var d in divisions.All.Values)
+            {
                 if (!fighting.Contains(d.UnitId) && !retreating.Contains(d.UnitId) && d.Organisation < d.MaxOrganisation)
                     d.Organisation = FP.Min(d.MaxOrganisation, d.Organisation + d.MaxOrganisation * RecoveryPerHour);
+                if (d.Entrenchment > FP.Zero && units.MovementQueue.IsUnitMoving(d.UnitId))
+                    d.Entrenchment = FP.Zero;
+            }
 
             foreach (ushort id in destroyed)
                 Destroy(id, divisions);
@@ -196,6 +213,17 @@ namespace Hoi4.Units
                 Hoi4UnitCounters.Instance?.MarkDirty(); // bars move every hour in battle
             Hoi4MoveArrows.Instance?.MarkDirty();
             lastBattleCount = Battles.Count;
+        }
+
+        /// <summary>Daily, from Hoi4Simulation: divisions standing still out of battle dig in (HOI4 builds
+        /// entrenchment while stationary and not engaged; reserves in a battle don't either).</summary>
+        public void SimulateDay()
+        {
+            if (gameState == null || Hoi4Divisions.Instance == null) return;
+            var queue = gameState.Units.MovementQueue;
+            foreach (var d in Hoi4Divisions.Instance.All.Values)
+                if (d.Entrenchment < DigInCap && !fighting.Contains(d.UnitId) && !queue.IsUnitMoving(d.UnitId))
+                    d.Entrenchment = FP.Min(DigInCap, d.Entrenchment + DigInPerDay);
         }
 
         /// <summary>A retreating division that arrives where an enemy stands is overrun: gone at once.</summary>
@@ -266,14 +294,22 @@ namespace Hoi4.Units
             foreach (var d in attackers) fighting.Add(d.UnitId);
             foreach (var d in defending) fighting.Add(d.UnitId);
 
-            ushort from = 0; int most = 0;
-            foreach (var kv in origins) if (kv.Value > most || (kv.Value == most && kv.Key < from)) { most = kv.Value; from = kv.Key; }
+            ushort from = 0; int most = 0, river = 0;
+            foreach (var kv in origins)
+            {
+                if (kv.Value > most || (kv.Value == most && kv.Key < from)) { most = kv.Value; from = kv.Key; }
+                river = System.Math.Max(river, Hoi4CombatTerrain.River(gameState, kv.Key, target));
+            }
 
-            var aFront = LineUp(attackers, d => d.SoftAttack * Frac(d));
-            var dFront = LineUp(defending, d => d.Defense * Frac(d));
+            // Width: the target's terrain, plus its support width for each direction beyond the first (flanking)
+            FP width = Hoi4CombatTerrain.Width(gameState, target)
+                       + Hoi4CombatTerrain.SupportWidth(gameState, target) * (origins.Count - 1);
+            var aFront = LineUp(attackers, d => d.SoftAttack * Frac(d), width);
+            var dFront = LineUp(defending, d => d.Defense * Frac(d), width);
 
-            Sums(aFront, out FP aSoft, out FP aHard, out FP aDef, out FP aBrk, out FP aHardness, out FP aArmor, out FP aPierce);
-            Sums(dFront, out FP dSoft, out FP dHard, out FP dDef, out FP dBrk, out FP dHardness, out FP dArmor, out FP dPierce);
+            System.Func<Hoi4Division, FP> aFactor = d => AttackerFactor(gameState, d, units.GetUnit(d.UnitId).provinceID, target);
+            Sums(aFront, aFactor, out FP aSoft, out FP aHard, out FP aDef, out FP aBrk, out FP aHardness, out FP aArmor, out FP aPierce);
+            Sums(dFront, DefenderFactor, out FP dSoft, out FP dHard, out FP dDef, out FP dBrk, out FP dHardness, out FP dArmor, out FP dPierce);
             FP aPierceFactor = PierceFactor(aPierce, dArmor), dPierceFactor = PierceFactor(dPierce, aArmor);
             FP aDie = aArmor > dPierce ? ArmouredDie : Die, dDie = dArmor > aPierce ? ArmouredDie : Die;
 
@@ -295,6 +331,9 @@ namespace Hoi4.Units
                 From = from,
                 To = target,
                 AttackerPercent = af + df > FP.Zero ? FP.Round(FP.Hundred * af / (af + df)).ToInt() : 50,
+                Width = width.ToInt(),
+                Directions = origins.Count,
+                River = river,
                 Attackers = attackers.ConvertAll(d => d.UnitId),
                 Defenders = defending.ConvertAll(d => d.UnitId),
                 AttackerFront = aFront.ConvertAll(d => d.UnitId),
@@ -356,12 +395,26 @@ namespace Hoi4.Units
         /// other's organisation. Above 1 the attackers should break the defenders first. Ignores combat width,
         /// armour and reserves; infinite when nobody defends.
         /// </summary>
-        public static FP Odds(List<Hoi4Division> attackers, List<Hoi4Division> defenders)
+        public static FP Odds(List<Hoi4Division> attackers, List<Hoi4Division> defenders, ushort target)
         {
             if (defenders.Count == 0) return FP.MaxValue;
             if (attackers.Count == 0) return FP.Zero;
-            Sums(attackers, out FP aSoft, out FP aHard, out _, out FP aBrk, out _, out _, out _);
-            Sums(defenders, out FP dSoft, out FP dHard, out FP dDef, out _, out _, out _, out _);
+            var gs = Instance != null ? Instance.gameState : null;
+            // Only what fits the combat width fights (the rest waits in reserve), so more divisions than the
+            // width holds don't raise the odds. Base width: where the attackers will come from isn't known yet.
+            if (gs != null)
+            {
+                FP width = Hoi4CombatTerrain.Width(gs, target);
+                attackers = LineUp(attackers, d => d.SoftAttack * Frac(d), width);
+                defenders = LineUp(defenders, d => d.Defense * Frac(d), width);
+                if (defenders.Count == 0) return FP.MaxValue; // all broken
+                if (attackers.Count == 0) return FP.Zero;
+            }
+            // The same modifiers as the battle: terrain and rivers from where each attacker stands, entrenchment
+            System.Func<Hoi4Division, FP> aFactor = d => gs != null && gs.Units.HasUnit(d.UnitId)
+                ? AttackerFactor(gs, d, gs.Units.GetUnit(d.UnitId).provinceID, target) : FP.One + d.Planning;
+            Sums(attackers, aFactor, out FP aSoft, out FP aHard, out _, out FP aBrk, out _, out _, out _);
+            Sums(defenders, DefenderFactor, out FP dSoft, out FP dHard, out FP dDef, out _, out _, out _, out _);
             FP aOrg = FP.Zero, dOrg = FP.Zero;
             foreach (var d in attackers) aOrg += d.Organisation;
             foreach (var d in defenders) dOrg += d.Organisation;
@@ -380,7 +433,7 @@ namespace Hoi4.Units
         static FP Frac(Hoi4Division d) => d.MaxStrength > FP.Zero ? FP.Clamp(d.Strength / d.MaxStrength, FP.Zero, FP.One) : FP.One;
 
         /// <summary>Divisions that fit the combat width, best first (ties: lower id); broken ones (no organisation) stay out.</summary>
-        static List<Hoi4Division> LineUp(List<Hoi4Division> members, System.Func<Hoi4Division, FP> key)
+        static List<Hoi4Division> LineUp(List<Hoi4Division> members, System.Func<Hoi4Division, FP> key, FP width)
         {
             var live = new List<Hoi4Division>();
             foreach (var d in members) if (d.Organisation > FP.Zero) live.Add(d);
@@ -393,7 +446,7 @@ namespace Hoi4.Units
             FP used = FP.Zero;
             foreach (var d in live)
             {
-                if (front.Count > 0 && used + d.CombatWidth > Width) continue; // in reserve
+                if (front.Count > 0 && used + d.CombatWidth > width) continue; // in reserve
                 front.Add(d);
                 used += d.CombatWidth;
             }
@@ -402,17 +455,27 @@ namespace Hoi4.Units
 
         static readonly FP P3 = FP.FromFraction(3, 10), P7 = FP.FromFraction(7, 10);
 
-        static void Sums(List<Hoi4Division> front, out FP soft, out FP hard, out FP def, out FP brk,
+        /// <summary>An attacking division's combat factor: planning (+1% per 1%), the target's terrain and the river
+        /// between its province and the target, multiplied (wiki: combat factors stack multiplicatively).</summary>
+        static FP AttackerFactor(GameState gs, Hoi4Division d, ushort from, ushort target) =>
+            FP.Max(MinFactor, (FP.One + d.Planning)
+                              * (FP.One + Hoi4CombatTerrain.AttackModifier(gs, target))
+                              * (FP.One + Hoi4CombatTerrain.RiverModifier(gs, from, target)));
+
+        /// <summary>A defending division's combat factor: entrenchment, +2% per level.</summary>
+        static FP DefenderFactor(Hoi4Division d) => FP.One + DigInFactor * d.Entrenchment;
+
+        /// <summary>A side's stats, each division's scaled by its strength and its factor (attack, defence and breakthrough alike).</summary>
+        static void Sums(List<Hoi4Division> front, System.Func<Hoi4Division, FP> factor, out FP soft, out FP hard, out FP def, out FP brk,
             out FP hardness, out FP armor, out FP pierce)
         {
             soft = hard = def = brk = hardness = pierce = FP.Zero;
             FP armorMax = FP.Zero, armorSum = FP.Zero;
             foreach (var d in front)
             {
-                FP hp = Frac(d); // damage output shrinks with strength
-                FP plan = hp * (FP.One + d.Planning); // planning: +1% attack and breakthrough per 1%
-                soft += d.SoftAttack * plan; hard += d.HardAttack * plan;
-                def += d.Defense * hp; brk += d.Breakthrough * plan;
+                FP m = Frac(d) * factor(d); // damage output shrinks with strength
+                soft += d.SoftAttack * m; hard += d.HardAttack * m;
+                def += d.Defense * m; brk += d.Breakthrough * m;
                 hardness += d.Hardness; pierce += d.Piercing;
                 armorMax = FP.Max(armorMax, d.Armor); armorSum += d.Armor;
             }

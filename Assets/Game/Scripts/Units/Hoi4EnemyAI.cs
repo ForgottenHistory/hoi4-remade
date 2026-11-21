@@ -17,7 +17,8 @@ namespace Hoi4.Units
     /// Divisions that are moving, worn down (organisation or strength), or defending a province under
     /// attack are left alone. A division only attacks where the estimated odds (Hoi4Combat.Odds, with the
     /// divisions already marching there) are good; now and then it takes an uneven fight, never a hopeless
-    /// one. Every hour, attacks that go badly are called off before the attackers are ground down.
+    /// one. No more divisions go at a province than its combat width holds (the rest would wait in reserve).
+    /// Every hour, attacks that go badly are called off before the attackers are ground down.
     /// Orders go through the same QueueUnitMovementCommand as the player's, so combat, retreat and
     /// occupation apply unchanged. Holding the line is the front lines' job (Hoi4BattlePlans makes one per
     /// enemy border): an attacker is borrowed off its line and rejoins it when the attack is over.
@@ -247,16 +248,20 @@ namespace Hoi4.Units
                 int bestLoad = int.MaxValue;
                 var order = new List<ushort>(targets);
                 order.Sort((a, b) => load[a] != load[b] ? load[a].CompareTo(load[b]) : a.CompareTo(b));
-                int tried = 0, badOdds = 0, noPath = 0;
+                int tried = 0, badOdds = 0, noPath = 0, full = 0;
                 FP bestOdds = FP.Zero, bestRejected = FP.Zero;
                 bool bold = false;
                 var self = Hoi4Divisions.Instance.Get(id);
                 foreach (ushort t in order)
                 {
                     if (tried >= 4 || (bestPath != null && load[t] > bestLoad)) break;
+                    // The battle there is already as wide as the ground allows: more would only wait in reserve
+                    FP committed = FP.Zero;
+                    foreach (var a in attackersOf[t]) committed += a.CombatWidth;
+                    if (attackersOf[t].Count > 0 && committed + self.CombatWidth > Hoi4.Map.Hoi4CombatTerrain.Width(gameState, t)) { full++; continue; }
                     // Odds with this division joining the ones already on the way
                     var side = new List<Hoi4Division>(attackersOf[t]) { self };
-                    FP odds = Hoi4Combat.Odds(side, defendersOf[t]);
+                    FP odds = Hoi4Combat.Odds(side, defendersOf[t], t);
                     if (odds < GoodOdds && (odds < BoldOdds || Roll(country, t, today) >= BoldChance))
                     {
                         badOdds++;
@@ -278,7 +283,7 @@ namespace Hoi4.Units
                 if (bestPath == null)
                 {
                     Core.Recording.SessionRecorder.Note("ai", "hold", country, id, unit.provinceID, 0,
-                        $"rejected {badOdds} on odds (best {OddsText(bestRejected)}), {noPath} without a path, of {order.Count} targets");
+                        $"rejected {badOdds} on odds (best {OddsText(bestRejected)}), {full} at full width, {noPath} without a path, of {order.Count} targets");
                     continue;
                 }
                 Core.Recording.SessionRecorder.Note("ai", bold ? "attack_bold" : "attack", country, id, unit.provinceID, bestTarget,

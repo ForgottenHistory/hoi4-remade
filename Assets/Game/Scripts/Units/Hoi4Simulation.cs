@@ -52,6 +52,7 @@ namespace Hoi4.Units
 
         void OnDay(int day)
         {
+            Hoi4Combat.Instance?.SimulateDay(); // entrenchment
             Hoi4BattlePlans.Instance?.SimulateDay();
             if (RunsAI) Hoi4EnemyAI.Instance?.SimulateDay();
         }

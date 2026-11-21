@@ -430,12 +430,18 @@ def convert(hoi4: Path, out: Path):
     (loc_out / "states_l_english.yml").write_text("\n".join(state_loc) + "\n", encoding="utf-8")
 
     # --- terrain.json5 -------------------------------------------------------
-    tj = ["// Generated from HOI4 province terrain types (definition.csv column 7)", "{", "  categories: {"]
+    tj = ["// Generated from HOI4 province terrain types (definition.csv column 7).",
+          "// combat_width, combat_support_width (per extra attack direction) and attack (the attacker's",
+          "// attack and breakthrough modifier) are GAME fields from common/terrain/00_terrain.txt.",
+          "{", "  categories: {"]
+    combat = load_terrain_combat(hoi4)
     entries = []
     for k, (c, cost, water) in TERRAIN.items():
         e = f"    {k}: {{\n      color: [{c[0]}, {c[1]}, {c[2]}],\n      movement_cost: {cost}"
         if water:
             e += ",\n      is_water: true"
+        for field, v in combat.get(k, {}).items():
+            e += f",\n      {field}: {v}"
         entries.append(e + "\n    }")
     tj.append(",\n".join(entries))
     tj += ["  }", "}"]
@@ -471,6 +477,8 @@ def convert(hoi4: Path, out: Path):
 
     water_keys = np.array([t in ("sea", "lake") for _, _, _, _, t, _ in provinces], dtype=bool)[order]
     water_px = found & water_keys[idx]
+    prov_ids = np.array([p[0] for p in provinces], dtype=np.int32)[order]
+    write_river_crossings(hoi4, out, np.where(found & ~water_px, prov_ids[idx], 0))
     convert_gfx(hoi4, out, water_px)
 
     (out / "map" / "default.json5").write_text(
@@ -1142,6 +1150,7 @@ UNITPANEL_SPRITES = {
     "entry_bg": "GFX_UV_unit_entry_bg", "unassigned_bg": "GFX_unitlist_unassigned_bg",
     "unitinfo": "GFX_unitlist_unitinfo_button", "level": "GFX_unit_level", "sort": "GFX_tiling_sort_button_thin",
     "column": "GFX_division_list_column_button", "close_small": "GFX_NV_btn_close",
+    "dig_in": "GFX_unitlist_dig_in_icon",
 }
 
 
@@ -1463,6 +1472,68 @@ def convert_counter_gfx(hoi4: Path, out: Path, tag_ideology, main_types):
 
 
 BORDER_TEXTURES = ["country", "state", "province", "sea", "sea_region", "impassable"]
+
+
+def load_terrain_combat(hoi4: Path):
+    """Land combat fields per terrain category from common/terrain/00_terrain.txt: combat_width,
+    combat_support_width (added per extra attack direction) and units.attack (the attacker's penalty)."""
+    root = parse_pdx(read_text(hoi4 / "common" / "terrain" / "00_terrain.txt"))
+    result = {}
+    for block in get_all(root, "categories"):
+        if not isinstance(block, list):
+            continue
+        for key, _, entry in block:
+            if not isinstance(entry, list) or get(entry, "is_water") == "yes":
+                continue
+            fields = {}
+            for f in ("combat_width", "combat_support_width"):
+                v = get(entry, f)
+                if v is not None:
+                    fields[f] = float(v)
+            units = get(entry, "units")
+            if isinstance(units, list) and get(units, "attack") is not None:
+                fields["attack"] = float(get(units, "attack"))
+            result[key] = fields
+    print("Terrain combat: " + ", ".join(f"{k} {v}" for k, v in result.items()))
+    return result
+
+
+RIVER_CROSSING_MIN_PIXELS = 4  # Tools/prototypes/rivers/river_crossings.py
+
+
+def write_river_crossings(hoi4: Path, out: Path, land):
+    """map/hoi4_river_crossings.json5: pairs of neighbouring land provinces with a river between them,
+    [a, b, size] with size 1 small, 2 large (HOI4 RIVER_CROSSING_PENALTY / _LARGE). HOI4 draws rivers along
+    province borders: a river pixel whose 3x3 window holds land of both provinces counts for the pair, and
+    a pair needs RIVER_CROSSING_MIN_PIXELS of them (a river flowing through a border touches it at one or two).
+    rivers.bmp palette 0..11 is river (3..6 small, 7..11 large: defines RIVER_SMALL_STOP_INDEX = 6,
+    RIVER_LARGE_STOP_INDEX = 11); large when most of the pair's river pixels are. land: province id per
+    pixel, 0 for water and unknown. Prototype: Tools/prototypes/rivers/river_crossings.py."""
+    a = np.asarray(Image.open(hoi4 / "map" / "rivers.bmp")).astype(np.int16)
+    if a.shape != land.shape:
+        print(f"WARNING: rivers.bmp {a.shape} != provinces {land.shape}; no river crossings")
+        return
+    H, W = land.shape
+    ys, xs = np.nonzero((a >= 0) & (a <= 11))
+    big = a[ys, xs] >= 7
+    win = np.stack([land[np.clip(ys + dy, 0, H - 1), np.clip(xs + dx, 0, W - 1)]
+                    for dy in (-1, 0, 1) for dx in (-1, 0, 1)], axis=1)
+    counts, large = {}, {}
+    for row, lg in zip(win, big):
+        u = np.unique(row[row > 0])
+        for i in range(len(u)):
+            for j in range(i + 1, len(u)):
+                k = (int(u[i]), int(u[j]))
+                counts[k] = counts.get(k, 0) + 1
+                large[k] = large.get(k, 0) + int(lg)
+    pairs = sorted((k[0], k[1], 2 if large[k] * 2 > n else 1)
+                   for k, n in counts.items() if n >= RIVER_CROSSING_MIN_PIXELS)
+    lines = ["// Generated by Tools/hoi4_convert.py: neighbouring land provinces with a river between them,",
+             "// [a, b, size], size 1 small river, 2 large river.", "{", "  crossings: ["]
+    lines += [f"    [{x}, {y}, {z}]," for x, y, z in pairs]
+    lines += ["  ]", "}"]
+    (out / "map" / "hoi4_river_crossings.json5").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"River crossings: {len(pairs)} ({sum(1 for p in pairs if p[2] == 2)} large)")
 
 
 def graphical_terrain_slots(hoi4: Path):

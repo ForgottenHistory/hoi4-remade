@@ -48,7 +48,7 @@ Engine-level findings like this belong in the Archon docs (`Docs/Log/learnings/`
 python Tools/hoi4_convert.py [--hoi4 "<HOI4 install>"] [--out Hoi4Data]
 ```
 
-The default `--hoi4` path is the Steam install under `C:\Program Files (x86)`. The script needs `numpy`, `scipy` and `Pillow`. It reads HOI4 map, state, country, localisation and gfx files and writes an Archon-format data directory (the same layout as `Assets/Archon-Engine/Template-Data`). That covers provinces, definitions, terrain, heightmap, rivers, `hoi4_regions.json5` and the converted terrain atlases and colormaps under `gfx/map/`. It contains its own small Paradox-script parser (`parse_pdx`).
+The default `--hoi4` path is the Steam install under `C:\Program Files (x86)`. The script needs `numpy`, `scipy` and `Pillow`. It reads HOI4 map, state, country, localisation and gfx files and writes an Archon-format data directory (the same layout as `Assets/Archon-Engine/Template-Data`). That covers provinces, definitions, terrain (with HOI4 combat width and attack penalty), heightmap, rivers, `hoi4_regions.json5`, `hoi4_river_crossings.json5` and the converted terrain atlases and colormaps under `gfx/map/`. It contains its own small Paradox-script parser (`parse_pdx`).
 
 Rerun the converter after changing it. The engine caches decoded images next to them as `*.pixels` and `*.adjacency` files.
 

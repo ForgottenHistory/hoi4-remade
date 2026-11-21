@@ -103,16 +103,32 @@ namespace Hoi4.Units
             RecordingTable table;
 
             public void Begin(SessionRecorder r) =>
-                table = r.Table("battles", "to\tfrom\tpercent\tattackers\tdefenders\tattacker_front\tdefender_front\tattacker_org\tdefender_org");
+                table = r.Table("battles", "to\tfrom\tpercent\tattackers\tdefenders\tattacker_front\tdefender_front\tattacker_org\tdefender_org" +
+                                           "\tterrain\twidth\tdirections\triver\tdefender_entrenchment");
 
             public void Record(SessionRecorder r)
             {
+                var gs = Engine.ArchonEngine.Instance?.GameState;
                 foreach (var b in Hoi4Combat.Battles)
                 {
                     if (b.Attackers == null) continue;
                     table.Row($"{b.To}\t{b.From}\t{b.AttackerPercent}\t{SessionRecorder.Join(b.Attackers)}\t{SessionRecorder.Join(b.Defenders)}" +
-                              $"\t{SessionRecorder.Join(b.AttackerFront)}\t{SessionRecorder.Join(b.DefenderFront)}\t{OrgSum(b.Attackers)}\t{OrgSum(b.Defenders)}");
+                              $"\t{SessionRecorder.Join(b.AttackerFront)}\t{SessionRecorder.Join(b.DefenderFront)}\t{OrgSum(b.Attackers)}\t{OrgSum(b.Defenders)}" +
+                              $"\t{Hoi4.Map.Hoi4CombatTerrain.TerrainKey(gs, b.To)}\t{b.Width}\t{b.Directions}\t{(b.River == 2 ? "large" : b.River == 1 ? "small" : "")}" +
+                              $"\t{MeanEntrenchment(b.DefenderFront)}");
                 }
+            }
+
+            static string MeanEntrenchment(List<ushort> ids)
+            {
+                float sum = 0; int n = 0;
+                foreach (ushort id in ids)
+                {
+                    var d = Hoi4Divisions.Instance?.Get(id);
+                    if (d == null) continue;
+                    sum += d.Entrenchment.ToFloat(); n++;
+                }
+                return n > 0 ? $"{sum / n:0.#}" : "";
             }
 
             static string OrgSum(List<ushort> ids)

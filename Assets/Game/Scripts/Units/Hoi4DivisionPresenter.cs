@@ -93,6 +93,9 @@ namespace Hoi4.Units
             card.Add(Hoi4Sprites.Make("dv-level"));
             // unitview.gui bar_prepare: the planning bonus, of its maximum
             card.Add(Bar("dv-bar-plan", d != null ? d.Planning.ToFloat() / Hoi4BattlePlans.MaxPlanning.ToFloat() : 0f));
+            // unitview.gui unitlist_dig_in_icon and dig_in_bonus: entrenchment, of its maximum
+            card.Add(Hoi4Sprites.Make("dv-dig-in"));
+            card.Add(Bar("dv-bar-dig-in", d != null ? d.Entrenchment.ToFloat() / Hoi4Combat.DigInCap.ToFloat() : 0f));
 
             card.Add(Text("dv-name", d?.Name ?? $"Unit {id}"));
             card.Add(Text("dv-status", Status(id, unit, gameState)));

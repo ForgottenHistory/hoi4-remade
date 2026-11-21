@@ -35,6 +35,7 @@ namespace Hoi4.Units
         public int Manpower;
         public FP Experience;
         public FP Planning;            // planning bonus, 0..0.3 (Hoi4BattlePlans: builds on the front line with an offensive)
+        public FP Entrenchment;        // dug in, 0..5 (Hoi4Combat: +1 a day standing still out of battle, lost on moving)
         public FP SoftAttack, HardAttack, Defense, Breakthrough; // sums over sub-units (1936 equipment)
         public FP Hardness, Armor, Piercing;
     }
