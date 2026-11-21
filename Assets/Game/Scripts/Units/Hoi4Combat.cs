@@ -72,7 +72,6 @@ namespace Hoi4.Units
             gameState = Engine.ArchonEngine.Instance.GameState;
             gameState.Units.MovementQueue.TicksPerDay = 24; // HOI4 divisions advance every hour
             gameState.Units.MovementQueue.ArrivalBlocker = EnemyHolds;
-            gameState.Time.OnHourlyTick += OnHour;
             arrivedSub = gameState.EventBus.Subscribe<UnitMovementCompletedEvent>(e => OnArrived(e.UnitID, e.DestinationProvinceID));
         }
 
@@ -81,7 +80,6 @@ namespace Hoi4.Units
             if (Instance == this) Instance = null;
             if (gameState != null)
             {
-                if (gameState.Time != null) gameState.Time.OnHourlyTick -= OnHour;
                 if (gameState.Units?.MovementQueue != null && gameState.Units.MovementQueue.ArrivalBlocker == (System.Func<ushort, ushort, bool>)EnemyHolds)
                     gameState.Units.MovementQueue.ArrivalBlocker = null;
             }
@@ -122,8 +120,10 @@ namespace Hoi4.Units
             return false;
         }
 
-        void OnHour(int hour)
+        /// <summary>One hour of fighting; called by Hoi4Simulation.</summary>
+        public void SimulateHour()
         {
+            if (gameState == null) return;
             var diplomacy = gameState.Diplomacy;
             var divisions = Hoi4Divisions.Instance;
             if (diplomacy == null || divisions == null) return;
@@ -153,8 +153,15 @@ namespace Hoi4.Units
             Battles.Clear();
             fighting.Clear();
             destroyed.Clear();
-            foreach (var kv in attackersOf)
-                if (kv.Value.Count > 0) Fight(kv.Key, kv.Value, diplomacy, divisions);
+            // Battles in province order: a division can take part in one and be destroyed in another
+            var targets = new List<ushort>();
+            foreach (var kv in attackersOf) if (kv.Value.Count > 0) targets.Add(kv.Key);
+            targets.Sort();
+            foreach (ushort target in targets)
+            {
+                attackersOf[target].Sort();
+                Fight(target, attackersOf[target], diplomacy, divisions);
+            }
 
             // Divisions out of contact slowly regain organisation
             foreach (var d in divisions.All.Values)

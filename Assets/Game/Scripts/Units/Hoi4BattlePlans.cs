@@ -105,6 +105,12 @@ namespace Hoi4.Units
 
         public Hoi4BattlePlan PlanOf(ushort unitId) => planOf.TryGetValue(unitId, out var p) ? p : null;
 
+        public Hoi4BattlePlan GetPlan(int planId)
+        {
+            foreach (var p in plans) if (p.Id == planId) return p;
+            return null;
+        }
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Spawn()
         {
@@ -122,7 +128,6 @@ namespace Hoi4.Units
             Shader.SetGlobalFloat(PlanActiveId, 0f);
             if (subscriptions != null)
                 foreach (var s in subscriptions) s?.Dispose();
-            if (gameState?.Time != null) gameState.Time.OnHourlyTick -= OnHour;
             if (material != null) Destroy(material);
             if (mesh != null) Destroy(mesh);
             if (planTex != null) Destroy(planTex);
@@ -183,7 +188,6 @@ namespace Hoi4.Units
                 gameState.EventBus.Subscribe<ProvinceControllerChangedEvent>(e => MarkBorder(e.OldController, e.NewController)),
                 gameState.EventBus.Subscribe<ProvinceOwnershipChangedEvent>(e => MarkBorder(e.OldOwner, e.NewOwner)),
             };
-            gameState.Time.OnHourlyTick += OnHour;
             borderDirty = true; // first hour: the AI draws its lines for the wars already going
             ready = true;
         }
@@ -258,15 +262,24 @@ namespace Hoi4.Units
         /// <summary>Remove the plans the selected divisions follow.</summary>
         public void DeleteSelectedPlans()
         {
-            bool any = false;
+            var ids = new SortedSet<int>();
             foreach (ushort id in Hoi4UnitSelection.Instance.Selected)
             {
                 var plan = PlanOf(id);
-                if (plan == null || plan.IsAI) continue;
-                RemovePlan(plan);
-                any = true;
+                if (plan != null && !plan.IsAI) ids.Add(plan.Id);
             }
-            if (any) { dirtyMesh = true; Changed?.Invoke(); }
+            foreach (int planId in ids)
+                gameState.TryExecuteCommand(new DeleteBattlePlanCommand { CountryId = Player, PlanId = planId }, out _);
+        }
+
+        /// <summary>DeleteBattlePlanCommand.</summary>
+        public void DeletePlan(int planId)
+        {
+            var plan = GetPlan(planId);
+            if (plan == null) return;
+            RemovePlan(plan);
+            dirtyMesh = true;
+            Changed?.Invoke();
         }
 
         void RemovePlan(Hoi4BattlePlan plan)
@@ -291,20 +304,39 @@ namespace Hoi4.Units
         {
             var selected = ArmySelection(out var army);
             if (selected == null) { Cancel(); return; }
-            var plan = new Hoi4BattlePlan { Id = nextId++, Owner = Player, ArmyId = army.Id, Country = hoverCountry, Arcs = previewArcs, Chains = previewChains };
-            foreach (ushort u in selected)
+            selected.Sort();
+            ushort target = hoverCountry;
+            Active = false;
+            SetPreview(0);
+            gameState.TryExecuteCommand(new PlaceBattlePlanCommand { CountryId = Player, TargetCountry = target, ArmyId = army.Id, UnitIds = selected }, out _);
+            dirtyMesh = true;
+            Changed?.Invoke();
+        }
+
+        /// <summary>True when the owner controls land next to land the country controls.</summary>
+        public bool HasBorder(ushort owner, ushort country) => country != 0 && country != owner && BorderWith(owner, country, new HashSet<ushort>()).Count > 0;
+
+        /// <summary>PlaceBattlePlanCommand: the owner's front line against the country, traced from the
+        /// current border, held by these divisions (those already on another plan stay there).</summary>
+        public Hoi4BattlePlan CreatePlan(ushort owner, int armyId, ushort country, List<ushort> unitIds)
+        {
+            var own = new HashSet<ushort>();
+            var arcs = BorderWith(owner, country, own);
+            if (arcs.Count == 0) return null;
+            var plan = new Hoi4BattlePlan { Id = nextId++, Owner = owner, ArmyId = armyId, Country = country, Arcs = arcs };
+            plan.Chains = BuildChains(arcs, country);
+            foreach (ushort u in unitIds)
             {
                 manualOrders.Remove(u);
                 if (!planOf.ContainsKey(u)) { plan.Units.Add(u); planOf[u] = plan; }
             }
             ComputeLabelAnchor(plan);
-            SetFronts(plan, previewProvinces);
+            SetFronts(plan, own);
             plans.Add(plan);
             Distribute(plan);
-            Active = false;
-            SetPreview(0);
             dirtyMesh = true;
             Changed?.Invoke();
+            return plan;
         }
 
         // --- Hover -------------------------------------------------------------------------------
@@ -334,10 +366,9 @@ namespace Hoi4.Units
         /// follow border changes from that hour (several provinces often flip at once), divisions that died
         /// or left the army drop off, new army divisions join, and idle divisions return to their spots.
         /// </summary>
-        void OnHour(int hour)
+        public void SimulateHour()
         {
             if (!ready) return;
-            if (hour == 0) borderDirty = true; // daily: wars declared or ended change which AI lines exist
             if (borderDirty) RefreshPlans();
             if (plans.Count == 0) return;
             var units = gameState.Units;
@@ -371,6 +402,14 @@ namespace Hoi4.Units
                 else Hold(plan);
             }
             if (playerTouched) Changed?.Invoke();
+        }
+
+        /// <summary>Daily, from Hoi4Simulation: wars declared or ended change which AI lines exist, so all
+        /// lines are checked on the next hour.</summary>
+        public void SimulateDay()
+        {
+            if (!ready) return;
+            borderDirty = true;
         }
 
         /// <summary>Hoi4EnemyAI takes a division off its line to attack; it rejoins when the attack is over.</summary>
@@ -716,7 +755,7 @@ namespace Hoi4.Units
                 }
                 keyed.Add((chain, at, p));
             }
-            keyed.Sort((x, y) => x.chain != y.chain ? x.chain.CompareTo(y.chain) : x.run.CompareTo(y.run));
+            keyed.Sort((x, y) => x.chain != y.chain ? x.chain.CompareTo(y.chain) : x.run != y.run ? x.run.CompareTo(y.run) : x.p.CompareTo(y.p));
             plan.Reach.Clear();
             plan.FrontProvinces = new List<ushort>(keyed.Count);
             plan.Fronts = new List<List<ushort>>();

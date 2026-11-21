@@ -38,6 +38,12 @@ namespace Hoi4.Units
 
         public Hoi4Army ArmyOf(ushort unitId) => armyOf.TryGetValue(unitId, out var a) ? a : null;
 
+        public Hoi4Army Get(int armyId)
+        {
+            foreach (var a in armies) if (a.Id == armyId) return a;
+            return null;
+        }
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Spawn()
         {

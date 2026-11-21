@@ -32,6 +32,8 @@ namespace Hoi4.Units
         const float BreakOffStrength = 0.35f;
         const int BreakOffPercent = 25;       // or when its side holds less than this share of the battle's organisation
 
+        public static Hoi4EnemyAI Instance { get; private set; }
+
         GameState gameState;
         ushort[] provinceIds;
         readonly List<ushort> idle = new List<ushort>();
@@ -44,6 +46,8 @@ namespace Hoi4.Units
             DontDestroyOnLoad(go);
             go.AddComponent<Hoi4EnemyAI>();
         }
+
+        void Awake() => Instance = this;
 
         IEnumerator Start()
         {
@@ -60,22 +64,19 @@ namespace Hoi4.Units
             var ids = gameState.Provinces.GetAllProvinceIds(Allocator.Temp);
             provinceIds = ids.ToArray();
             ids.Dispose();
-            gameState.Time.OnDailyTick += OnDay;
-            gameState.Time.OnHourlyTick += OnHour;
+            System.Array.Sort(provinceIds);
         }
 
         void OnDestroy()
         {
-            if (gameState?.Time != null)
-            {
-                gameState.Time.OnDailyTick -= OnDay;
-                gameState.Time.OnHourlyTick -= OnHour;
-            }
+            if (Instance == this) Instance = null;
         }
 
-        /// <summary>Call off attacks that go badly: worn-down attackers, or a battle that is clearly lost.</summary>
-        void OnHour(int hour)
+        /// <summary>Call off attacks that go badly: worn-down attackers, or a battle that is clearly lost.
+        /// Called every hour by Hoi4Simulation, after combat.</summary>
+        public void SimulateHour()
         {
+            if (gameState == null) return;
             ushort player = PlayerCountry;
             var units = gameState.Units;
             var queue = units.MovementQueue;
@@ -97,7 +98,17 @@ namespace Hoi4.Units
                 bool worn = d.Organisation < d.MaxOrganisation * BreakOffOrganisation || d.Strength < d.MaxStrength * BreakOffStrength;
                 if (worn || battle.AttackerPercent < BreakOffPercent) breakOff.Add(id);
             }
-            foreach (ushort id in breakOff) queue.CancelMovement(id); // not while iterating the moving units
+            // Not while iterating the moving units; one command per country
+            breakOff.Sort();
+            var byCountry = new SortedDictionary<ushort, List<ushort>>();
+            foreach (ushort id in breakOff)
+            {
+                ushort c = units.GetUnit(id).countryID;
+                if (!byCountry.TryGetValue(c, out var list)) byCountry[c] = list = new List<ushort>();
+                list.Add(id);
+            }
+            foreach (var kv in byCountry)
+                gameState.TryExecuteCommand(new HaltUnitsCommand { CountryId = kv.Key, UnitIds = kv.Value });
         }
 
         /// <summary>Deterministic "dice" per country, province and day (same game, same choices).</summary>
@@ -117,11 +128,13 @@ namespace Hoi4.Units
             }
         }
 
-        void OnDay(int day)
+        /// <summary>New attacks; called every day by Hoi4Simulation. Countries in id order.</summary>
+        public void SimulateDay()
         {
+            if (gameState == null) return;
             ushort player = PlayerCountry;
             var diplomacy = gameState.Diplomacy;
-            var countries = new HashSet<ushort>();
+            var countries = new SortedSet<ushort>();
             foreach (ushort id in gameState.Units.GetAllUnits())
                 countries.Add(gameState.Units.GetUnit(id).countryID);
             foreach (ushort country in countries)
@@ -165,13 +178,15 @@ namespace Hoi4.Units
             foreach (var kv in fronts)
             {
                 float s = Strength(kv.Key);
-                if (s > best) { best = s; target = kv.Key; }
+                if (s > best || (s == best && kv.Key < target)) { best = s; target = kv.Key; } // ties: lowest id
             }
             var targets = fronts[target];
 
             // Idle divisions: not marching, rested, and not the defenders of a province under attack
             idle.Clear();
-            foreach (ushort id in gameState.Units.GetCountryUnits(country))
+            var own = gameState.Units.GetCountryUnits(country);
+            own.Sort();
+            foreach (ushort id in own)
             {
                 var d = Hoi4Divisions.Instance.Get(id);
                 if (d == null || d.Organisation < d.MaxOrganisation * MinOrganisation || d.Strength < d.MaxStrength * MinStrength) continue;
@@ -217,7 +232,7 @@ namespace Hoi4.Units
                 ushort bestTarget = 0;
                 int bestLoad = int.MaxValue;
                 var order = new List<ushort>(targets);
-                order.Sort((a, b) => load[a].CompareTo(load[b]));
+                order.Sort((a, b) => load[a] != load[b] ? load[a].CompareTo(load[b]) : a.CompareTo(b));
                 int tried = 0;
                 var self = Hoi4Divisions.Instance.Get(id);
                 foreach (ushort t in order)
@@ -247,7 +262,8 @@ namespace Hoi4.Units
                     MovementDays = type?.Speed ?? 3,
                     CountryId = country,
                 };
-                Hoi4BattlePlans.Instance?.Borrow(id); // off its front line while it attacks
+                if (Hoi4BattlePlans.Instance != null) // off its front line while it attacks
+                    gameState.TryExecuteCommand(new BorrowForAttackCommand { CountryId = country, UnitId = id });
                 if (gameState.TryExecuteCommand(command, out _))
                 {
                     load[bestTarget]++;

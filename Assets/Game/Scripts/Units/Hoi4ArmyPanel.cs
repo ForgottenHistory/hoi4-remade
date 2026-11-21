@@ -161,7 +161,7 @@ namespace Hoi4.Units
             disband.RegisterCallback<PointerDownEvent>(e =>
             {
                 if (e.button != 0) return;
-                Hoi4Armies.Instance.Disband(army);
+                Engine.ArchonEngine.Instance.GameState.TryExecuteCommand(new DisbandArmyCommand { CountryId = Player, ArmyId = army.Id }, out _);
                 e.StopPropagation();
             });
             card.Add(disband);
@@ -175,7 +175,8 @@ namespace Hoi4.Units
                 else if (e.button == 1)
                 {
                     var own = SelectedOwn(Player);
-                    if (own.Count > 0) Hoi4Armies.Instance.Add(army, own);
+                    if (own.Count > 0)
+                        Engine.ArchonEngine.Instance.GameState.TryExecuteCommand(new AddToArmyCommand { CountryId = Player, ArmyId = army.Id, UnitIds = new System.Collections.Generic.List<ushort>(own) }, out _);
                 }
                 e.StopPropagation();
             });
@@ -187,7 +188,7 @@ namespace Hoi4.Units
             if (e.button != 0) return;
             var own = SelectedOwn(Player);
             if (own.Count == 0) return;
-            Hoi4Armies.Instance.Create(own);
+            Engine.ArchonEngine.Instance.GameState.TryExecuteCommand(new CreateArmyCommand { CountryId = Player, UnitIds = new System.Collections.Generic.List<ushort>(own) }, out _);
             e.StopPropagation();
         }
     }

@@ -134,13 +134,12 @@ namespace Hoi4.Units
         {
             var p = StarterKit.Initializer.Instance?.PlayerState;
             if (p == null || !p.HasPlayerCountry) return;
-            foreach (ushort id in new List<ushort>(selection))
-                if (gameState.Units.HasUnit(id) && gameState.Units.GetUnit(id).countryID == p.PlayerCountryId)
-                {
-                    Hoi4BattlePlans.Instance?.Unassign(id); // otherwise the plan sends it straight back
-                    gameState.Units.MovementQueue.CancelMovement(id);
-                }
-            Hoi4UnitCounters.Instance?.MarkDirty();
+            var own = new List<ushort>();
+            foreach (ushort id in ordered)
+                if (gameState.Units.HasUnit(id) && gameState.Units.GetUnit(id).countryID == p.PlayerCountryId) own.Add(id);
+            if (own.Count == 0) return;
+            // ReleasePlan: otherwise the plan sends them straight back
+            gameState.TryExecuteCommand(new HaltUnitsCommand { CountryId = p.PlayerCountryId, UnitIds = own, ReleasePlan = true }, out _);
         }
 
         // --- Box selection ---------------------------------------------------------------------
@@ -245,17 +244,24 @@ namespace Hoi4.Units
             }
             var paths = new Dictionary<ushort, List<ushort>>(); // per start province
             int issued = 0, noPath = 0;
+            // A manual order overrides the battle plan; ordered back to where they are = stop
+            var own = new List<ushort>();
+            var stay = new List<ushort>();
             foreach (ushort id in ordered)
             {
                 var unit = gameState.Units.GetUnit(id);
                 if (unit.unitCount == 0 || unit.countryID != country) continue;
-                Hoi4BattlePlans.Instance?.Unassign(id); // a manual order overrides the battle plan
-                if (unit.provinceID == target)
-                {
-                    if (gameState.Units.MovementQueue.IsUnitMoving(id))
-                        gameState.Units.MovementQueue.CancelMovement(id); // ordered back to where it is
-                    continue;
-                }
+                own.Add(id);
+                if (unit.provinceID == target) stay.Add(id);
+            }
+            if (own.Count > 0 && Hoi4BattlePlans.Instance != null)
+                gameState.TryExecuteCommand(new ReleaseFromPlanCommand { CountryId = country, UnitIds = own }, out _);
+            if (stay.Count > 0)
+                gameState.TryExecuteCommand(new HaltUnitsCommand { CountryId = country, UnitIds = stay }, out _);
+            foreach (ushort id in own)
+            {
+                var unit = gameState.Units.GetUnit(id);
+                if (unit.provinceID == target) continue;
                 if (!paths.TryGetValue(unit.provinceID, out var path))
                     paths[unit.provinceID] = path = gameState.Pathfinding.FindPath(unit.provinceID, target, country);
                 if (path == null || path.Count < 2) { noPath++; continue; }
