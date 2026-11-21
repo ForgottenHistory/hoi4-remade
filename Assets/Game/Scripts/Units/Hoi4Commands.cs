@@ -212,6 +212,55 @@ namespace Hoi4.Units
         }
     }
 
+    /// <summary>Divisions join a front line (and its army, leaving theirs).</summary>
+    public sealed class AssignToPlanCommand : BaseCommand
+    {
+        public ushort CountryId;
+        public int PlanId;
+        public int OffensiveId;      // assigned to an offensive: kept on its front (0: the line as a whole)
+        public List<ushort> UnitIds;
+
+        public override bool Validate(GameState gameState)
+        {
+            var plan = Hoi4BattlePlans.Instance?.GetPlan(PlanId);
+            return plan != null && !plan.IsAI && plan.Owner == CountryId && Hoi4CommandIo.Owned(gameState, CountryId, UnitIds);
+        }
+
+        public override void Execute(GameState gameState) => Hoi4BattlePlans.Instance.AssignToPlan(PlanId, UnitIds, OffensiveId);
+        public override void Undo(GameState gameState) { }
+
+        public override void Serialize(BinaryWriter w)
+        {
+            w.Write(CountryId);
+            w.Write(PlanId);
+            w.Write(OffensiveId);
+            Hoi4CommandIo.WriteIds(w, UnitIds);
+        }
+
+        public override void Deserialize(BinaryReader r)
+        {
+            CountryId = r.ReadUInt16();
+            PlanId = r.ReadInt32();
+            OffensiveId = r.ReadInt32();
+            UnitIds = Hoi4CommandIo.ReadIds(r);
+        }
+    }
+
+    /// <summary>Divisions leave their front lines, stop, and stay off lines until assigned again.</summary>
+    public sealed class UnassignFromPlanCommand : BaseCommand
+    {
+        public ushort CountryId;
+        public List<ushort> UnitIds;
+
+        public override bool Validate(GameState gameState) =>
+            Hoi4BattlePlans.Instance != null && Hoi4CommandIo.Owned(gameState, CountryId, UnitIds);
+
+        public override void Execute(GameState gameState) => Hoi4BattlePlans.Instance.UnassignFromPlans(UnitIds);
+        public override void Undo(GameState gameState) { }
+        public override void Serialize(BinaryWriter w) { w.Write(CountryId); Hoi4CommandIo.WriteIds(w, UnitIds); }
+        public override void Deserialize(BinaryReader r) { CountryId = r.ReadUInt16(); UnitIds = Hoi4CommandIo.ReadIds(r); }
+    }
+
     public sealed class DeleteBattlePlanCommand : BaseCommand
     {
         public ushort CountryId;

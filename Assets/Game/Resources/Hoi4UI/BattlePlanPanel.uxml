@@ -5,6 +5,8 @@
         <ui:Label name="bp-title" class="bp-title" text="Battle Plans" picking-mode="Ignore" />
         <ui:VisualElement name="bp-offence" class="bp-btn bp-offence hoi4-button" picking-mode="Position" />
         <ui:VisualElement name="bp-front" class="bp-btn bp-front hoi4-button" picking-mode="Position" />
+        <ui:VisualElement name="bp-assign" class="bp-btn bp-assign hoi4-button" picking-mode="Position" />
+        <ui:VisualElement name="bp-unassign" class="bp-btn bp-unassign hoi4-button" picking-mode="Position" />
         <ui:VisualElement name="bp-delete" class="bp-btn bp-delete hoi4-button" picking-mode="Position" />
     </ui:VisualElement>
 </ui:UXML>

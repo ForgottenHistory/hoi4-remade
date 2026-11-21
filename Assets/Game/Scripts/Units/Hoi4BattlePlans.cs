@@ -356,13 +356,14 @@ namespace Hoi4.Units
 
         /// <summary>A plan tool is on, or one was closed with Escape this frame (so Escape does not also clear the
         /// selection).</summary>
-        public bool ToolOn => Active || OffensiveActive || DeleteActive || toolEscapeFrame == Time.frameCount;
+        public bool ToolOn => Active || OffensiveActive || DeleteActive || AssignActive || toolEscapeFrame == Time.frameCount;
 
         public void BeginDelete()
         {
             if (!ready) return;
             if (Active) Cancel();
             if (OffensiveActive) CancelOffensive();
+            CancelAssign();
             DeleteActive = true;
             if (Hoi4UnitCounters.Instance != null) Hoi4UnitCounters.Instance.Hidden = true;
             dirtyMesh = true;
@@ -396,6 +397,7 @@ namespace Hoi4.Units
         {
             if (!ready || !HasArmySelection) return;
             CancelDelete();
+            CancelAssign();
             if (OffensiveActive) CancelOffensive();
             Active = true;
             lineDrag = false;
@@ -442,6 +444,7 @@ namespace Hoi4.Units
             var plan = GetPlan(planId);
             if (plan == null) return;
             RemovePlan(plan);
+            if (!plan.IsAI) RemoveOrphanedOffensives(plan.ArmyId);
             dirtyMesh = true;
             Changed?.Invoke();
         }
@@ -461,6 +464,7 @@ namespace Hoi4.Units
         {
             if (OffensiveActive) return OnOffensiveClick(button);
             if (DeleteActive) return OnDeleteClick(button);
+            if (AssignActive) return OnAssignClick(button);
             if (!Active) return false;
             if (button == 0 && previewArcs != null && previewArcs.Count > 0) Place();
             else if (button == 1 && previewArcs != null && previewArcs.Count > 0 && !lineDrag)
@@ -512,6 +516,8 @@ namespace Hoi4.Units
             foreach (ushort u in unitIds)
             {
                 manualOrders.Remove(u);
+                unassigned.Remove(u); // selected for a new line: on lines again
+                pinnedOffensive.Remove(u);
                 if (!planOf.ContainsKey(u)) { plan.Units.Add(u); planOf[u] = plan; }
             }
             TraceLine(plan);
@@ -531,9 +537,10 @@ namespace Hoi4.Units
             UpdateHover();
             if (dirtyMesh) { dirtyMesh = false; Rebuild(); }
             if (OffensiveActive) { UpdateOffensiveTool(); return; }
-            if (DeleteActive)
+            if (DeleteActive || AssignActive)
             {
-                if (Input.GetKeyDown(KeyCode.Escape)) { toolEscapeFrame = Time.frameCount; CancelDelete(); }
+                if (Input.GetKeyDown(KeyCode.Escape)) { toolEscapeFrame = Time.frameCount; CancelDelete(); CancelAssign(); }
+                else if (AssignActive && !HasOwnSelection) CancelAssign();
                 return;
             }
             if (!Active) return;
@@ -709,7 +716,7 @@ namespace Hoi4.Units
             foreach (var army in armies.All)
                 foreach (ushort u in army.Units)
                 {
-                    if (planOf.ContainsKey(u) || manualOrders.ContainsKey(u)) continue;
+                    if (planOf.ContainsKey(u) || manualOrders.ContainsKey(u) || unassigned.Contains(u)) continue;
                     Hoi4BattlePlan best = null;
                     foreach (var plan in plans)
                         if (!plan.IsAI && plan.ArmyId == army.Id && (best == null || LessLoaded(plan, best))) best = plan;
@@ -1506,26 +1513,38 @@ namespace Hoi4.Units
                 reachCache[key] = ok;
                 return ok;
             }
+            // Divisions assigned to an offensive stay on its front (if they can reach it); the rest are spread
+            var pinned = new Dictionary<ushort, int>();
+            foreach (ushort u in ids)
+            {
+                int pf = PinnedFront(plan, u);
+                if (pf >= 0 && Reaches(u, pf)) pinned[u] = pf;
+            }
+            int PinnedOn(int f) { int n = 0; foreach (var kv in pinned) if (kv.Value == f) n++; return n; }
             var reachers = new int[fronts.Count];
             foreach (ushort u in ids)
+            {
+                if (pinned.ContainsKey(u)) continue;
                 for (int f = 0; f < fronts.Count; f++)
                     if (Reaches(u, f)) reachers[f]++;
+            }
 
             // Divisions per front: every reachable front (an encircled pocket too) gets one while there are
             // enough, the rest go by front length (D'Hondt: the next one to the front with the most provinces
             // per division). A front never gets more divisions than can reach it.
             var alloc = new int[fronts.Count];
+            foreach (var kv in pinned) alloc[kv.Value]++;
             var order = new List<int>();
             for (int i = 0; i < fronts.Count; i++) if (reachers[i] > 0) order.Add(i);
             order.Sort((x, y) => fronts[y].Count != fronts[x].Count ? fronts[y].Count.CompareTo(fronts[x].Count) : x.CompareTo(y));
-            int left = ids.Count;
-            foreach (int i in order) { if (left == 0) break; alloc[i] = 1; left--; }
+            int left = ids.Count - pinned.Count;
+            foreach (int i in order) { if (left == 0) break; if (alloc[i] > 0) continue; alloc[i] = 1; left--; }
             while (left > 0)
             {
                 int best = -1;
                 foreach (int i in order)
                 {
-                    if (alloc[i] >= reachers[i]) continue;
+                    if (alloc[i] >= reachers[i] + PinnedOn(i)) continue;
                     // Most provinces per division after one more: count_i/(alloc_i+1) > count_best/(alloc_best+1)
                     if (best < 0 || (long)fronts[i].Count * (alloc[best] + 1) > (long)fronts[best].Count * (alloc[i] + 1)) best = i;
                 }
@@ -1559,13 +1578,20 @@ namespace Hoi4.Units
                 ushort heading = HeadingTo(u);
                 ushort at = heading != 0 ? heading : units.GetUnit(u).provinceID;
                 if (!hopsFrom.TryGetValue(at, out var hops)) hopsFrom[at] = hops = Hops(at, slotProvinces);
+                bool isPinned = pinned.TryGetValue(u, out int pinFront);
                 for (int s = 0; s < slots.Count; s++)
                 {
-                    if (!Reaches(u, slots[s].front)) continue;
+                    if (!Reaches(u, slots[s].front) || (isPinned && slots[s].front != pinFront)) continue;
                     pairs.Add((hops.TryGetValue(slots[s].province, out int d) ? d : int.MaxValue, u, s));
                 }
             }
-            pairs.Sort((x, y) => x.d != y.d ? x.d.CompareTo(y.d) : x.unit != y.unit ? x.unit.CompareTo(y.unit) : x.slot.CompareTo(y.slot));
+            // Pinned divisions take their front's slots first, so a spread division can't leave them without one
+            pairs.Sort((x, y) =>
+            {
+                bool px = pinned.ContainsKey(x.unit), py = pinned.ContainsKey(y.unit);
+                if (px != py) return px ? -1 : 1;
+                return x.d != y.d ? x.d.CompareTo(y.d) : x.unit != y.unit ? x.unit.CompareTo(y.unit) : x.slot.CompareTo(y.slot);
+            });
             var taken = new bool[slots.Count];
             foreach (var (d, u, s) in pairs)
             {

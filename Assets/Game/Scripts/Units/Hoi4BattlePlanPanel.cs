@@ -20,14 +20,14 @@ namespace Hoi4.Units
         const string Dir = "gfx/interface/battleplans/";
 
         UIDocument document;
-        VisualElement window, labels, front, offence, delete;
+        VisualElement window, labels, front, offence, delete, assign, unassign;
         readonly List<Label> labelPool = new List<Label>();   // one per letter
         readonly Dictionary<char, float> charWidth = new Dictionary<char, float>(); // at BaseFontPx, panel px
         Label probe;                                            // measures letters
         const float BaseFontPx = 15f;                           // BattlePlanStyle.uss .bp-line-label at full size
         readonly List<Vector2> linePts = new List<Vector2>();
         readonly List<float> lineRun = new List<float>();
-        bool frontActive, offenceActive, deleteActive, offenceEnabled = true;
+        bool frontActive, offenceActive, deleteActive, assignActive, offenceEnabled = true, ownEnabled = true;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Spawn()
@@ -103,23 +103,62 @@ namespace Hoi4.Units
                 else return;
                 e.StopPropagation();
             });
+            assign = window.Q("bp-assign");
+            unassign = window.Q("bp-unassign");
+            Hoi4Sprites.Apply(assign, Dir + "assign_0.png");
+            Hoi4Sprites.Apply(unassign, Dir + "unassign_0.png");
+            assign.RegisterCallback<PointerDownEvent>(e =>
+            {
+                if (e.button != 0) return;
+                var plans = Hoi4BattlePlans.Instance;
+                if (plans.AssignActive) plans.CancelAssign(); else plans.BeginAssign();
+                e.StopPropagation();
+            });
+            unassign.RegisterCallback<PointerDownEvent>(e =>
+            {
+                if (e.button != 0) return;
+                var plans = Hoi4BattlePlans.Instance;
+                var selected = plans.OwnSelection();
+                if (selected.Count > 0 && Engine.ArchonEngine.Instance?.GameState != null)
+                    Engine.ArchonEngine.Instance.GameState.TryExecuteCommand(
+                        new UnassignFromPlanCommand { CountryId = selectedCountry(selected), UnitIds = selected }, out _);
+                e.StopPropagation();
+            });
             root.Add(labels);
             root.Add(window);
         }
 
         void OnDestroy() => Hoi4UiHover.Remove(this);
 
+        static ushort selectedCountry(List<ushort> units)
+        {
+            var gs = Engine.ArchonEngine.Instance.GameState;
+            return gs.Units.HasUnit(units[0]) ? gs.Units.GetUnit(units[0]).countryID : (ushort)0;
+        }
+
         void Update()
         {
             if (window == null) return;
             var plans = Hoi4BattlePlans.Instance;
-            bool show = plans.Active || plans.OffensiveActive || plans.DeleteActive || plans.HasArmySelection;
+            bool own = plans.HasOwnSelection;
+            bool show = plans.Active || plans.OffensiveActive || plans.DeleteActive || plans.AssignActive || plans.HasArmyMemberSelected;
             window.style.display = show ? DisplayStyle.Flex : DisplayStyle.None;
             Hoi4UiHover.Report(this, window);
             if (show && frontActive != plans.Active)
             {
                 frontActive = plans.Active;
                 Hoi4Sprites.Apply(front, Dir + (frontActive ? "defence_1.png" : "defence_0.png"));
+            }
+            if (show && assignActive != plans.AssignActive)
+            {
+                assignActive = plans.AssignActive;
+                Hoi4Sprites.Apply(assign, Dir + (assignActive ? "assign_1.png" : "assign_0.png"));
+            }
+            if (show && own != ownEnabled)
+            {
+                ownEnabled = own;
+                assign.EnableInClassList("bp-disabled", !own);
+                unassign.EnableInClassList("bp-disabled", !own);
             }
             if (show && deleteActive != plans.DeleteActive)
             {

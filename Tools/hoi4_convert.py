@@ -1359,13 +1359,15 @@ def convert_army_cards(hoi4: Path, out: Path):
 
 def convert_battleplan_gfx(hoi4: Path, out: Path):
     """Sprites of the Battle Plans window (interface/battleplantools.gui) under gfx/interface/battleplans/:
-    the window background and the draw offence / draw defence / delete buttons (2 frames each: idle, pressed)."""
+    the window background and the draw offence / draw defence / assign / unassign / delete buttons (2 frames each:
+    idle, pressed)."""
     import hoi4_gui as gui
     dst = out / "gfx" / "interface" / "battleplans"
     dst.mkdir(parents=True, exist_ok=True)
     sprites = gui.load_sprites(hoi4)
     for name, spr in (("bg", "GFX_BPT_bg"), ("offence", "GFX_BPT_order_draw_offence_btn"),
-                      ("defence", "GFX_BPT_order_draw_defence_btn"), ("delete", "GFX_BPT_order_delete_btn")):
+                      ("defence", "GFX_BPT_order_draw_defence_btn"), ("delete", "GFX_BPT_order_delete_btn"),
+                      ("assign", "GFX_BPT_order_assign_units_btn"), ("unassign", "GFX_BPT_order_unassign_units_btn")):
         frames = gui.sprite_frames(hoi4, sprites, spr)
         if not frames:
             print(f"  battle plans: no sprite {spr}")

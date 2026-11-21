@@ -7,6 +7,8 @@
 .bp-front { left: 275px; }
 .bp-offence { left: 312px; }
 .bp-disabled { opacity: 0.45; }
+.bp-assign { left: 473px; }   /* HOI4 battleplantools.gui btn_assign_units x 437, +36 like the others */
+.bp-unassign { left: 508px; }
 .bp-delete { left: 599px; }
 
 .bp-labels { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }

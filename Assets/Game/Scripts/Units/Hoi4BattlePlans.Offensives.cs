@@ -16,6 +16,7 @@ namespace Hoi4.Units
         public int ArmyId;
         public readonly List<ushort> Targets = new List<ushort>(); // the provinces to take, in the order they were dragged over
         public ushort Target;                       // the middle one: the arrow and the path go there
+        public ushort Country;                      // the country attacked (the target's holder when placed): its divisions are the army's line against it
         public readonly HashSet<ushort> Units = new HashSet<ushort>();
         // Simulation: the provinces of the one front this offensive starts from (HOI4: the front line it was drawn
         // from), a front facing the piece of the enemy's land its target is in. Followed as the borders move.
@@ -180,6 +181,7 @@ namespace Hoi4.Units
             if (!CanPlanOffensive) return;
             if (Active) Cancel();
             CancelDelete();
+            CancelAssign();
             OffensiveActive = true;
             hoverProvince = 0;
             previewStart = 0;
@@ -653,7 +655,7 @@ namespace Hoi4.Units
             ushort target = targets[targets.Count / 2];
             var fronts = OffensiveFrontList(owner, armyId, target);
             if (fronts.Count == 0) return null;
-            var o = new Hoi4Offensive { Id = nextOffensiveId++, Owner = owner, ArmyId = armyId, Target = target };
+            var o = new Hoi4Offensive { Id = nextOffensiveId++, Owner = owner, ArmyId = armyId, Target = target, Country = Ctrl(target) };
             o.Targets.AddRange(targets);
             int chosen = startProvince != 0 ? fronts.FindIndex(f => f.Contains(startProvince)) : -1;
             if (chosen < 0) chosen = NearestFront(fronts, target);
@@ -665,6 +667,19 @@ namespace Hoi4.Units
             dirtyMesh = true;
             Changed?.Invoke();
             return o;
+        }
+
+        /// <summary>The plan is the offensive's line: the army's front line against the country it attacks. Only its
+        /// divisions are the offensive's (two lines against two countries can share a corner province).</summary>
+        bool OnLineOf(Hoi4Offensive o, Hoi4BattlePlan plan) =>
+            !plan.IsAI && plan.ArmyId == o.ArmyId && plan.Country == (o.Country != 0 ? o.Country : Ctrl(o.Target));
+
+        /// <summary>A front line was deleted: the army's offensives no line of it faces any more go with it.</summary>
+        void RemoveOrphanedOffensives(int armyId)
+        {
+            foreach (var o in new List<Hoi4Offensive>(offensives))
+                if (o.ArmyId == armyId && OffensiveFrontList(o.Owner, o.ArmyId, o.Target).Count == 0)
+                    RemoveOffensive(o, "its front line was deleted");
         }
 
         /// <summary>DeleteOffensiveCommand.</summary>
@@ -801,8 +816,11 @@ namespace Hoi4.Units
                     {
                         ushort u = kv.Key, slot = kv.Value;
                         if (manualOrders.ContainsKey(u)) continue;
+                        // Assigned to an offensive: that one, while it starts where the division stands
+                        if (pinnedOffensive.TryGetValue(u, out int pin) && GetOffensive(pin) is Hoi4Offensive own
+                            && OnLineOf(own, plan) && own.FrontSet.Contains(slot)) { next[u] = own; continue; }
                         foreach (var o in offensives) // in the order they were placed
-                            if (o.ArmyId == plan.ArmyId && o.FrontSet.Contains(slot)) { next[u] = o; break; }
+                            if (OnLineOf(o, plan) && o.FrontSet.Contains(slot)) { next[u] = o; break; }
                     }
                 }
             }
@@ -827,7 +845,7 @@ namespace Hoi4.Units
         {
             int n = 0;
             foreach (ushort u in o.Units)
-                if (planOf.TryGetValue(u, out var plan) && plan.Slot.TryGetValue(u, out ushort slot) && o.FrontSet.Contains(slot)) n++;
+                if (planOf.TryGetValue(u, out var plan) && OnLineOf(o, plan) && plan.Slot.TryGetValue(u, out ushort slot) && o.FrontSet.Contains(slot)) n++;
             return n;
         }
 
