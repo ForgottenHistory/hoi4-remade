@@ -83,6 +83,10 @@ namespace Hoi4.Units
         ProvinceCenterLookup centers;
         IDisposable[] subscriptions;
         bool dirty;
+        float lastRebuild = -1f;
+        const float MinRebuildInterval = 0.1f; // hourly ticks at high speed would otherwise rebuild every frame
+        // Composed counters by content: a counter that did not change is copied, not re-composed
+        readonly Dictionary<string, Color32[]> composed = new Dictionary<string, Color32[]>();
 
         Sprite plate, selectedFrame, ideologyStrip, barOrg, barStr, digits;
         List<Stack> stacks = new List<Stack>();
@@ -192,9 +196,10 @@ namespace Hoi4.Units
         void LateUpdate()
         {
             if (material == null) return;
-            if (dirty)
+            if (dirty && Time.unscaledTime - lastRebuild >= MinRebuildInterval)
             {
                 dirty = false;
+                lastRebuild = Time.unscaledTime;
                 Rebuild();
             }
 
@@ -452,7 +457,7 @@ namespace Hoi4.Units
             {
                 var s = stacks[i];
                 int sx = (i % cols) * SlotW, sy = (i / cols) * SlotH; // slot top-left, row 0 = top
-                ComposeCounter(s, sx, sy);
+                ComposeCached(s, sx, sy);
 
                 // Atlas uv (texture rows are bottom-up)
                 float u0 = (float)sx / AtlasWidth, u1 = (float)(sx + SlotW) / AtlasWidth;
@@ -475,7 +480,7 @@ namespace Hoi4.Units
                 tris[t + 3] = v; tris[t + 4] = v + 2; tris[t + 5] = v + 3;
             }
 
-            atlas.SetPixels32(atlasPixels);
+            atlas.SetPixelData(atlasPixels, 0);
             atlas.Apply(false);
 
             mesh.Clear();
@@ -487,6 +492,36 @@ namespace Hoi4.Units
             mesh.bounds = new Bounds(Vector3.zero, Vector3.one * 1e6f);
 
             ArchonLogger.Log($"Hoi4UnitCounters: {stacks.Count} counters, atlas {AtlasWidth}x{atlasHeight}", "game_units");
+        }
+
+        string Signature(Stack s)
+        {
+            if (s.IsBattle) return "b" + s.Count;
+            string type = "infantry";
+            int best = -1;
+            foreach (var kv in s.Types)
+                if (kv.Value > best) { best = kv.Value; type = kv.Key; }
+            int org = Mathf.RoundToInt(barOrg.Width * Mathf.Clamp01(s.MaxOrg > 0 ? s.Org / s.MaxOrg : 1f));
+            int str = Mathf.RoundToInt(barStr.Width * Mathf.Clamp01(s.MaxStr > 0 ? s.Str / s.MaxStr : 1f));
+            return string.Concat(s.Tag, "|", type, "|", s.Count.ToString(), "|", org.ToString(), "|", str.ToString(), s.Selected ? "|s" : "");
+        }
+
+        void ComposeCached(Stack s, int ox, int oy)
+        {
+            string key = Signature(s);
+            int h = atlas.height;
+            if (composed.TryGetValue(key, out var block))
+            {
+                for (int y = 0; y < SlotH; y++)
+                    Array.Copy(block, y * SlotW, atlasPixels, (h - 1 - (oy + y)) * AtlasWidth + ox, SlotW);
+                return;
+            }
+            ComposeCounter(s, ox, oy);
+            if (composed.Count > 5000) composed.Clear();
+            block = new Color32[SlotW * SlotH];
+            for (int y = 0; y < SlotH; y++)
+                Array.Copy(atlasPixels, (h - 1 - (oy + y)) * AtlasWidth + ox, block, y * SlotW, SlotW);
+            composed[key] = block;
         }
 
         void ComposeCounter(Stack s, int ox, int oy)
