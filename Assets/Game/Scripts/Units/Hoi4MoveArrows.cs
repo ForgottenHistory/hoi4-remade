@@ -38,10 +38,8 @@ namespace Hoi4.Units
         [Range(0f, 0.5f)] public float rootFade = 0.04f;
         [Tooltip("Arrow height above the terrain, world units")]
         public float lift = 0.05f;
-        [Tooltip("Arrows shorter than this (map pixels) are scaled down, like HOI4's global_scale")]
-        public float fullSizeLength = 200f;
-        [Tooltip("Smallest arrow scale for short moves")]
-        public float minScale = 0.5f;
+        [Tooltip("Size of every arrow (body width, head): the same for any length, so a long march isn't drawn bigger than a short one. Only the head shrinks, to fit an arrow too short for it")]
+        public float arrowScale = 0.5f;
         [Tooltip("Even body width in map pixels (as HOI4 shows it); 0 = the move_thick taper from body_width[0] to body_width[1]")]
         public float evenBodyWidth = 9f;
         [Range(0f, 1f)] public float stripeStrength = 0.08f;
@@ -246,7 +244,7 @@ namespace Hoi4.Units
             float length = cum[curve.Count - 1];
             if (length <= 1e-4f) return;
 
-            float scale = Mathf.Clamp(length / worldPerPx / Mathf.Max(fullSizeLength, 1f), Mathf.Clamp01(minScale), 1f);
+            float scale = Mathf.Max(arrowScale, 0.01f);
             float startPx = evenBodyWidth > 0f ? evenBodyWidth : bodyWidthStart;
             float endPx = evenBodyWidth > 0f ? evenBodyWidth : bodyWidthEnd;
             float w0 = startPx * scale * worldPerPx, w1 = endPx * scale * worldPerPx;

@@ -81,7 +81,9 @@ namespace Hoi4.Units
         readonly List<Hoi4BattlePlan> plans = new List<Hoi4BattlePlan>();
         readonly Dictionary<ushort, Hoi4BattlePlan> planOf = new Dictionary<ushort, Hoi4BattlePlan>();
         int nextId = 1;
-        readonly HashSet<ushort> manualOrders = new HashSet<ushort>(); // taken off a plan by a manual order: not auto-assigned again
+        // On a manual order: unit -> the plan it left (0: none). Off its plan until the order is done (it stops),
+        // then back to that plan, like HOI4
+        readonly Dictionary<ushort, int> manualOrders = new Dictionary<ushort, int>();
         IDisposable[] subscriptions;
         bool borderDirty;
         readonly HashSet<ushort> dirtyCountries = new HashSet<ushort>();   // controllers that gained or lost land since the last refresh
@@ -113,7 +115,7 @@ namespace Hoi4.Units
 
         public Hoi4BattlePlan PlanOf(ushort unitId) => planOf.TryGetValue(unitId, out var p) ? p : null;
         public bool IsBorrowed(ushort unitId) => borrowed.Contains(unitId);         // an AI division off its line, attacking
-        public bool HasManualOrder(ushort unitId) => manualOrders.Contains(unitId); // a player division ordered by hand
+        public bool HasManualOrder(ushort unitId) => manualOrders.ContainsKey(unitId); // a player division following a manual order
 
         public Hoi4BattlePlan GetPlan(int planId)
         {
@@ -431,11 +433,11 @@ namespace Hoi4.Units
             var units = gameState.Units;
             var queue = units.MovementQueue;
             var armies = Hoi4Armies.Instance;
-            manualOrders.RemoveWhere(u => !units.HasUnit(u) || armies == null || armies.ArmyOf(u) == null);
-            // An AI attack is over once the division stops (won, broke off, or retreated): back to the line
-            borrowed.RemoveWhere(u => !units.HasUnit(u) || !queue.IsUnitMoving(u));
             var touched = new HashSet<Hoi4BattlePlan>(dirtyPlans);
             dirtyPlans.Clear();
+            ReturnFromManualOrders(touched);
+            // An AI attack is over once the division stops (won, broke off, or retreated): back to the line
+            borrowed.RemoveWhere(u => !units.HasUnit(u) || !queue.IsUnitMoving(u));
             foreach (var plan in plans)
             {
                 int removed = plan.Units.RemoveWhere(u =>
@@ -480,6 +482,41 @@ namespace Hoi4.Units
             dirtyPlans.Add(plan); // the rest close the gap on the next hour
         }
 
+        /// <summary>
+        /// A manual order lasts until the division stops: arrived, halted, or its attack over (a retreat still
+        /// counts as marching). Then it goes back to the plan it left, if that plan is still its army's;
+        /// otherwise AutoAssign gives it its army's least loaded plan, or it stays put when the army has none.
+        /// </summary>
+        void ReturnFromManualOrders(HashSet<Hoi4BattlePlan> touched)
+        {
+            if (manualOrders.Count == 0) return;
+            var units = gameState.Units;
+            var queue = units.MovementQueue;
+            var armies = Hoi4Armies.Instance;
+            var done = new List<ushort>();
+            foreach (var kv in manualOrders)
+            {
+                ushort u = kv.Key;
+                if (!units.HasUnit(u) || armies == null || armies.ArmyOf(u) == null) { done.Add(u); continue; } // gone, or left the army
+                if (queue.IsUnitMoving(u) || Hoi4Combat.IsRetreating(u)) continue;                          // still on its order
+                done.Add(u);
+            }
+            done.Sort();
+            foreach (ushort u in done)
+            {
+                int planId = manualOrders[u];
+                manualOrders.Remove(u);
+                if (!units.HasUnit(u) || planOf.ContainsKey(u)) continue;
+                var plan = planId != 0 ? GetPlan(planId) : null;
+                var army = armies?.ArmyOf(u);
+                if (plan == null || plan.IsAI || army == null || plan.ArmyId != army.Id) continue; // AutoAssign decides
+                plan.Units.Add(u);
+                planOf[u] = plan;
+                touched.Add(plan);
+                Core.Recording.SessionRecorder.Note("plans", "rejoined", plan.Owner, u, units.GetUnit(u).provinceID, 0, $"plan {plan.Id}: manual order done");
+            }
+        }
+
         /// <summary>An AI country's divisions that hold no line (new, back from an attack, or the line moved
         /// on) join its line with the fewest divisions per front province. Marching ones (retreating, say)
         /// wait until they stop.</summary>
@@ -522,7 +559,7 @@ namespace Hoi4.Units
             foreach (var army in armies.All)
                 foreach (ushort u in army.Units)
                 {
-                    if (planOf.ContainsKey(u) || manualOrders.Contains(u)) continue;
+                    if (planOf.ContainsKey(u) || manualOrders.ContainsKey(u)) continue;
                     Hoi4BattlePlan best = null;
                     foreach (var plan in plans)
                         if (!plan.IsAI && plan.ArmyId == army.Id && (best == null || LessLoaded(plan, best))) best = plan;
@@ -890,7 +927,7 @@ namespace Hoi4.Units
         public void Unassign(ushort unitId)
         {
             if (planOf.TryGetValue(unitId, out var p) && p.IsAI) return; // the player's orders, the player's plans
-            manualOrders.Add(unitId);
+            if (!manualOrders.ContainsKey(unitId)) manualOrders[unitId] = p?.Id ?? 0; // a new order keeps the plan it first left
             if (!planOf.TryGetValue(unitId, out var plan)) return;
             planOf.Remove(unitId);
             plan.Units.Remove(unitId);

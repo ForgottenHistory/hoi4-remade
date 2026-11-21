@@ -130,7 +130,8 @@ namespace Hoi4.Units
             UpdateBox();
         }
 
-        /// <summary>H: the selected own divisions stop where they stand, whether marching or attacking.</summary>
+        /// <summary>H: the selected own divisions stop where they stand, whether marching or attacking. Like
+        /// HOI4, divisions on a battle plan stay on it: the plan sends them on again on the next hour.</summary>
         void HaltSelected()
         {
             var p = StarterKit.Initializer.Instance?.PlayerState;
@@ -139,8 +140,7 @@ namespace Hoi4.Units
             foreach (ushort id in ordered)
                 if (gameState.Units.HasUnit(id) && gameState.Units.GetUnit(id).countryID == p.PlayerCountryId) own.Add(id);
             if (own.Count == 0) return;
-            // ReleasePlan: otherwise the plan sends them straight back
-            gameState.TryExecuteCommand(new HaltUnitsCommand { CountryId = p.PlayerCountryId, UnitIds = own, ReleasePlan = true }, out _);
+            gameState.TryExecuteCommand(new HaltUnitsCommand { CountryId = p.PlayerCountryId, UnitIds = own, ReleasePlan = false }, out _);
         }
 
         // --- Box selection ---------------------------------------------------------------------
