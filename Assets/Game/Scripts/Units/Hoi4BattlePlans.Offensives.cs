@@ -16,11 +16,14 @@ namespace Hoi4.Units
         public readonly List<ushort> Targets = new List<ushort>(); // the provinces to take, in the order they were dragged over
         public ushort Target;                       // the middle one: the arrow and the path go there
         public readonly HashSet<ushort> Units = new HashSet<ushort>();
+        // Simulation: the army's front provinces this offensive starts from, the fronts facing the piece of the
+        // enemy's land its target is in (not a pocket elsewhere). Refreshed when the borders move.
+        public readonly HashSet<ushort> FrontSet = new HashSet<ushort>();
         // Presentation (rebuilt with the mesh). Path: HOI4 keeps an offensive line as province points, from an own
         // province on the front through the enemy's land to the target (the last); the arrow starts where it
         // crosses the front (HOI4 draws one bend, not the route). Its tie-breaks use the drawn province centres
         // (floats from a GPU readback), so the simulation must never read it: divisions advance by land hops
-        // to the targets (Advance), and whether a route exists is RouteExists, from adjacency only.
+        // to the targets (Advance), and the fronts it starts from are FrontSet, from adjacency only.
         public List<ushort> Path;
         public List<Vector3> Objective;             // the line around the targets, world
         public Vector3 LabelWorld, LabelAhead;
@@ -472,6 +475,7 @@ namespace Hoi4.Units
                         continue;
                     }
                     if (d != null && (d.Organisation < d.MaxOrganisation * AttackOrganisation || d.Strength < d.MaxStrength * AttackStrength)) continue;
+                    if (!o.FrontSet.Contains(unit.provinceID)) continue; // on another front (a pocket): it holds there
                     ushort best = 0;
                     int bestLoad = int.MaxValue, bestDist = int.MaxValue;
                     foreach (ushort q in Neighbours(unit.provinceID))
@@ -512,13 +516,11 @@ namespace Hoi4.Units
             // Hops from the front: 1 for the holder's provinces across the army's lines against it
             var fromFront = new Dictionary<ushort, int>();
             var queue = new List<ushort>();
-            foreach (var plan in plans)
-            {
-                if (plan.IsAI || plan.Owner != o.Owner || plan.ArmyId != o.ArmyId || plan.Country != holder || plan.FrontProvinces == null) continue;
-                foreach (ushort fp in plan.FrontProvinces)
-                    foreach (ushort q in Neighbours(fp))
-                        if (Walk(q) && fromFront.TryAdd(q, 1)) queue.Add(q);
-            }
+            var starts = new List<ushort>(o.FrontSet);
+            starts.Sort();
+            foreach (ushort fp in starts)
+                foreach (ushort q in Neighbours(fp))
+                    if (Walk(q) && fromFront.TryAdd(q, 1)) queue.Add(q);
             queue.Sort();
             Bfs(fromFront, queue, Walk);
             if (fromFront.Count == 0) return zone;
@@ -580,9 +582,11 @@ namespace Hoi4.Units
         {
             if (!simReady || !AreOffensiveTargets(owner, armyId, targets)) return null;
             ushort target = targets[targets.Count / 2];
-            if (!RouteExists(owner, armyId, target)) return null;
+            var fronts = OffensiveFronts(owner, armyId, target);
+            if (fronts.Count == 0) return null;
             var o = new Hoi4Offensive { Id = nextOffensiveId++, Owner = owner, ArmyId = armyId, Target = target };
             o.Targets.AddRange(targets);
+            o.FrontSet.UnionWith(fronts);
             var armies = Hoi4Armies.Instance;
             foreach (ushort u in unitIds)
             {
@@ -650,7 +654,12 @@ namespace Hoi4.Units
                 }
                 if (o.Targets.Count == 0) why = "targets taken (or no front line against their holder)";
                 else if (o.Units.Count == 0) why = "no divisions";
-                else if ((bordersMoved || lost > 0) && !RouteExists(o.Owner, o.ArmyId, o.Target)) why = "no route to the target";
+                else if (bordersMoved || lost > 0)
+                {
+                    var fronts = OffensiveFronts(o.Owner, o.ArmyId, o.Target);
+                    if (fronts.Count == 0) why = "no route to the target";
+                    else if (!o.FrontSet.SetEquals(fronts)) { o.FrontSet.Clear(); o.FrontSet.UnionWith(fronts); any = true; }
+                }
                 if (why == null) continue;
                 RemoveOffensive(o, why);
                 any = true;
@@ -661,27 +670,36 @@ namespace Hoi4.Units
         }
 
         /// <summary>
-        /// Simulation: one of the army's front provinces against the target's holder borders the holder's land that
-        /// connects to the target (OffensivePath's search, without its drawn tie-breaks, so it is the same on every
-        /// machine).
+        /// Simulation: the army's front provinces an offensive on the target starts from, sorted: every front of
+        /// its lines against the target's holder that faces the piece of the holder's land the target is in
+        /// (FrontsAgainst splits fronts by enemy piece). Empty: no route to the target. Adjacency only, the
+        /// same on every machine.
         /// </summary>
-        bool RouteExists(ushort owner, int armyId, ushort target)
+        List<ushort> OffensiveFronts(ushort owner, int armyId, ushort target)
         {
+            var result = new List<ushort>();
             ushort holder = Ctrl(target);
-            if (holder == 0 || holder == owner) return false;
-            var reach = new HashSet<ushort> { target };
-            var queue = new List<ushort> { target };
-            for (int qi = 0; qi < queue.Count; qi++)
-                foreach (ushort q in Neighbours(queue[qi]))
-                    if (!reach.Contains(q) && Ctrl(q) == holder) { reach.Add(q); queue.Add(q); }
+            if (holder == 0 || holder == owner) return result;
             foreach (var plan in plans)
             {
-                if (plan.IsAI || plan.Owner != owner || plan.ArmyId != armyId || plan.Country != holder || plan.FrontProvinces == null) continue;
-                foreach (ushort fp in plan.FrontProvinces)
-                    foreach (ushort q in Neighbours(fp))
-                        if (reach.Contains(q)) return true;
+                if (plan.IsAI || plan.Owner != owner || plan.ArmyId != armyId || plan.Country != holder || plan.Fronts == null) continue;
+                var sizes = new List<int>();
+                var piece = EnemyPieces(plan.FrontProvinces, holder, sizes);
+                if (!piece.TryGetValue(target, out int tp)) continue; // the target's piece borders none of this line
+                foreach (var front in plan.Fronts)
+                    if (front.Count > 0 && PieceFaced(front[0], piece, sizes) == tp) result.AddRange(front);
             }
-            return false;
+            result.Sort();
+            return result;
+        }
+
+        /// <summary>Presentation: the offensive's divisions slotted on its fronts (its label's count).</summary>
+        public int OffensiveDivisions(Hoi4Offensive o)
+        {
+            int n = 0;
+            foreach (ushort u in o.Units)
+                if (planOf.TryGetValue(u, out var plan) && plan.Slot.TryGetValue(u, out ushort slot) && o.FrontSet.Contains(slot)) n++;
+            return n;
         }
 
         /// <summary>Presentation: the drawn path still starts in an own province and runs through the target's holder's land.</summary>
@@ -701,10 +719,11 @@ namespace Hoi4.Units
         /// nearest the straight line from the start to the target. Steps and province ids decide; province
         /// centres (integer map px) only break ties.
         /// </summary>
-        List<ushort> OffensivePath(ushort owner, int armyId, ushort target)
+        List<ushort> OffensivePath(Hoi4Offensive o)
         {
+            ushort target = o.Target;
             ushort holder = Ctrl(target);
-            if (holder == 0 || holder == owner) return null;
+            if (holder == 0 || holder == o.Owner) return null;
             var dist = new Dictionary<ushort, int> { [target] = 0 };
             var queue = new List<ushort> { target };
             for (int qi = 0; qi < queue.Count; qi++)
@@ -717,20 +736,18 @@ namespace Hoi4.Units
             ushort start = 0;
             int bestSteps = int.MaxValue;
             long bestD = long.MaxValue;
-            foreach (var plan in plans)
+            var starts = new List<ushort>(o.FrontSet);
+            starts.Sort();
+            foreach (ushort fp in starts)
             {
-                if (plan.IsAI || plan.Owner != owner || plan.ArmyId != armyId || plan.Country != holder || plan.FrontProvinces == null) continue;
-                foreach (ushort fp in plan.FrontProvinces)
+                int steps = int.MaxValue;
+                foreach (ushort q in Neighbours(fp))
+                    if (dist.TryGetValue(q, out int d)) steps = Mathf.Min(steps, d + 1);
+                if (steps == int.MaxValue) continue;
+                long d2 = SqDist(ProvinceCentre(fp), goal);
+                if (steps < bestSteps || (steps == bestSteps && (d2 < bestD || (d2 == bestD && fp < start))))
                 {
-                    int steps = int.MaxValue;
-                    foreach (ushort q in Neighbours(fp))
-                        if (dist.TryGetValue(q, out int d)) steps = Mathf.Min(steps, d + 1);
-                    if (steps == int.MaxValue) continue;
-                    long d2 = SqDist(ProvinceCentre(fp), goal);
-                    if (steps < bestSteps || (steps == bestSteps && (d2 < bestD || (d2 == bestD && fp < start))))
-                    {
-                        bestSteps = steps; bestD = d2; start = fp;
-                    }
+                    bestSteps = steps; bestD = d2; start = fp;
                 }
             }
             if (start == 0) return null;
@@ -783,7 +800,7 @@ namespace Hoi4.Units
             AddDragPreview(counters);
             foreach (var o in offensives)
             {
-                if (!PathHolds(o)) o.Path = OffensivePath(o.Owner, o.ArmyId, o.Target); // new, or the front moved
+                if (!PathHolds(o) || !o.FrontSet.Contains(o.Path[0])) o.Path = OffensivePath(o); // new, or the front moved
                 if (counters == null || !counters.TryGetProvincePoint(o.Target, out var target)) continue;
                 target.y = 0f;
                 // Several targets: the arrow goes into the middle of the line through their centres

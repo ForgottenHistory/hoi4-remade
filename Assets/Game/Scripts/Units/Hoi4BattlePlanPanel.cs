@@ -155,7 +155,7 @@ namespace Hoi4.Units
                 }
                 foreach (var o in plans.Offensives)
                     if (o.Objective != null)
-                        PlaceAlong(Text(o.Units.Count, ArmyName(armies, o.ArmyId)), o.LabelPath, o.LabelAnchor, cam, counters, ref used);
+                        PlaceAlong(Text(plans.OffensiveDivisions(o), ArmyName(armies, o.ArmyId)), o.LabelPath, o.LabelAnchor, cam, counters, ref used);
             }
             for (int i = used; i < labelPool.Count; i++) labelPool[i].style.display = DisplayStyle.None;
             // Diagnostics: lines exist but no text was written (logged now and then, with why)

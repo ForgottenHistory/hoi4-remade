@@ -758,7 +758,8 @@ namespace Hoi4.Units
         /// Simulation: the owner's provinces facing the country, as separate fronts each in order along the
         /// line. A front province is owner land (not impassable) next to land the country controls. Two of
         /// them belong to the same front when they are neighbours or face the same enemy province (that
-        /// bridges a gap such as a lake on our side); an enemy pocket is then a front of its own. The order
+        /// bridges a gap such as a lake on our side), and face the same connected piece of the enemy's land;
+        /// so an own pocket and an enemy pocket are each a front of their own. The order
         /// along a front runs from one end (the farthest province from the lowest id) by hop distance.
         /// Integer graph maths only, in id order, so every client gets the same fronts.
         /// </summary>
@@ -775,7 +776,15 @@ namespace Hoi4.Units
             }
             if (front.Count == 0) return result;
 
-            // Links: own neighbours, and own provinces facing the same enemy province
+            // The enemy's land in connected pieces: a pocket of it inside our land is a front of its own, like
+            // HOI4, even where the ring around it touches the main line. Each front province faces the smallest
+            // piece it borders (ties: the lower piece id), so the pocket gets the corner provinces.
+            var pieceSize = new List<int>();
+            var piece = EnemyPieces(front, country, pieceSize);
+            var faces = new int[front.Count];
+            for (int i = 0; i < front.Count; i++) faces[i] = PieceFaced(front[i], piece, pieceSize);
+
+            // Links (within one enemy piece): own neighbours, and own provinces facing the same enemy province
             var index = new Dictionary<ushort, int>(front.Count);
             for (int i = 0; i < front.Count; i++) index[front[i]] = i;
             var links = new List<int>[front.Count];
@@ -784,7 +793,7 @@ namespace Hoi4.Units
             for (int i = 0; i < front.Count; i++)
                 foreach (ushort q in Neighbours(front[i]))
                 {
-                    if (index.TryGetValue(q, out int j)) { if (j > i) { links[i].Add(j); links[j].Add(i); } }
+                    if (index.TryGetValue(q, out int j)) { if (j > i && faces[i] == faces[j]) { links[i].Add(j); links[j].Add(i); } }
                     else if (Ctrl(q) == country)
                     {
                         if (!facing.TryGetValue(q, out var list)) facing[q] = list = new List<int>();
@@ -794,7 +803,7 @@ namespace Hoi4.Units
             foreach (var list in facing.Values)
                 for (int a = 0; a < list.Count; a++)
                     for (int b = a + 1; b < list.Count; b++)
-                        if (!links[list[a]].Contains(list[b])) { links[list[a]].Add(list[b]); links[list[b]].Add(list[a]); }
+                        if (faces[list[a]] == faces[list[b]] && !links[list[a]].Contains(list[b])) { links[list[a]].Add(list[b]); links[list[b]].Add(list[a]); }
             foreach (var l in links) l.Sort();
 
             // Components in order of their lowest province id (front is sorted, so the first unvisited)
@@ -813,6 +822,38 @@ namespace Hoi4.Units
                 result.Add(ordered);
             }
             return result;
+        }
+
+        /// <summary>The country's land next to the given provinces, split into connected pieces (id per province,
+        /// in the order the provinces list them; sizes filled per id).</summary>
+        Dictionary<ushort, int> EnemyPieces(IEnumerable<ushort> along, ushort country, List<int> sizes)
+        {
+            var piece = new Dictionary<ushort, int>();
+            foreach (ushort p in along)
+                foreach (ushort q in Neighbours(p))
+                {
+                    if (Ctrl(q) != country || piece.ContainsKey(q)) continue;
+                    int id = sizes.Count;
+                    var queue = new List<ushort> { q };
+                    piece[q] = id;
+                    for (int k = 0; k < queue.Count; k++)
+                        foreach (ushort r in Neighbours(queue[k]))
+                            if (Ctrl(r) == country && !piece.ContainsKey(r)) { piece[r] = id; queue.Add(r); }
+                    sizes.Add(queue.Count);
+                }
+            return piece;
+        }
+
+        /// <summary>The enemy piece a front province belongs with: the smallest it borders (ties: lower id), -1 none.</summary>
+        int PieceFaced(ushort province, Dictionary<ushort, int> piece, List<int> sizes)
+        {
+            int best = -1;
+            foreach (ushort q in Neighbours(province))
+            {
+                if (!piece.TryGetValue(q, out int id)) continue;
+                if (best < 0 || sizes[id] < sizes[best] || (sizes[id] == sizes[best] && id < best)) best = id;
+            }
+            return best;
         }
 
         /// <summary>Breadth-first from start over the links: fills dist (hops) and returns the members reached.</summary>
@@ -883,7 +924,40 @@ namespace Hoi4.Units
         {
             if (!ready) { plan.Arcs = new List<BorderArc>(); plan.Chains = new List<List<Vector3>>(); return; }
             plan.Arcs = BorderWith(plan.Owner, plan.Country, new HashSet<ushort>());
-            plan.Chains = plan.Arcs.Count > 0 ? BuildChains(plan.Arcs, plan.Country) : new List<List<Vector3>>();
+            plan.Chains = new List<List<Vector3>>();
+            plan.ChainFront.Clear();
+            // Each front is drawn from its own arcs (the own-side province decides), so a pocket that touches the
+            // main line at a corner stays a line of its own, with its own label and look, like HOI4
+            // A corner province belongs to one front (the pocket's) but its arc towards the other enemy piece is
+            // drawn with the front that faces that piece
+            var sizes = new List<int>();
+            var piece = EnemyPieces(plan.FrontProvinces ?? new List<ushort>(), plan.Country, sizes);
+            var frontPiece = new int[plan.Fronts?.Count ?? 0];
+            for (int f = 0; f < frontPiece.Length; f++)
+                frontPiece[f] = plan.Fronts[f].Count > 0 ? PieceFaced(plan.Fronts[f][0], piece, sizes) : -1;
+            var byFront = new SortedDictionary<int, List<BorderArc>>();
+            foreach (var arc in plan.Arcs)
+            {
+                bool aOwn = Hoi4Occupation.ControllerOf(gameState, arc.ProvinceA) == plan.Owner;
+                ushort own = aOwn ? arc.ProvinceA : arc.ProvinceB, enemy = aOwn ? arc.ProvinceB : arc.ProvinceA;
+                int f = plan.FrontIndex.TryGetValue(own, out int fi) ? fi : -1; // -1: impassable, not part of a front
+                if (f >= 0 && piece.TryGetValue(enemy, out int ep) && frontPiece[f] != ep)
+                {
+                    // the front facing that piece next to this enemy province (lowest province id first)
+                    int g = -1;
+                    foreach (ushort n in Neighbours(enemy))
+                        if (plan.FrontIndex.TryGetValue(n, out int fn) && frontPiece[fn] == ep) { g = fn; break; }
+                    if (g >= 0) f = g;
+                }
+                if (!byFront.TryGetValue(f, out var list)) byFront[f] = list = new List<BorderArc>();
+                list.Add(arc);
+            }
+            foreach (var kv in byFront)
+                foreach (var chain in BuildChains(kv.Value, plan.Country))
+                {
+                    plan.Chains.Add(chain);
+                    plan.ChainFront.Add(kv.Key);
+                }
             ComputeLabelAnchor(plan);
         }
 
@@ -1471,46 +1545,22 @@ namespace Hoi4.Units
 
         /// <summary>
         /// One label per front, like HOI4 (an encircled pocket is its own front with its own count): each drawn
-        /// stretch of line belongs to the front whose provinces lie nearest its points (a vote over the points),
-        /// and a front's label sits halfway along its longest stretch. A front without a drawn stretch gets none.
+        /// stretch belongs to the front it was traced for (ChainFront, TraceLine), and a front's label sits
+        /// halfway along its longest stretch.
         /// </summary>
         void ComputeLabelAnchor(Hoi4BattlePlan plan)
         {
             plan.Labels.Clear();
-            plan.ChainFront.Clear();
             var counters = Hoi4UnitCounters.Instance;
-            if (counters == null || plan.Chains == null || plan.Fronts == null || plan.Fronts.Count == 0) return;
-            if (plan.Chains.Count == 0) return;
-            var centres = new List<(Vector2 p, int front)>();
-            for (int f = 0; f < plan.Fronts.Count; f++)
-                foreach (ushort prov in plan.Fronts[f])
-                    if (counters.TryGetProvincePoint(prov, out var w)) centres.Add((new Vector2(w.x, w.z), f));
-            if (centres.Count == 0) return;
-            // (ChainFront stays empty when nothing could be matched: every stretch is then drawn as held)
-
+            if (counters == null || plan.Chains == null) return;
             var longest = new SortedDictionary<int, (List<Vector3> pts, float len)>();
-            var votes = new int[plan.Fronts.Count];
-            foreach (var pts in plan.Chains)
+            for (int c = 0; c < plan.Chains.Count && c < plan.ChainFront.Count; c++)
             {
-                if (pts.Count < 2) { plan.ChainFront.Add(-1); continue; }
-                Array.Clear(votes, 0, votes.Length);
+                var pts = plan.Chains[c];
+                int front = plan.ChainFront[c];
+                if (front < 0 || pts.Count < 2) continue;
                 float len = 0f;
-                for (int i = 0; i < pts.Count; i++)
-                {
-                    if (i > 0) len += Vector3.Distance(pts[i - 1], pts[i]);
-                    var q = new Vector2(pts[i].x, pts[i].z);
-                    int nearest = 0;
-                    float bestD = float.MaxValue;
-                    foreach (var c in centres)
-                    {
-                        float d = (c.p - q).sqrMagnitude;
-                        if (d < bestD) { bestD = d; nearest = c.front; }
-                    }
-                    votes[nearest]++;
-                }
-                int front = 0;
-                for (int f = 1; f < votes.Length; f++) if (votes[f] > votes[front]) front = f;
-                plan.ChainFront.Add(front);
+                for (int i = 1; i < pts.Count; i++) len += Vector3.Distance(pts[i - 1], pts[i]);
                 if (!longest.TryGetValue(front, out var was) || len > was.len) longest[front] = (pts, len);
             }
 
