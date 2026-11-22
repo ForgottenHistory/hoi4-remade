@@ -43,6 +43,7 @@ namespace Hoi4.UI
             ("province", "Province Buildings"), ("facility", "Experimental Facilities"),
         };
         const int SectionHeader = 52, ButtonRow = 44, ButtonsPerRow = 4;
+        const string ProvinceBorderClass = "province"; // Hoi4BorderClassifier: same owner, same state
 
         public static Hoi4ConstructionPanel Instance { get; private set; }
         public static bool IsOpen => Instance != null && Instance.open;
@@ -67,6 +68,7 @@ namespace Hoi4.UI
         readonly Dictionary<int, Vector3> boxWorld = new Dictionary<int, Vector3>();
         int boxUsers = int.MinValue;
         string placing;
+        int hoverState; // the state under the cursor while placing (its outline glows)
         bool open, structureDirty = true;
         float nextRefresh;
         ushort shownCountry;
@@ -210,6 +212,11 @@ namespace Hoi4.UI
             selected = selected == button ? null : button;
             selected?.AddToClassList("selected");
             placing = selected?.userData as string;
+            global::Map.Rendering.Labels.MapRegionLabels.Shown = placing != null; // state names while placing
+            // HOI4 drops the borders between provinces of a state while placing a state-wide building
+            string section = placing != null ? Hoi4StateData.Def(placing)?.Section : null;
+            global::Map.Rendering.Border.BorderClassStyles.SetHidden(ProvinceBorderClass, section == "state" || section == "shared");
+            hoverState = 0;
             if (placing == null) { Hoi4ConstructionMap.Hide(); ClearBoxes(); }
             nextRefresh = 0f; // repaint the map for the new building now
         }
@@ -280,6 +287,8 @@ namespace Hoi4.UI
         {
             if (selected != null) Select(selected);
             Hoi4ConstructionMap.Hide();
+            global::Map.Rendering.Labels.MapRegionLabels.Shown = false;
+            global::Map.Rendering.Border.BorderClassStyles.SetHidden(ProvinceBorderClass, false);
             ClearBoxes();
             // show the counters again, unless a peace conference (which hides them too) closed the screen
             if (open && Hoi4.Units.Hoi4UnitCounters.Instance != null && Hoi4.War.Hoi4War.Instance?.Conference == null)
@@ -485,6 +494,21 @@ namespace Hoi4.UI
             }
         }
 
+        /// <summary>The state under the cursor (none over the screen's own UI); true when it changed.</summary>
+        bool UpdateHover()
+        {
+            int state = 0;
+            var cam = Camera.main;
+            if (cam != null && selector != null && !global::Map.CameraControllers.BaseCameraController.ScrollCaptured)
+            {
+                ushort p = selector.GetProvinceAtScreenPosition(Input.mousePosition, cam);
+                if (p != 0 && !Hoi4Regions.IsWater(p)) state = Mathf.Max(0, Hoi4Regions.State(p));
+            }
+            if (state == hoverState) return false;
+            hoverState = state;
+            return true;
+        }
+
         void LateUpdate()
         {
             if (boxes.Count == 0 || boxLayer?.panel == null) return;
@@ -528,12 +552,13 @@ namespace Hoi4.UI
             }
             if (structureDirty) Rebuild(construction);
             Animate(construction);
+            if (placing != null && UpdateHover()) Hoi4ConstructionMap.Show(gameState, shownCountry, placing, hoverState);
             if (Time.unscaledTime < nextRefresh) return;
             nextRefresh = Time.unscaledTime + RefreshSeconds;
             Refresh(construction);
             if (placing != null)
             {
-                Hoi4ConstructionMap.Show(gameState, shownCountry, placing);
+                Hoi4ConstructionMap.Show(gameState, shownCountry, placing, hoverState);
                 UpdateBoxes(construction);
             }
         }

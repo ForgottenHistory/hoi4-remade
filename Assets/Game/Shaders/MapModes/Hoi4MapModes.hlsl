@@ -165,10 +165,12 @@ float Hoi4CountryRim(float2 uv)
 
 // Construction placing (Hoi4ConstructionMap): province-indexed RGBA, r = fill (0.5 green: the state has room for the
 // building, 1 blue: full; the building's own orders not counted), g = bands (0.5 yellow: an order for the building,
-// room left; 1 blue: the order fills the state). Broad '/' bands at 40 degrees, 7.4 map px apart.
+// room left; 1 blue: the order fills the state), b = the state under the cursor (a soft green glow along its
+// outline, coasts included). Broad '/' bands at 40 degrees, 7.4 map px apart.
 // Prototype: Tools/prototypes/construction/construction_map.py
 TEXTURE2D(_Hoi4ConstructionTex);
 float _Hoi4ConstructionActive;
+float _Hoi4ConstructionHover; // 1 while a state is hovered (skips the 6x6 glow window otherwise)
 
 float4 RenderMapMode(int mapMode, uint provinceID, float2 uv, float3 positionWS)
 {
@@ -256,6 +258,31 @@ float3 Hoi4PlanOverlay(float3 rgb, ArchonMapContext ctx)
     return lerp(rgb, tint, k) + hot * 0.05;
 }
 
+// The hovered state's (b channel) share of a 6x6 map pixel window around uv, tent-weighted like the country
+// colour blend (Hoi4CountryColor) but wider: a smooth field that goes from 1 inside to 0 outside over ~4 map px,
+// following the outline in curves instead of map pixel steps
+float Hoi4HoverShare(float2 uv, uint w, uint h)
+{
+    float2 q = float2(uv.x, 1.0 - uv.y) * float2(w, h) - 0.5;   // pixel-centre coordinates
+    int2 i0 = (int2)floor(q);
+    int2 maxI = int2(w - 1, h - 1);
+    float share = 0.0, total = 0.0;
+    [unroll] for (int oy = -2; oy <= 3; oy++)
+    {
+        [unroll] for (int ox = -2; ox <= 3; ox++)
+        {
+            int2 pixel = i0 + int2(ox, oy);
+            float2 tent = saturate(1.0 - abs((float2)pixel - q) / 2.6);
+            float weight = tent.x * tent.y;
+            int2 cp = clamp(pixel, int2(0, 0), maxI);
+            uint id = DecodeProvinceID(LOAD_TEXTURE2D(_ProvinceIDTexture, cp).rg);
+            share += weight * (LOAD_TEXTURE2D(_Hoi4ConstructionTex, int2(id % 256u, id / 256u)).b > 0.5 ? 1.0 : 0.0);
+            total += weight;
+        }
+    }
+    return share / max(total, 1e-4);
+}
+
 float3 Hoi4ConstructionOverlay(float3 rgb, ArchonMapContext ctx)
 {
     if (_Hoi4ConstructionActive < 0.5 || ctx.provinceID == 0u) return rgb;
@@ -279,7 +306,15 @@ float3 Hoi4ConstructionOverlay(float3 rgb, ArchonMapContext ctx)
         blueBand += c.g >= 0.75 ? 1.0 : 0.0;
     }
     green /= 13.0; blue /= 13.0; yellowBand /= 13.0; blueBand /= 13.0;
-    if (green + blue < 0.01) return rgb;
+
+    // hovered state: a glowing line along its outline (where its smooth share is about half), brightest on the
+    // line, fading out to both sides, pulsing slowly
+    float hover = _Hoi4ConstructionHover > 0.5 ? Hoi4HoverShare(ctx.uv, w, h) : 0.0;
+    float d = (hover - 0.5) / 0.24;
+    float glow = exp(-d * d) * (hover > 0.001 && hover < 0.999 ? 1.0 : 0.0);
+    glow *= 0.75 + 0.25 * sin(_Time.y * 3.5);
+    const float3 glowColour = float3(0.45, 1.0, 0.62);
+    if (green + blue < 0.01) return lerp(rgb, glowColour, glow) + glowColour * glow * 0.25;
 
     rgb = lerp(rgb, float3(0.30, 0.85, 0.25), green * 0.55);
     rgb = lerp(rgb, float3(0.20, 0.35, 1.00), blue * 0.60);
@@ -293,7 +328,7 @@ float3 Hoi4ConstructionOverlay(float3 rgb, ArchonMapContext ctx)
         float3 colour = (yellowBand * float3(1.0, 0.9, 0.1) + blueBand * float3(0.2, 0.35, 1.0)) / bands;
         rgb = lerp(rgb, colour, core * band * 0.9);
     }
-    return rgb;
+    return lerp(rgb, glowColour, glow) + glowColour * glow * 0.25;
 }
 
 // Peace conference (Hoi4PeaceConferencePanel): province-indexed RGBA, rgb = band colour (green on the table,

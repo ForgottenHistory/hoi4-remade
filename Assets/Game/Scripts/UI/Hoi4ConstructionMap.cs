@@ -18,6 +18,7 @@ namespace Hoi4.UI
         const int TexWidth = 256; // province id -> (id % 256, id / 256), like the other province-indexed overlays
         static readonly int TexId = Shader.PropertyToID("_Hoi4ConstructionTex");
         static readonly int ActiveId = Shader.PropertyToID("_Hoi4ConstructionActive");
+        static readonly int HoverId = Shader.PropertyToID("_Hoi4ConstructionHover");
         const byte Half = 128, Full = 255;
 
         static Texture2D tex;
@@ -30,10 +31,11 @@ namespace Hoi4.UI
             tex = null; pixels = null; shown = false;
             // shader globals outlive play mode in the editor: a session stopped while placing would start on terrain only
             Shader.SetGlobalFloat(ActiveId, 0f);
+            Shader.SetGlobalFloat(HoverId, 0f);
         }
 
-        /// <summary>Paint the player's states for the building and show the overlay.</summary>
-        public static void Show(GameState gameState, ushort country, string building)
+        /// <summary>Paint the player's states for the building and show the overlay; hoverState (0 none) glows.</summary>
+        public static void Show(GameState gameState, ushort country, string building, int hoverState = 0)
         {
             var construction = Hoi4Construction.Instance;
             if (construction == null || building == null) { Hide(); return; }
@@ -46,6 +48,9 @@ namespace Hoi4.UI
                 pixels = new Color32[TexWidth * TexWidth];
             }
             System.Array.Clear(pixels, 0, pixels.Length);
+            if (hoverState > 0)
+                foreach (ushort p in Hoi4Regions.ProvincesOf(hoverState))
+                    if (p < pixels.Length && !Hoi4Regions.IsWater(p)) pixels[p] = new Color32(0, 0, Full, 255);
             foreach (var kv in Hoi4Buildings.Users(gameState))
             {
                 if (kv.Value != country) continue;
@@ -55,13 +60,14 @@ namespace Hoi4.UI
                 int room = construction.Room(state, building);
                 byte fill = room + queued > 0 ? Half : Full;                       // green: room without this building's orders
                 byte bands = queued == 0 ? (byte)0 : room > 0 ? Half : Full;      // yellow: room left after them
-                var c = new Color32(fill, bands, 0, 255);
+                var c = new Color32(fill, bands, state == hoverState ? Full : (byte)0, 255);
                 foreach (ushort p in Hoi4Regions.ProvincesOf(state))
                     if (p < pixels.Length) pixels[p] = c;
             }
             tex.SetPixelData(pixels, 0);
             tex.Apply(false);
             Shader.SetGlobalTexture(TexId, tex);
+            Shader.SetGlobalFloat(HoverId, hoverState > 0 ? 1f : 0f);
             if (!shown)
             {
                 Shader.SetGlobalFloat(ActiveId, 1f);
@@ -73,6 +79,7 @@ namespace Hoi4.UI
         {
             if (!shown) return;
             Shader.SetGlobalFloat(ActiveId, 0f);
+            Shader.SetGlobalFloat(HoverId, 0f);
             shown = false;
         }
     }

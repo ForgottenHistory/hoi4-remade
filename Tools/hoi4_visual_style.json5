@@ -97,6 +97,21 @@
     fade: [1.5, 2.5],
   },
 
+  // State names (Archon region labels, Hoi4StateLabelSource): shown while the construction screen places a
+  // building, fading in at the zoom where unit counters appear (counters: 3..5 screen px per map px).
+  regionLabels: {
+    font: "gfx/fonts/Oswald.ttf",
+    color: [0.93, 0.93, 0.93, 0.95],
+    shadowColor: [0.03, 0.03, 0.07, 0.85],
+    shadowOffset: [0.04, 0.05],
+    shadowSoftness: 0.6,
+    minScreenHeight: 14,
+    maxScale: 1.5,
+    fade: [3, 5],
+    fadeIn: true,
+    maxHeight: 24,
+  },
+
   // Haze and drifting clouds (Archon MapAtmosphereRenderer). Zoom ranges are [full at or below,
   // gone at or above] in screen px per map px (small = zoomed out); distances in map px.
   atmosphere: {
