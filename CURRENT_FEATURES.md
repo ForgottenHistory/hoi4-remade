@@ -1,6 +1,6 @@
 # HOI4 Remade - Current Features
 
-**Last Updated:** 2026-11-21
+**Last Updated:** 2026-11-22
 
 ---
 
@@ -8,11 +8,13 @@
 
 **Map:** Clausewitz-style terrain, water, coasts, smooth mesh borders in HOI4 classes, rivers, country labels, haze, clouds, day/night with city lights, political / terrain / diplomatic map modes
 
-**Units:** 1936 armies, on-map counters with action icons and battle bubbles, click and box selection, HOI4 movement rules, hourly movement, province-to-province combat with terrain, rivers and entrenchment, retreat and overrun, occupation, manpower pools, equipment stockpiles with the 1936 production lines, reinforcement
+**Units:** 1936 armies, on-map counters with action icons and battle bubbles, click and box selection, HOI4 movement rules, hourly movement, province-to-province combat with terrain, rivers and entrenchment, retreat and overrun, occupation, manpower pools, equipment stockpiles, reinforcement
 
 **Armies and battle plans:** Armies with bottom-of-screen cards, front lines that divisions fill and hold, offensive plans (drag over targets) that advance as a broad front when executed, planning bonus
 
-**AI:** Enemy war AI with odds-based attacks off its own front lines
+**Production:** Military factories from owned states, production lines in priority order with per-factory efficiency growth, commands for adding, sizing, reordering and deleting lines, AI that puts free factories to work (no production screen yet)
+
+**AI:** Enemy war AI with odds-based attacks off its own front lines; production AI
 
 **Simulation:** Every decision is a command, one fixed-order hourly tick, fixed-point maths and adjacency-based fronts (deterministic, lockstep-ready), session recordings for debugging
 
@@ -22,7 +24,7 @@
 
 **War and peace:** War participation, surrender progress from victory points, capitulation, a basic peace conference (take states)
 
-**Not Implemented:** production control (only the 1936 lines run), research, politics, supply, generals, air and naval, factions, conditional surrender, saving/loading of HOI4-specific state, multiplayer in practice
+**Not Implemented:** production screen (the commands exist, the UI doesn't yet), strategic resources and trade, research, politics, supply, generals, air and naval, factions, conditional surrender, saving/loading of HOI4-specific state, multiplayer in practice
 
 The goal is to stress-test Archon-Engine, not to ship a game. Big visual wins are preferred over exact HOI4 fidelity.
 
@@ -69,12 +71,27 @@ The goal is to stress-test Archon-Engine, not to ship a game. Big visual wins ar
 - **Entrenchment** - A division standing still out of battle digs in 1 level a day, up to 5; each level gives a defender +2% attack and defence; lost on moving or attacking. Shown in the division panel
 - **Manpower** - Each country's pool is the engine's `ResourceSystem` resource `manpower` (saved with the game): recruitable manpower (core population + 2% of non-core, times the mobilisation law) minus the men in its divisions, growing 1.5% of recruitable a year
 - **Equipment** - Divisions track equipment per archetype (infantry, support, artillery, trucks, light tanks): what their sub-units `need` and what they have, starting at `start_equipment_factor`. A sub-unit is as strong as its scarcest equipment; strength is capped by equipment and by men. Battle losses take the men and 70% of the equipment (`EQUIPMENT_COMBAT_LOSS_FACTOR`)
-- **Stockpiles and production** - One engine `ResourceSystem` resource per archetype per country, starting at the history's `add_equipment_to_stockpile` (nearly empty, as in real HOI4). Each country runs its 1936 production lines from its OOB (`add_equipment_production`): factories x 4.5 x efficiency / build cost a day, efficiency fixed. Weekly notes per country (made, delivered, stock)
+- **Stockpiles** - One engine `ResourceSystem` resource per archetype per country, starting at the history's `add_equipment_to_stockpile` (nearly empty, as in real HOI4). Production adds to them, reinforcement takes from them. Weekly notes per country (made, delivered, stock)
 - **Reinforcement** - Daily, every division short of equipment gets up to 10% of its need per archetype from the stockpile, and every division short of men up to 10% of its manpower from the pool; then strength rises to what equipment and men allow. Countries and divisions in id order. Readiness checks (AI, offensives) measure against that full strength
 - **Combat factors** - Planning, terrain and river (attackers) and entrenchment (defenders) multiply per division, like HOI4; the AI's odds use the same factors
 - **Retreat and overrun** - Broken defenders march to a friendly neighbouring province (a day); a retreater that arrives where an enemy stands is destroyed. Broken attackers drop their order
 - **Occupation** - Entering a province held by an enemy flips its controller (not owner); occupied land is drawn in the occupier's colour, lakes follow the land around them, allies liberate land for its owner
 - **Hover blocking** - No province hover or click through counters or panels
+
+---
+
+## Production
+
+`Assets/Game/Scripts/Production/` (wiki "Production", `NDefines.NProduction`):
+
+- **Military factories** - A state's `arms_factory` buildings count for its owner (the country owning most of its provinces) while the owner controls more than half of them; recounted when ownership or control changes, so conquest and peace deals move factories. Day one matches real HOI4 (Germany 28)
+- **Production lines** - Per country, in priority order, starting from the 1936 lines in the OOB. Each day the lines take factories top-down (requested, at most 150 per line) until the country's factories run out; a lost factory comes off the bottom and loses its efficiency, an added one starts at 10%
+- **Output** - 4.5 IC per active factory x its efficiency a day; whole units come out when the line's progress reaches the equipment's `build_cost_ic`, the rest carries over, and go into the stockpile
+- **Efficiency** - Per factory slot, growing by 0.001 x cap² / current a day up to the 50% cap (about 500 days from nothing)
+- **Buildable equipment** - Per country and archetype, the newest equipment its 1936 technologies unlock (a tank design needs its chassis technology), written by the converter; a 1936 line's equipment always counts
+- **Commands** - Add a line (bottom of the queue), set its factories, move it in the queue, delete it, all through `TryExecuteCommand`
+- **Production AI** - Weekly, each country but the player's on its own weekday: free factories go one at a time to the archetype with the most need per factory already making it (what its divisions lack beyond the stockpile, plus a 10% reserve of their total use); never takes factories off a line. Host only, through the same commands
+- **Recording** - Weekly `production` notes (factories, free, each line's factories, efficiency, IC), `ai_assign` notes, a Production section in `report.py`, `production` and `ai_production` columns in `perf.tsv`
 
 ---
 
@@ -120,8 +137,9 @@ The goal is to stress-test Archon-Engine, not to ship a game. Big visual wins ar
 - **Commands** - Every player or AI decision (move, halt, leave plan, create army, add to army, place / delete battle plan, place offensive, execute plan, borrow for attack) goes through `gameState.TryExecuteCommand`: validated, logged, replayable, network-ready
 - **Fixed-order tick** - `Hoi4Simulation` runs combat, then battle plans, then AI break-offs every hour, and plan checks plus new AI attacks every day
 - **Determinism** - `FixedPoint64` maths, loops in id order, adjacency-based fronts, AI decides on the host only (Archon lockstep model)
-- **Session recordings** - Every editor play session is recorded to `Recordings/<stamp>_<TAG>/` (newest 12 kept): divisions, plans, plan fronts, battles, control changes, commands, decision notes, log. Read with `Tools/recorder/report.py`, `unit.py` and the engine's `rows.py`
-- **Scene guard** - Game registrations only run in HOI4 scenes (`Hoi4Scenes.Active`), so the engine's StarterKit scene stays clean
+- **Session recordings** - Every editor play session is recorded to `Recordings/<stamp>_<TAG>/` (newest 12 kept): divisions, plans, plan fronts, battles, control changes, commands, decision notes, log, and `perf.tsv` (milliseconds per simulation system per game day, frame times, wars, divisions). Read with `Tools/recorder/report.py`, `unit.py`, `battles.py` and the engine's `rows.py`. Menu **HOI4 > Record Sessions** turns recording off (remembered per machine), for clean profiling: it costs about 15 ms per game day in a large war
+- **Performance for large wars** - Built on the AI war stress test: one shared controller / owner snapshot per change of control (not one read per system per hour), flat state and region lookups, target-first AI attacks with a path-search budget, cheaper movement rules and counters. Each simulation step has a Unity profiler marker named like its `perf.tsv` column (`Hoi4.<step>`), visible in a normal capture
+- **Scene guard** - Game registrations only run in HOI4 scenes (`Hoi4Scenes.Active`), so the engine's StarterKit scene stays clean. The StarterKit demo systems (economy, buildings, AI, province history) are switched off in `Hoi4Test`
 
 ---
 
@@ -159,7 +177,13 @@ All panels follow one pattern: structure in `.uxml`, look in `*Style.uss` + `Hoi
 
 ## Prototypes
 
-Tricky map algorithms are prototyped in Python under `Tools/prototypes/<topic>/` and checked as preview PNGs before porting to C# or HLSL: borders, rivers, river crossings, labels, highlight outline, move arrows, counters, country fill, top bar, units, battle plans (front line, offensive arrow, drag).
+Tricky map algorithms are prototyped in Python under `Tools/prototypes/<topic>/` and checked as preview PNGs before porting to C# or HLSL: borders, rivers, river crossings, labels, highlight outline, move arrows, counters, country fill, top bar, units, battle plans (front line, offensive arrow, drag), peace conference (costs and score checked against a live HOI4 conference, map stripes).
+
+## Analysis and Reference Tools
+
+- **Build check** - `Tools/check_build.py` compiles the game layer (or one engine project) with `dotnet build`, without the editor
+- **Our numbers** - `Tools/manpower_pools.py` (starting manpower pools), `Tools/equipment_outlook.py` (equipment shortfall, stockpile and production per country)
+- **Real HOI4** - `Tools/reference/`: refill rates from real-game division snapshots, entrenchment from a plain-text save, wiki page text
 
 ---
 
@@ -168,7 +192,7 @@ Tricky map algorithms are prototyped in Python under `Tools/prototypes/<topic>/`
 - Combat ignores forts, generals, supply, night, stacking and per-unit terrain modifiers (only the terrain's base penalty applies); max entrenchment ignores the division's own entrenchment stat (engineers)
 - Offensives are broad-front only; no spearhead or encirclement logic
 - AI does not use offensives or armies, only odds-based border attacks
-- Production is fixed to the 1936 lines: no production screen, no new lines, no efficiency growth, no factory construction, no resources; country production modifiers ignored (real Germany makes about 20% more)
+- Production has no screen yet, no strategic resources or trade, no factory construction, no factory output modifiers (real Germany makes about 17% more per factory), no civilian factories; air and naval lines are not converted, so their factories end up free (the AI puts them on land equipment)
 - Equipment designs and variants are not modelled: an archetype is one kind of equipment, stats from the 1936 design
 - No recruiting new divisions; manpower only reinforces
 - Province selection does not persist after the state panel closes (HOI4 keeps it)

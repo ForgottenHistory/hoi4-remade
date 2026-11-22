@@ -899,8 +899,13 @@ def load_equipment_info(hoi4: Path):
                     cost = float(get(eq, "build_cost_ic"))
                 except (TypeError, ValueError):
                     cost = None
+                try:
+                    year = int(float(get(eq, "year", 0) or 0))
+                except (TypeError, ValueError):
+                    year = 0
                 entries[name] = {"archetype": name if get(eq, "is_archetype") == "yes" else get(eq, "archetype"),
-                                 "parent": get(eq, "parent"), "cost": cost}
+                                 "parent": get(eq, "parent"), "cost": cost, "year": year,
+                                 "buildable": get(eq, "is_buildable") != "no" and get(eq, "is_archetype") != "yes"}
 
     def cost_of(name, depth=0):
         e = entries.get(name)
@@ -915,7 +920,51 @@ def load_equipment_info(hoi4: Path):
                     return c
         return None
 
-    return {n: {"archetype": e["archetype"], "cost": cost_of(n)} for n, e in entries.items() if e["archetype"]}
+    return {n: {"archetype": e["archetype"], "cost": cost_of(n), "year": e["year"], "buildable": e["buildable"]}
+            for n, e in entries.items() if e["archetype"]}
+
+
+def load_tech_equipment(hoi4: Path):
+    """{technology: [equipment it enables]} from common/technologies (enable_equipments)."""
+    techs = {}
+    for f in sorted((hoi4 / "common" / "technologies").glob("*.txt")):
+        for key, _, block in parse_pdx(read_text(f)):
+            if key != "technologies" or not isinstance(block, list):
+                continue
+            for name, _, t in block:
+                if isinstance(t, list):
+                    en = get(t, "enable_equipments")
+                    if isinstance(en, list):
+                        techs[name] = values(en)
+    return techs
+
+
+def available_equipment(country_root, equipment, tech_equipment, land_archetypes):
+    """What a country can build at the start, per land archetype: the newest buildable equipment that its history's
+    set_technology unlocks, or that no technology unlocks (always available). {archetype: {"equipment", "cost"}}.
+    Tanks: a bare chassis is not buildable here (the 1936 lines build designs, which cost the modules too), and a
+    design (light_tank_equipment_N) needs the technology of its chassis (light_tank_chassis_N)."""
+    known = set()
+    for block in collect_blocks(country_root, "set_technology", []):
+        for k, _, v in block:
+            if isinstance(k, str) and str(v) != "0":
+                known.add(k)
+    locked = {e for es in tech_equipment.values() for e in es}
+    unlocked = {e for t in known for e in tech_equipment.get(t, [])}
+    best = {}
+    for name, info in sorted(equipment.items()):
+        arch = info["archetype"]
+        if arch not in land_archetypes or not info["buildable"] or not info["cost"]:
+            continue
+        if "chassis" in name or (name in locked and name not in unlocked):
+            continue
+        chassis = name.replace("_equipment_", "_chassis_")
+        if chassis != name and chassis in locked and chassis not in unlocked:
+            continue
+        rank = (info["year"], info["cost"])
+        if arch not in best or rank > best[arch][0]:
+            best[arch] = (rank, {"equipment": name, "cost": info["cost"]})
+    return {a: b for a, (_, b) in best.items()}
 
 
 def collect_blocks(items, key, out):
@@ -974,6 +1023,7 @@ def convert_oob(hoi4: Path, out: Path, existing_tags, ruling_party):
     names = load_division_name_groups(hoi4)
     subs = load_sub_units(hoi4)
     equipment = load_equipment_info(hoi4)
+    tech_equipment = load_tech_equipment(hoi4)
     land_archetypes = {a for s in subs.values() for a in s["need"]}
     countries = {}
     used_subs = set()
@@ -1032,7 +1082,11 @@ def convert_oob(hoi4: Path, out: Path, existing_tags, ruling_party):
                 main_types.add(t["main"])
         if divisions:
             lines_, stock = starting_equipment(hoi4, root, country_root, equipment, land_archetypes)
+            buildable = available_equipment(country_root, equipment, tech_equipment, land_archetypes)
+            for p in lines_:  # what a 1936 line builds is buildable, whatever the technology check says
+                buildable[p["archetype"]] = {"equipment": p["equipment"], "cost": p["cost"]}
             countries[tag] = {"ideology": ruling_party.get(tag) or "neutrality",
+                              "equipment": buildable,
                               "templates": {k: {kk: vv for kk, vv in v.items() if kk != "names_group"}
                                             for k, v in templates.items()},
                               "divisions": divisions, "production": lines_, "stockpile": stock}
@@ -1042,6 +1096,7 @@ def convert_oob(hoi4: Path, out: Path, existing_tags, ruling_party):
     for c in countries.values():
         c["production"] = [p for p in c["production"] if p["archetype"] in land_archetypes]
         c["stockpile"] = {a: n for a, n in c["stockpile"].items() if a in land_archetypes}
+        c["equipment"] = {a: e for a, e in sorted(c["equipment"].items()) if a in land_archetypes}
 
     def j(v):
         return json.dumps(v, ensure_ascii=False)
@@ -1068,6 +1123,8 @@ def convert_oob(hoi4: Path, out: Path, existing_tags, ruling_party):
             lines.append(f"        {j(p)},")
         lines.append("      ],")
         lines.append(f"      stockpile: {j(c['stockpile'])},")
+        # what it can build at the start: archetype -> newest unlocked equipment and its build cost
+        lines.append(f"      equipment: {j(c['equipment'])},")
         lines.append("    },")
     lines += ["  }", "}", ""]
     (out / "history" / "units").mkdir(parents=True, exist_ok=True)

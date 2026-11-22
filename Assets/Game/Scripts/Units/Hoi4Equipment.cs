@@ -12,16 +12,12 @@ using FP = Core.Data.FixedPoint64;
 namespace Hoi4.Units
 {
     /// <summary>
-    /// GAME: HOI4 equipment: stockpiles, the 1936 production lines, and equipment reinforcement.
+    /// GAME: HOI4 equipment stockpiles and equipment reinforcement (production is Hoi4.Production.Hoi4Production,
+    /// which adds what its lines make to these stockpiles first each day).
     /// - Stockpiles: one engine ResourceSystem resource per equipment archetype the divisions need (id
     ///   StockResourceBase + index into Hoi4Divisions.Archetypes), so they are saved with the game. They start at the
     ///   country history's add_equipment_to_stockpile, which is almost nothing (Germany has none: HOI4's stockpile is a
     ///   pass-through, production goes straight to the divisions).
-    /// - Production: each country runs its 1936 lines (add_equipment_production in its OOB: equipment, factories,
-    ///   efficiency), fixed, no production screen yet. Per day a line makes factories x FactoryOutput x efficiency /
-    ///   the equipment's build_cost_ic. FactoryOutput is HOI4's 4.5 per military factory; real Germany measured 5.3
-    ///   to 6.2 on its rifle, support and artillery lines (country modifiers we don't model; Tools/reference).
-    ///   Efficiency stays at its starting value, capped at HOI4's base 50% (its growth comes from research, not modelled).
     /// - Daily delivery: every division short of an archetype gets up to 10% of its need of it from the stockpile, in
     ///   id order, until the stockpile is empty. Hoi4Manpower then raises strength to what equipment and men allow.
     /// Countries, lines and divisions all go in id or file order: the same on every machine.
@@ -33,18 +29,12 @@ namespace Hoi4.Units
         /// <summary>Engine resource id of the first archetype's stockpile (manpower is 1).</summary>
         public const ushort StockResourceBase = 100;
 
-        public static readonly FP FactoryOutput = FP.FromFraction(9, 2);    // HOI4 military factory output a day
         static readonly FP DeliveryChunk = FP.FromFraction(1, 10);          // of a division's need, a day
-        // HOI4 BASE_FACTORY_MAX_EFFICIENCY_FACTOR: some histories start lines at 100, the game caps them (research raises the cap)
-        public static readonly FP MaxEfficiency = FP.Half;
         const int ReportEveryDays = 7;
 
         public static Hoi4Equipment Instance { get; private set; }
 
-        struct Line { public int Archetype; public FP PerDay; public string Equipment; public int Factories; }
-
         GameState gameState;
-        readonly SortedDictionary<ushort, List<Line>> lines = new SortedDictionary<ushort, List<Line>>();
         readonly List<ushort> countries = new List<ushort>(); // with a stockpile, in id order
         readonly Dictionary<ushort, FP[]> made = new Dictionary<ushort, FP[]>(), delivered = new Dictionary<ushort, FP[]>();
         int day;
@@ -94,13 +84,10 @@ namespace Hoi4.Units
         public FP Stock(ushort country, int archetype) =>
             IsReady ? gameState.Resources.GetResource(country, (ushort)(StockResourceBase + archetype)) : FP.Zero;
 
-        /// <summary>What the country's lines make of an archetype a day.</summary>
-        public FP PerDay(ushort country, int archetype)
+        /// <summary>Production adds what a line made today (for the weekly note).</summary>
+        public void CountMade(ushort country, int archetype, FP amount)
         {
-            FP sum = FP.Zero;
-            if (lines.TryGetValue(country, out var list))
-                foreach (var l in list) if (l.Archetype == archetype) sum += l.PerDay;
-            return sum;
+            if (made.TryGetValue(country, out var m) && archetype >= 0 && archetype < m.Length) m[archetype] += amount;
         }
 
         IEnumerator Start()
@@ -130,11 +117,10 @@ namespace Hoi4.Units
             var data = File.Exists(path) ? Json5Loader.LoadJson5File(path)["countries"] as JObject : null;
             if (data == null)
             {
-                ArchonLogger.LogWarning($"Hoi4Equipment: no {OobFile}; no production or stockpiles", "game_units");
+                ArchonLogger.LogWarning($"Hoi4Equipment: no {OobFile}; no stockpiles", "game_units");
                 yield break;
             }
 
-            int lineCount = 0;
             resources.BeginBatch();
             foreach (var p in data.Properties())
             {
@@ -147,29 +133,14 @@ namespace Hoi4.Units
                     foreach (var s in stock.Properties())
                         if (index.TryGetValue(s.Name, out int a))
                             resources.SetResource(country, (ushort)(StockResourceBase + a), Num(s.Value));
-                if (!(p.Value["production"] is JArray list)) continue;
-                var own = new List<Line>();
-                foreach (var l in list)
-                {
-                    if (!index.TryGetValue((string)l["archetype"] ?? "", out int a)) continue;
-                    FP cost = Num(l["cost"]);
-                    if (cost <= FP.Zero) continue;
-                    int factories = (int)l["factories"];
-                    own.Add(new Line
-                    {
-                        Archetype = a, Equipment = (string)l["equipment"], Factories = factories,
-                        PerDay = FP.FromInt(factories) * FactoryOutput * FP.Min(Num(l["efficiency"]), MaxEfficiency) / cost,
-                    });
-                }
-                if (own.Count > 0) { lines[country] = own; lineCount += own.Count; }
             }
             resources.EndBatch();
             countries.Sort();
             IsReady = true;
-            ArchonLogger.Log($"Hoi4Equipment: {archetypes.Length} archetypes, {lineCount} production lines in {lines.Count} countries", "game_units");
+            ArchonLogger.Log($"Hoi4Equipment: {archetypes.Length} archetypes, stockpiles for {countries.Count} countries", "game_units");
         }
 
-        /// <summary>Daily, from Hoi4Simulation before Hoi4Manpower: production into the stockpiles, then deliveries.</summary>
+        /// <summary>Daily, from Hoi4Simulation after Hoi4Production and before Hoi4Manpower: deliveries from the stockpiles.</summary>
         public void SimulateDay()
         {
             if (!IsReady || Hoi4Divisions.Instance == null) return;
@@ -183,12 +154,6 @@ namespace Hoi4.Units
             foreach (ushort country in countries)
             {
                 for (int a = 0; a < n; a++) stock[a] = resources.GetResource(country, (ushort)(StockResourceBase + a));
-                if (lines.TryGetValue(country, out var own))
-                    foreach (var l in own)
-                    {
-                        stock[l.Archetype] += l.PerDay;
-                        made[country][l.Archetype] += l.PerDay;
-                    }
                 if (byCountry.TryGetValue(country, out var list))
                     for (int a = 0; a < n; a++)
                         foreach (var d in list)

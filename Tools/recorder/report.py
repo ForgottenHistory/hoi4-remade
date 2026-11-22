@@ -326,6 +326,28 @@ def main():
                           f"{eq_made[c][x]:,}/{eq_given[c][x]:,}/{eq_stock.get(c, {}).get(x, 0):,}" for x in arch)
         print(f"{c:8} {cells}")
 
+    # --- production: weekly notes (Hoi4Production), "factories F free N | archetype active/requested eff% ic" ---
+    print("\n## Production (last week's factories and lines; AI assignments over the recording)")
+    prod_last, ai_assign = {}, Counter()
+    for r in notes:
+        if r["system"] != "production":
+            continue
+        if r["kind"] == "week":
+            prod_last[r["country"]] = (r["date"], r["text"])
+        elif r["kind"] == "ai_assign":
+            m_ = re.match(r"\+(\d+)", r["text"])
+            if m_:
+                ai_assign[r["country"]] += int(m_.group(1))
+    if not prod_last:
+        print("no production notes")
+    shown = [player] if player in prod_last else []
+    by_factories = Counter({c: int(re.match(r"factories (\d+)", t).group(1)) for c, (_, t) in prod_last.items()})
+    shown += [c for c, _ in by_factories.most_common(a.top) if c != player]
+    for c in shown[: a.top]:
+        d, t = prod_last[c]
+        extra = f"  (AI assigned +{ai_assign[c]})" if ai_assign[c] else ""
+        print(f"{c:8} {d}  {t.replace('_equipment', '').replace('_chassis', '')}{extra}")
+
     # --- war: capitulations and peace deals (Hoi4War / Hoi4PeaceConference) ---------------------------
     print("\n## War (AI declarations, capitulations, peace deals)")
     war_notes = [r for r in notes if r["system"] in ("war", "ai_war") and r["kind"] != "sent_home"]
