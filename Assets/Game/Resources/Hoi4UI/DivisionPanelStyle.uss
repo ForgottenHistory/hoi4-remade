@@ -45,7 +45,9 @@
 .dv-bar-fill { position: absolute; left: 0; bottom: 0; width: 6px; }
 .dv-bar-org .dv-bar-fill { background-color: rgb(115, 217, 77); }
 .dv-bar-str .dv-bar-fill { background-color: rgb(242, 153, 51); }
-.dv-bar-plan { left: 130px; }   /* unitview.gui bar_prepare (x=136, rotated), right of the experience level */
+.dv-bar-xp { left: 122px; }     /* unitview.gui xp_bar (x=128, rotated): experience towards the next level */
+.dv-bar-xp .dv-bar-fill { background-color: rgb(235, 217, 109); } /* unit_xp_bar.dds */
+.dv-bar-plan { left: 130px; }   /* unitview.gui bar_prepare (x=136, rotated), right of the experience bar */
 .dv-bar-plan .dv-bar-fill { background-color: rgb(81, 133, 156); }
 .dv-dig-in { --sprite: "gfx/interface/unitpanel/dig_in.png"; left: 143px; top: 4px; width: 22px; height: 26px; } /* unitlist_dig_in_icon */
 .dv-bar-dig-in { left: 170px; } /* dig_in_bonus (x=176, rotated): the same bar as planning */
@@ -56,7 +58,8 @@
 .dv-priority { left: 80px; top: -1px; width: 16px; height: 23px; display: none; }
 .dv-priority.reserve { --sprite: "gfx/interface/deployment/unit_priority_0.png"; display: flex; }
 .dv-priority.elite { --sprite: "gfx/interface/deployment/unit_priority_2.png"; display: flex; }
-.dv-level { --sprite: "gfx/interface/unitpanel/level_0.png"; left: 99px; top: 3px; width: 27px; height: 27px; }
+/* experience level, set per division (level_0 green .. level_4 veteran) */
+.dv-level { left: 97px; top: 3px; width: 27px; height: 27px; }
 .dv-name { left: 180px; top: 1px; width: 175px; height: 18px; text-overflow: ellipsis; } /* unit_name x=180, maxWidth 175 */
 .dv-status { left: 180px; top: 17px; width: 175px; height: 14px; font-size: 11px; color: rgb(199, 209, 184); text-overflow: ellipsis; }
 .dv-card-bg.dv-card-bg-off { --sprite: "gfx/interface/unitpanel/entry_bg_0.png"; }

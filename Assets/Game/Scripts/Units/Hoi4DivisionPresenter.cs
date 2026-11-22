@@ -90,7 +90,14 @@ namespace Hoi4.Units
             if (Hoi4UiAssets.Texture(iconPath) == null) iconPath = Dir + "icons/infantry.png";
             Hoi4Sprites.Apply(icon, iconPath);
             card.Add(icon);
-            card.Add(Hoi4Sprites.Make("dv-level"));
+            var level = Hoi4Sprites.Make("dv-level");
+            int lv = d != null ? d.Level : 0;
+            Hoi4Sprites.Apply(level, Dir + $"level_{lv}.png");
+            level.pickingMode = PickingMode.Position;
+            level.tooltip = d != null ? $"{Hoi4Division.LevelNames[lv]} ({Mathf.RoundToInt(d.Experience.ToFloat() * 100)}% experience)" : "";
+            card.Add(level);
+            // unitview.gui xp_bar: experience towards the next level (full at veteran)
+            card.Add(Bar("dv-bar-xp", d != null ? d.LevelProgress.ToFloat() : 0f));
             int priority = d != null && Hoi4Divisions.Instance != null ? Hoi4Divisions.Instance.TemplatePriority(d.Tag, d.Template) : Hoi4Divisions.Normal;
             var marker = Hoi4Sprites.Make("dv-priority", priority == Hoi4Divisions.Reserve ? "reserve" : priority == Hoi4Divisions.Elite ? "elite" : "normal");
             marker.pickingMode = PickingMode.Position;

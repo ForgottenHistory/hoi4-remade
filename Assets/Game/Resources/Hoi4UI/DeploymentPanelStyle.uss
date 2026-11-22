@@ -114,7 +114,8 @@
 /* GFX_deployment_entry_stalled_progressbar (yellow): the line can't train on (waiting for manpower, or its training has
    caught up with its equipment) */
 .dpl-eq-fill.stalled, .dpl-tr-fill.stalled, .dpo-eq-fill.stalled { --sprite: "gfx/interface/deployment/entry_bar_stalled.png"; }
-.dpl-level { --sprite: "gfx/interface/deployment/unit_level_0.png"; left: 306px; top: 6px; width: 27px; height: 27px; }
+/* army_training: the level the division would deploy with (green until fully trained, then trained) */
+.dpl-level { left: 306px; top: 6px; width: 27px; height: 27px; }
 .dpl-tr-area { position: absolute; left: 329px; top: 13px; width: 68px; height: 12px; }
 /* left-anchored, so "1/" sits in the same place whether the infinity icon or a number follows */
 .dpl-series { position: absolute; left: 395px; top: 0; width: 50px; height: 40px; padding-left: 18px; flex-direction: row; justify-content: flex-start; align-items: center; }

@@ -85,7 +85,36 @@ namespace Hoi4.Units
         public FP CombatWidth;         // sum over regiments
         public FP SpeedKmh;            // slowest sub-unit
         public int Manpower;
-        public FP Experience;
+        public FP Experience;          // 0..1; its level: Level
+        // HOI4 UNIT_EXP_LEVELS: experience needed for trained, regular, seasoned, veteran
+        static readonly FP[] LevelThresholds =
+            { FP.FromFraction(1, 10), FP.FromFraction(3, 10), FP.FromFraction(75, 100), FP.FromFraction(9, 10) };
+        public static readonly string[] LevelNames = { "Green", "Trained", "Regular", "Seasoned", "Veteran" };
+
+        /// <summary>The experience level (0 green, 1 trained, 2 regular, 3 seasoned, 4 veteran) of an experience.</summary>
+        public static int LevelOf(FP experience)
+        {
+            int level = 0;
+            while (level < LevelThresholds.Length && experience >= LevelThresholds[level]) level++;
+            return level;
+        }
+
+        /// <summary>Experience at the start of a level (Trained: 0.1).</summary>
+        public static FP LevelStart(int level) => level <= 0 ? FP.Zero : LevelThresholds[System.Math.Min(level, LevelThresholds.Length) - 1];
+
+        public int Level => LevelOf(Experience);
+
+        /// <summary>Progress from this level's start to the next level (HOI4's experience bar), 1 at veteran.</summary>
+        public FP LevelProgress
+        {
+            get
+            {
+                int level = Level;
+                if (level >= LevelThresholds.Length) return FP.One;
+                FP start = LevelStart(level), end = LevelThresholds[level];
+                return FP.Clamp((Experience - start) / (end - start), FP.Zero, FP.One);
+            }
+        }
         public FP Planning;            // planning bonus, 0..0.3 (Hoi4BattlePlans: builds on the front line with an offensive)
         public FP Entrenchment;        // dug in, 0..5 (Hoi4Combat: +1 a day standing still out of battle, lost on moving)
         public FP SoftAttack, HardAttack, Defense, Breakthrough; // sums over sub-units (1936 equipment)

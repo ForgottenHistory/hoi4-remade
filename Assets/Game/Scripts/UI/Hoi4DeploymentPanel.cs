@@ -143,6 +143,9 @@ namespace Hoi4.UI
 
             while (Hoi4Deployment.Instance == null) yield return null;
             Hoi4Deployment.Instance.Changed += c => { if (c == shownCountry) dirty = true; };
+            // selecting units closes the screen (the division panel takes the left side), as in HOI4
+            while (Hoi4UnitSelection.Instance == null) yield return null;
+            Hoi4UnitSelection.Instance.Changed += () => { if (open && Hoi4UnitSelection.Instance.Selected.Count > 0) Close(); };
         }
 
         static ushort Player
@@ -450,6 +453,14 @@ namespace Hoi4.UI
                     lv.Q(className: "dpl-tr-fill").EnableInClassList("stalled", stalled);
                     lv.Q("dpl-eq-icon").EnableInClassList("full", equipment >= 0.999f);
                     SetBar(lv.Q("dpl-tr"), training, EntryBarWidth);
+                    int level = Hoi4Division.LevelOf(Hoi4Deployment.DeployExperience(line.Training));
+                    var levelIcon = lv.Q("dpl-level");
+                    if (!(levelIcon.userData is int shownLevel) || shownLevel != level)
+                    {
+                        Hoi4Sprites.Apply(levelIcon, Gfx + $"unit_level_{level}.png");
+                        levelIcon.userData = level;
+                    }
+                    levelIcon.tooltip = $"Deploys {Hoi4Division.LevelNames[level]}" + (level == 0 ? " (Trained when fully trained)" : "");
                     lv.Q<Label>("dpl-number").text = infinite ? $"{line.Series}/" : $"{line.Series}/{order.Amount}";
                     lv.Q("dpl-infinity").style.display = infinite ? DisplayStyle.Flex : DisplayStyle.None;
                     lv.Q("dpl-eq-area").tooltip = !line.Started ? $"Waiting for manpower: {d.Manpower:N0} men"

@@ -25,7 +25,8 @@ namespace Hoi4.Deployment
     ///   training_time), never above the line's equipment level: in HOI4 a line's max_training follows its equipment
     ///   (105 of 910 rifles: at most 0.11 trained), so training waits for the factories.
     /// - Deploying: a fully trained line deploys on its own; the player may deploy one early from 20% training
-    ///   (MIN_DIVISION_DEPLOYMENT_TRAINING) with the equipment it has. It appears at the order's province, or the
+    ///   (MIN_DIVISION_DEPLOYMENT_TRAINING) with the equipment it has. Its experience is its training of the way to
+    ///   level 1 (DEPLOY_TRAINING_MAX_LEVEL): fully trained it is Trained, early it is Green. It appears at the order's province, or the
     ///   capital when the country no longer holds that province; with neither it waits.
     /// - A cancelled line or order: the men in training go back to the pool and their equipment to the stockpile.
     /// Orders are changed only through commands (Hoi4DeploymentCommands), so every client runs the same days.
@@ -269,6 +270,11 @@ namespace Hoi4.Deployment
             Changed?.Invoke(country);
         }
 
+        /// <summary>Experience a division deploys with: its training of the way to level 1, trained
+        /// (DEPLOY_TRAINING_MAX_LEVEL: training goes no higher), so fully trained it is Trained, deployed early Green.</summary>
+        public static FP DeployExperience(FP training) =>
+            Hoi4Division.LevelStart(1) * FP.Clamp(training, FP.Zero, FP.One);
+
         /// <summary>Whether a line may deploy now: started and at least 20% trained.</summary>
         public bool CanDeployEarly(ushort country, int orderId, int lineId)
         {
@@ -316,6 +322,7 @@ namespace Hoi4.Deployment
             var d = line.Division;
             d.Strength = d.FullStrength;
             d.Organisation = d.MaxOrganisation;
+            d.Experience = DeployExperience(line.Training);
             ushort unitId = Hoi4Divisions.Instance.Deploy(d, province, country);
             if (unitId == 0) return false;
             var next = order.Amount == 0 || line.Series < order.Amount ? Hoi4Divisions.Instance.NewDivision(Tag(country), order.Template) : null;

@@ -11,7 +11,7 @@
                 <ui:VisualElement name="dpl-eq-fill" class="spr dpl-eq-fill" picking-mode="Ignore" />
             </ui:VisualElement>
         </ui:VisualElement>
-        <ui:VisualElement class="spr dpl-level" picking-mode="Ignore" />
+        <ui:VisualElement name="dpl-level" class="spr dpl-level" picking-mode="Position" />
         <ui:VisualElement name="dpl-tr-area" class="dpl-tr-area" picking-mode="Position">
             <ui:VisualElement class="spr dpl-tr-bg" picking-mode="Ignore" />
             <ui:VisualElement name="dpl-tr" class="dpl-tr-clip" picking-mode="Ignore">
