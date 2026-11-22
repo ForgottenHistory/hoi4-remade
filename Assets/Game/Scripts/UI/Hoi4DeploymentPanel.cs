@@ -24,8 +24,9 @@ namespace Hoi4.UI
     /// - Orders (a series: each line trains the order's amount of divisions in turn, infinite by default):
     ///   template icon (with the template's reinforcement priority chevrons: reserve down, normal none, elite
     ///   up; the order's own priority is only its dots), name, -/+ the amount (infinite shows HOI4's infinity icon, - is off
-    ///   there; + from infinite sets 1, then counts up, Shift: 5; - from 1 goes back to infinite), low/normal/high priority, deploy location (click it, then a province the player holds; Escape or a
-    ///   right click cancels), Add Unit (one more line), deploy every division with 20% training,
+    ///   there; + from infinite sets 1, then counts up, Shift: 5; - from 1 goes back to infinite), low/normal/high priority, deploy location (red "No location set" until picked: click it, the states
+    ///   the player may deploy to, land-connected to the capital, show green bands on the map, the hovered one glows;
+    ///   click one to set it; Escape or a right click cancels), Add Unit (one more line), deploy every division with 20% training,
     ///   cancel. Summary row: move the order
     ///   up or down, mean equipment, how many divisions, collapse. One row per line: its division's name, equipment and training
     ///   (yellow while stalled), its place in the series (2/5, 3/infinite), deploy early (from 20%), cancel.
@@ -71,6 +72,8 @@ namespace Hoi4.UI
         readonly Dictionary<string, VisualElement> templateStrips = new Dictionary<string, VisualElement>();
         string shownStructure = "", shownTemplates;
         int pickingOrder; // the order whose location the next map click sets (0: none)
+        int hoverState;   // while picking: the state under the cursor
+        HashSet<int> deployableStates = new HashSet<int>();
         bool open, dirty = true;
         float nextRefresh;
         ushort shownCountry;
@@ -273,8 +276,38 @@ namespace Hoi4.UI
 
         void SetPicking(int orderId)
         {
+            bool was = pickingOrder != 0;
             pickingOrder = orderId;
             foreach (var kv in orderViews) kv.Value.Q("dpo-location").EnableInClassList("picking", kv.Key == orderId);
+            hoverState = 0;
+            if (orderId != 0)
+            {
+                deployableStates = Hoi4Deployment.Instance.DeployableStates(shownCountry);
+                global::Map.Rendering.Labels.MapRegionLabels.Shown = true; // state names, as when placing buildings
+                Hoi4ConstructionMap.ShowStates(deployableStates, 0);
+            }
+            else if (was)
+            {
+                global::Map.Rendering.Labels.MapRegionLabels.Shown = false;
+                Hoi4ConstructionMap.Hide();
+            }
+            nextRefresh = 0f;
+        }
+
+        /// <summary>While picking: the deployable state under the cursor (none over UI); true when it changed.</summary>
+        bool UpdateHover()
+        {
+            int state = 0;
+            var cam = Camera.main;
+            if (cam != null && selector != null && !global::Map.CameraControllers.BaseCameraController.ScrollCaptured)
+            {
+                ushort p = selector.GetProvinceAtScreenPosition(Input.mousePosition, cam);
+                if (p != 0 && !Hoi4Regions.IsWater(p)) state = Mathf.Max(0, Hoi4Regions.State(p));
+            }
+            if (!deployableStates.Contains(state)) state = 0;
+            if (state == hoverState) return false;
+            hoverState = state;
+            return true;
         }
 
         /// <summary>Click interceptor (Hoi4UnitSelection): while a location is being picked, a left click on a province
@@ -285,7 +318,7 @@ namespace Hoi4.UI
             if (button == 1) { SetPicking(0); return true; }
             var cam = Camera.main;
             ushort province = cam != null && selector != null ? selector.GetProvinceAtScreenPosition(screen, cam) : (ushort)0;
-            if (province != 0 && Hoi4Deployment.Instance.CanDeployTo(shownCountry, province))
+            if (province != 0 && deployableStates.Contains(Hoi4Regions.State(province)) && Hoi4Deployment.Instance.CanDeployTo(shownCountry, province))
             {
                 gameState.TryExecuteCommand(new SetDeploymentLocationCommand { CountryId = shownCountry, OrderId = pickingOrder, Province = province }, out _);
                 SetPicking(0);
@@ -429,9 +462,10 @@ namespace Hoi4.UI
                 for (int p = 0; p < 3; p++) view.Q($"dpo-prio-{p}").EnableInClassList("on", order.Priority == p);
 
                 var locText = view.Q<Label>("dpo-location-text");
-                bool hasLocation = order.Province != 0 && deployment.CanDeployTo(shownCountry, order.Province);
                 int state = order.Province != 0 ? Hoi4Regions.State(order.Province) : 0;
-                locText.text = pickingOrder == order.Id ? "Click a province" : hasLocation && state > 0 ? Hoi4StatePresenter.StateName(state) : "No location set";
+                bool hasLocation = state > 0 && deployableStates.Contains(state) && deployment.CanDeployTo(shownCountry, order.Province);
+                locText.text = pickingOrder == order.Id ? (hoverState > 0 ? Hoi4StatePresenter.StateName(hoverState) : "Select a state")
+                    : hasLocation ? Hoi4StatePresenter.StateName(state) : "No location set";
                 locText.EnableInClassList("none", !hasLocation && pickingOrder != order.Id);
 
                 float eqSum = 0f;
@@ -616,8 +650,15 @@ namespace Hoi4.UI
                 nextRefresh = 0f;
             }
             if (shownTemplates != deployment.Tag(shownCountry)) RebuildTemplates();
+            if (pickingOrder != 0 && UpdateHover())
+            {
+                Hoi4ConstructionMap.ShowStates(deployableStates, hoverState);
+                nextRefresh = 0f;
+            }
             if (Time.unscaledTime < nextRefresh) return;
             nextRefresh = Time.unscaledTime + RefreshSeconds;
+            deployableStates = deployment.DeployableStates(shownCountry); // control changes with the war
+            if (pickingOrder != 0) Hoi4ConstructionMap.ShowStates(deployableStates, hoverState);
             RefreshOrders(orders);
             RefreshTemplates();
         }

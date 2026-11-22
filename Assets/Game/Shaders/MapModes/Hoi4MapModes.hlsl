@@ -291,7 +291,7 @@ float3 Hoi4ConstructionOverlay(float3 rgb, ArchonMapContext ctx)
     float2 texel = 1.0 / float2(w, h);
 
     // coverage blurred over a disc (the id texture is pixelated): soft state edges
-    float green = 0.0, blue = 0.0, yellowBand = 0.0, blueBand = 0.0;
+    float green = 0.0, blue = 0.0, yellowBand = 0.0, blueBand = 0.0, greenBand = 0.0;
     const float radius = 1.4; // map px
     [unroll] for (int i = 0; i < 13; i++)
     {
@@ -304,8 +304,9 @@ float3 Hoi4ConstructionOverlay(float3 rgb, ArchonMapContext ctx)
         blue += c.r >= 0.75 ? 1.0 : 0.0;
         yellowBand += (c.g > 0.25 && c.g < 0.75) ? 1.0 : 0.0;
         blueBand += c.g >= 0.75 ? 1.0 : 0.0;
+        greenBand += (c.g > 0.1 && c.g <= 0.25) ? 1.0 : 0.0; // deploy locations (recruit screen)
     }
-    green /= 13.0; blue /= 13.0; yellowBand /= 13.0; blueBand /= 13.0;
+    green /= 13.0; blue /= 13.0; yellowBand /= 13.0; blueBand /= 13.0; greenBand /= 13.0;
 
     // hovered state: a glowing line along its outline (where its smooth share is about half), brightest on the
     // line, fading out to both sides, pulsing slowly
@@ -314,18 +315,18 @@ float3 Hoi4ConstructionOverlay(float3 rgb, ArchonMapContext ctx)
     float glow = exp(-d * d) * (hover > 0.001 && hover < 0.999 ? 1.0 : 0.0);
     glow *= 0.75 + 0.25 * sin(_Time.y * 3.5);
     const float3 glowColour = float3(0.45, 1.0, 0.62);
-    if (green + blue < 0.01) return lerp(rgb, glowColour, glow) + glowColour * glow * 0.25;
+    if (green + blue + yellowBand + blueBand + greenBand < 0.01) return lerp(rgb, glowColour, glow) + glowColour * glow * 0.25;
 
     rgb = lerp(rgb, float3(0.30, 0.85, 0.25), green * 0.55);
     rgb = lerp(rgb, float3(0.20, 0.35, 1.00), blue * 0.60);
-    float bands = yellowBand + blueBand;
+    float bands = yellowBand + blueBand + greenBand;
     if (bands > 0.01)
     {
         float2 mapPx = float2(ctx.uv.x * w, (1.0 - ctx.uv.y) * h);
         float across = -0.6428 * mapPx.x - 0.7660 * mapPx.y;   // 40 degrees, rising to the right ('/')
         float band = saturate((sin(across * 6.2832 / 7.4) + 0.05) / 0.35);
         float core = saturate((bands - 0.35) / 0.5);
-        float3 colour = (yellowBand * float3(1.0, 0.9, 0.1) + blueBand * float3(0.2, 0.35, 1.0)) / bands;
+        float3 colour = (yellowBand * float3(1.0, 0.9, 0.1) + blueBand * float3(0.2, 0.35, 1.0) + greenBand * float3(0.25, 1.0, 0.25)) / bands;
         rgb = lerp(rgb, colour, core * band * 0.9);
     }
     return lerp(rgb, glowColour, glow) + glowColour * glow * 0.25;

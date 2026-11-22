@@ -4,8 +4,8 @@ using Core.Commands;
 
 namespace Hoi4.Deployment
 {
-    /// <summary>A new deployment order: Lines training lines of the template, deploying to the province (0: the
-    /// capital), training without end until its amount is set.</summary>
+    /// <summary>A new deployment order: Lines training lines of the template, deploying to the province (0: no
+    /// location set, HOI4's default; they deploy at the capital), training without end until its amount is set.</summary>
     public sealed class CreateDeploymentOrderCommand : BaseCommand
     {
         public ushort CountryId;
@@ -13,20 +13,14 @@ namespace Hoi4.Deployment
         public int Lines = 1;
         public ushort Province;
 
-        ushort Target(Hoi4Deployment d) => Province != 0 ? Province : d.DefaultProvince(CountryId);
-
         public override bool Validate(GameState gameState)
         {
             var d = Hoi4Deployment.Instance;
             return d != null && Lines >= 1 && Lines <= Hoi4Deployment.MaxAmount && d.CanTrain(CountryId, Template)
-                   && d.CanDeployTo(CountryId, Target(d));
+                   && (Province == 0 || d.CanDeployTo(CountryId, Province));
         }
 
-        public override void Execute(GameState gameState)
-        {
-            var d = Hoi4Deployment.Instance;
-            d.Create(CountryId, Template, Lines, Target(d));
-        }
+        public override void Execute(GameState gameState) => Hoi4Deployment.Instance.Create(CountryId, Template, Lines, Province);
 
         public override void Undo(GameState gameState) { }
         public override void Serialize(BinaryWriter w) { w.Write(CountryId); w.Write(Template ?? ""); w.Write(Lines); w.Write(Province); }
@@ -99,7 +93,8 @@ namespace Hoi4.Deployment
         public override void Deserialize(BinaryReader r) { CountryId = r.ReadUInt16(); OrderId = r.ReadInt32(); Priority = r.ReadInt32(); }
     }
 
-    /// <summary>Where an order's divisions deploy: a land province the country owns and controls.</summary>
+    /// <summary>Where an order's divisions deploy: a province in a state the country holds, connected by its land to the
+    /// capital.</summary>
     public sealed class SetDeploymentLocationCommand : BaseCommand
     {
         public ushort CountryId;

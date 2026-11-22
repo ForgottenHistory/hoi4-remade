@@ -19,7 +19,7 @@ namespace Hoi4.UI
         static readonly int TexId = Shader.PropertyToID("_Hoi4ConstructionTex");
         static readonly int ActiveId = Shader.PropertyToID("_Hoi4ConstructionActive");
         static readonly int HoverId = Shader.PropertyToID("_Hoi4ConstructionHover");
-        const byte Half = 128, Full = 255;
+        const byte Half = 128, Full = 255, GreenBand = 48; // g: 48 green bands (deploy locations), 128 yellow, 255 blue
 
         static Texture2D tex;
         static Color32[] pixels;
@@ -39,14 +39,7 @@ namespace Hoi4.UI
         {
             var construction = Hoi4Construction.Instance;
             if (construction == null || building == null) { Hide(); return; }
-            if (tex == null)
-            {
-                tex = new Texture2D(TexWidth, TexWidth, TextureFormat.RGBA32, false, linear: true)
-                {
-                    filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp, name = "Hoi4ConstructionTex"
-                };
-                pixels = new Color32[TexWidth * TexWidth];
-            }
+            Ensure();
             System.Array.Clear(pixels, 0, pixels.Length);
             if (hoverState > 0)
                 foreach (ushort p in Hoi4Regions.ProvincesOf(hoverState))
@@ -64,6 +57,39 @@ namespace Hoi4.UI
                 foreach (ushort p in Hoi4Regions.ProvincesOf(state))
                     if (p < pixels.Length) pixels[p] = c;
             }
+            Upload(hoverState);
+        }
+
+        /// <summary>Picking a deploy location (recruit screen): plain terrain, green bands over the states the player may
+        /// deploy to (g = GreenBand), the hovered state glowing.</summary>
+        public static void ShowStates(System.Collections.Generic.ICollection<int> states, int hoverState)
+        {
+            Ensure();
+            System.Array.Clear(pixels, 0, pixels.Length);
+            if (hoverState > 0)
+                foreach (ushort p in Hoi4Regions.ProvincesOf(hoverState))
+                    if (p < pixels.Length && !Hoi4Regions.IsWater(p)) pixels[p] = new Color32(0, 0, Full, 255);
+            foreach (int state in states)
+            {
+                var c = new Color32(0, GreenBand, state == hoverState ? Full : (byte)0, 255);
+                foreach (ushort p in Hoi4Regions.ProvincesOf(state))
+                    if (p < pixels.Length && !Hoi4Regions.IsWater(p)) pixels[p] = c;
+            }
+            Upload(hoverState);
+        }
+
+        static void Ensure()
+        {
+            if (tex != null) return;
+            tex = new Texture2D(TexWidth, TexWidth, TextureFormat.RGBA32, false, linear: true)
+            {
+                filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp, name = "Hoi4ConstructionTex"
+            };
+            pixels = new Color32[TexWidth * TexWidth];
+        }
+
+        static void Upload(int hoverState)
+        {
             tex.SetPixelData(pixels, 0);
             tex.Apply(false);
             Shader.SetGlobalTexture(TexId, tex);

@@ -9,7 +9,8 @@ namespace Hoi4.Deployment
 {
     /// <summary>
     /// GAME: HOI4 training and deployment (recruit & deploy). Each country has deployment orders: a division template,
-    /// a province to deploy to (the capital by default), a priority (low, normal, high) and a series amount. An order
+    /// a province to deploy to (none at first: HOI4's red "No location set", they deploy at the capital then; the
+    /// player picks a state its land connects to the capital, never overseas), a priority (low, normal, high) and a series amount. An order
     /// holds training lines (Add Unit adds one), each training one division at a time: when it deploys the line starts
     /// the next, until it has made the order's amount of them (0 = infinite, HOI4's default: it keeps training; amount
     /// 1: the line goes after its first division). Daily, per country in id order, lines by priority (high first), then the order's place
@@ -25,9 +26,10 @@ namespace Hoi4.Deployment
     ///   training_time), never above the line's equipment level: in HOI4 a line's max_training follows its equipment
     ///   (105 of 910 rifles: at most 0.11 trained), so training waits for the factories.
     /// - Deploying: a fully trained line deploys on its own; the player may deploy one early from 20% training
-    ///   (MIN_DIVISION_DEPLOYMENT_TRAINING) with the equipment it has. Its experience is its training of the way to
+    ///   (MIN_DIVISION_DEPLOYMENT_TRAINING) with the equipment it has. It appears at the order's province while that
+    ///   is still a valid location, else at the capital; Its experience is its training of the way to
     ///   level 1 (DEPLOY_TRAINING_MAX_LEVEL): fully trained it is Trained, early it is Green. It appears at the order's province, or the
-    ///   capital when the country no longer holds that province; with neither it waits.
+    ///   with neither it waits.
     /// - A cancelled line or order: the men in training go back to the pool and their equipment to the stockpile.
     /// Orders are changed only through commands (Hoi4DeploymentCommands), so every client runs the same days.
     /// </summary>
@@ -143,10 +145,42 @@ namespace Hoi4.Deployment
             IsReady && country != 0 && Hoi4Divisions.Instance.HasTemplate(Tag(country), template)
             && Hoi4Divisions.Instance.TrainingDays(Tag(country), template) > 0;
 
-        /// <summary>Whether the country may deploy to the province: it owns and controls it, on land.</summary>
+        /// <summary>Whether the country may deploy to the province: it owns and controls it, on land, in a state its own
+        /// land connects to the capital (HOI4: no deploying overseas).</summary>
         public bool CanDeployTo(ushort country, ushort province) =>
+            Held(country, province) && DeployableStates(country).Contains(Hoi4.Map.Hoi4Regions.State(province));
+
+        bool Held(ushort country, ushort province) =>
             IsReady && province != 0 && gameState.Provinces.HasProvince(province) && !Hoi4.Map.Hoi4Regions.IsWater(province)
             && gameState.Provinces.GetProvinceOwner(province) == country && gameState.Provinces.GetProvinceController(province) == country;
+
+        /// <summary>States the country may deploy to: those with a province it owns and controls, reached from its capital
+        /// over land it controls. Empty while it doesn't hold its capital.</summary>
+        public HashSet<int> DeployableStates(ushort country)
+        {
+            var states = new HashSet<int>();
+            ushort capital = DefaultProvince(country);
+            if (!Held(country, capital)) return states;
+            var provinces = gameState.Provinces;
+            var seen = new HashSet<ushort> { capital };
+            var queue = new Queue<ushort>();
+            queue.Enqueue(capital);
+            while (queue.Count > 0)
+            {
+                ushort p = queue.Dequeue();
+                if (provinces.GetProvinceOwner(p) == country) states.Add(Hoi4.Map.Hoi4Regions.State(p));
+                var neighbours = gameState.Adjacencies.GetNeighbors(p, Unity.Collections.Allocator.Temp);
+                foreach (ushort q in neighbours)
+                    if (q != 0 && !seen.Contains(q) && !Hoi4.Map.Hoi4Regions.IsWater(q) && provinces.GetProvinceController(q) == country)
+                    {
+                        seen.Add(q);
+                        queue.Enqueue(q);
+                    }
+                neighbours.Dispose();
+            }
+            states.Remove(0);
+            return states;
+        }
 
         /// <summary>Where a country's new orders deploy: its capital (HOI4's default).</summary>
         public ushort DefaultProvince(ushort country) => Hoi4.Map.Hoi4Regions.Capital(Tag(country));
@@ -316,8 +350,8 @@ namespace Hoi4.Deployment
         /// nor its capital.</summary>
         bool Deploy(ushort country, Order order, Line line)
         {
-            ushort province = CanDeployTo(country, order.Province) ? order.Province
-                : CanDeployTo(country, DefaultProvince(country)) ? DefaultProvince(country) : (ushort)0;
+            ushort province = order.Province != 0 && CanDeployTo(country, order.Province) ? order.Province
+                : Held(country, DefaultProvince(country)) ? DefaultProvince(country) : (ushort)0;
             if (province == 0) return false;
             var d = line.Division;
             d.Strength = d.FullStrength;

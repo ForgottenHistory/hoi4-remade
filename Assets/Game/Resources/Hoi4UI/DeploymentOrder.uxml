@@ -8,7 +8,7 @@
             <ui:VisualElement name="dpo-icon" class="spr dpo-icon" picking-mode="Ignore" />
             <ui:VisualElement name="dpo-strip" class="spr dpo-strip" picking-mode="Ignore" />
             <ui:Label name="dpo-name" class="hoi4-label dpo-name" picking-mode="Ignore" />
-            <ui:VisualElement name="dpo-location" class="spr hoi4-button dpo-location" picking-mode="Position" tooltip="Where the divisions deploy: click, then click a province you hold">
+            <ui:VisualElement name="dpo-location" class="spr hoi4-button dpo-location" picking-mode="Position" tooltip="Where the divisions deploy: click, then click a green state (connected by land to the capital)">
                 <ui:Label name="dpo-location-text" class="hoi4-label center dpo-location-text" picking-mode="Ignore" />
             </ui:VisualElement>
             <!-- the series amount: how many divisions each line trains (infinite: HOI4's infinity icon) -->
