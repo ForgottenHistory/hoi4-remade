@@ -1,0 +1,10 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <!-- One equipment to add a line for (countryproductionlineview.gui military_equipment_info_entry) -->
+    <ui:VisualElement class="pp-entry" picking-mode="Position">
+        <ui:VisualElement class="spr hoi4-button pp-bg" picking-mode="Ignore" />
+        <ui:VisualElement name="pp-picture" class="spr pp-picture" picking-mode="Ignore" />
+        <ui:Label name="pp-name" class="hoi4-label pp-name" picking-mode="Ignore" />
+        <ui:Label name="pp-general" class="hoi4-label pp-general" picking-mode="Ignore" />
+        <ui:Label name="pp-cost" class="hoi4-label gold pp-cost" picking-mode="Ignore" />
+    </ui:VisualElement>
+</ui:UXML>

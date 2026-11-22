@@ -164,9 +164,26 @@ def layout(items, parent, out, depth=0, listing=False):
             layout(v, (x, y, w, h), out, depth + 1, listing)
 
 
+def resolve_constants(items, consts=None):
+    """Replace @name values with the file's `@name = value` constants (in place, nested blocks too)."""
+    if consts is None:
+        consts = {k: v for k, _, v in items if isinstance(k, str) and k.startswith("@")}
+    for i, (k, op, v) in enumerate(items):
+        if isinstance(v, list):
+            resolve_constants(v, consts)
+        elif isinstance(v, str) and v.startswith("@") and v in consts:
+            items[i] = (k, op, consts[v])
+    return items
+
+
+def load_gui(hoi4: Path, gui_file):
+    """interface/<gui_file> parsed, with its @constants resolved."""
+    return resolve_constants(parse_pdx(read_text(hoi4 / "interface" / gui_file)))
+
+
 def window(hoi4: Path, gui_file, window_name):
     """The named top-level containerWindowType block of interface/<gui_file>."""
-    gui = parse_pdx(read_text(hoi4 / "interface" / gui_file))
+    gui = load_gui(hoi4, gui_file)
     for k, _, v in kv(gui, "guiTypes") or []:
         if k == "containerWindowType" and kv(v, "name") == window_name:
             return v

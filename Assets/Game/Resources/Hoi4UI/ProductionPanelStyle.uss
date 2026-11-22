@@ -1,0 +1,161 @@
+/* HOI4 production screen (interface/countryproductionlineview.gui). Positions and sizes are HOI4's, in HOI4 pixels.
+   Sprites from gfx/interface/production/ (converter: convert_production_gfx); tiled ones are 9-sliced with their
+   borderSize. Prototype: Tools/prototypes/production/render_production.py */
+
+.pr-window { position: absolute; left: 0; top: 78px; bottom: 0; width: 550px; display: none; }
+.pr-plain-bg {
+    --sprite: "gfx/interface/production/plain_bg.png"; left: 0; top: 0; right: 0; bottom: 0;
+    -unity-slice-left: 64; -unity-slice-right: 64; -unity-slice-top: 64; -unity-slice-bottom: 64;
+}
+.pr-header-bg { --sprite: "gfx/interface/production/header_bg.png"; left: 5px; top: 7px; width: 543px; height: 41px; }
+.pr-title { left: 45px; top: 10px; height: 34px; font-size: 22px; letter-spacing: 3px; }
+.pr-close { --sprite: "gfx/interface/production/close.png"; left: 507px; top: 9px; width: 32px; height: 33px; }
+
+/* production_win_top: military_tab (y 30) + 14 */
+.pr-top { position: absolute; left: 0; top: 44px; width: 550px; height: 253px; }
+.pr-top-bg { --sprite: "gfx/interface/production/win_top.png"; left: 0; top: 0; width: 550px; height: 253px; }
+.pr-resources { position: absolute; left: 25px; top: 17px; width: 490px; height: 31px; flex-direction: row; }
+.pr-resource { position: relative; width: 70px; height: 31px; }
+.pr-resource-bg { --sprite: "gfx/interface/production/resource_item.png"; left: 0; top: 0; width: 70px; height: 30px; }
+.pr-resource-icon { left: 4px; top: 2px; width: 27px; height: 27px; }
+.pr-resource-value { left: 35px; top: 5px; width: 32px; height: 20px; font-size: 14px; color: rgb(140, 220, 100); }
+.pr-resource-value.none { color: rgb(200, 200, 200); }
+
+.pr-mod { top: 56px; height: 20px; font-size: 15px; color: rgb(140, 220, 100); }
+.pr-output-icon { --sprite: "gfx/interface/production/output_icon.png"; left: 108px; top: 53px; width: 28px; height: 27px; }
+.pr-output { left: 137px; width: 55px; }
+.pr-cap-icon { --sprite: "gfx/interface/production/efficiency_cap_icon.png"; left: 199px; top: 57px; width: 24px; height: 21px; }
+.pr-cap { left: 227px; width: 50px; }
+.pr-growth-icon { --sprite: "gfx/interface/production/efficiency_icon.png"; left: 366px; top: 58px; width: 24px; height: 21px; }
+.pr-growth { left: 396px; width: 50px; }
+
+.pr-factory-icon { --sprite: "gfx/interface/production/military_factory_icon.png"; left: 25px; top: 90px; width: 27px; height: 23px; }
+.pr-factories-label { left: 55px; top: 92px; width: 130px; height: 22px; font-size: 16px; -unity-font-style: bold; }
+.pr-factories { left: 188px; top: 92px; width: 70px; height: 22px; font-size: 16px; -unity-font-style: bold; }
+.pr-factories.free { color: var(--hoi4-gold); }
+
+.pr-add { width: 81px; height: 41px; }
+.pr-add-inf { --sprite: "gfx/interface/production/add_inf_art_0.png"; left: 25px; top: 122px; }
+.pr-add-armour { --sprite: "gfx/interface/production/add_armour_0.png"; left: 105px; top: 122px; }
+.pr-add-inf.open { --sprite: "gfx/interface/production/add_inf_art_1.png"; }
+.pr-add-armour.open { --sprite: "gfx/interface/production/add_armour_1.png"; }
+.pr-add-glow { width: 76px; height: 37px; display: none; }
+.pr-add-inf-glow { --sprite: "gfx/interface/production/new_equipment_glow_2.png"; left: 28px; top: 123px; }
+.pr-add-armour-glow { --sprite: "gfx/interface/production/new_equipment_glow_2.png"; left: 108px; top: 123px; }
+
+/* category filters (production_win_top show_* checkboxes): frame 1 (yellow border and tick) is on. Infantry/artillery,
+   armour, stockpiling and reinforcing filter the lines; the rest (air, ships, refitting, resources, outdated,
+   upgrading) have nothing to filter here and stay on at 0. */
+.pr-filter { width: 45px; height: 32px; }
+.pr-filter-count { width: 40px; height: 20px; font-size: 15px; -unity-font-style: bold; }
+.pr-filter-inf { --sprite: "gfx/interface/production/show_inf_art_0.png"; left: 13px; top: 179px; }
+.pr-filter-inf.on { --sprite: "gfx/interface/production/show_inf_art_1.png"; }
+.pr-filter-inf-count { left: 51px; top: 188px; }
+.pr-filter-armour { --sprite: "gfx/interface/production/show_armour_0.png"; left: 98px; top: 179px; }
+.pr-filter-armour.on { --sprite: "gfx/interface/production/show_armour_1.png"; }
+.pr-filter-armour-count { left: 137px; top: 188px; }
+.pr-filter-air { --sprite: "gfx/interface/production/show_air_0.png"; left: 183px; top: 179px; }
+.pr-filter-air.on { --sprite: "gfx/interface/production/show_air_1.png"; }
+.pr-filter-air-count { left: 221px; top: 188px; }
+.pr-filter-capital { --sprite: "gfx/interface/production/show_capital_ships_0.png"; left: 268px; top: 179px; }
+.pr-filter-capital.on { --sprite: "gfx/interface/production/show_capital_ships_1.png"; }
+.pr-filter-capital-count { left: 306px; top: 188px; }
+.pr-filter-screen { --sprite: "gfx/interface/production/show_screen_ships_0.png"; left: 353px; top: 179px; }
+.pr-filter-screen.on { --sprite: "gfx/interface/production/show_screen_ships_1.png"; }
+.pr-filter-screen-count { left: 391px; top: 188px; }
+.pr-filter-other { --sprite: "gfx/interface/production/show_other_ships_0.png"; left: 439px; top: 179px; }
+.pr-filter-other.on { --sprite: "gfx/interface/production/show_other_ships_1.png"; }
+.pr-filter-other-count { left: 476px; top: 188px; }
+.pr-filter-refit { --sprite: "gfx/interface/production/show_refitting_0.png"; left: 14px; top: 208px; }
+.pr-filter-refit.on { --sprite: "gfx/interface/production/show_refitting_1.png"; }
+.pr-filter-refit-count { left: 67px; top: 216px; }
+.pr-filter-resources { --sprite: "gfx/interface/production/show_resources_0.png"; left: 98px; top: 211px; }
+.pr-filter-resources.on { --sprite: "gfx/interface/production/show_resources_1.png"; }
+.pr-filter-resources-count { left: 152px; top: 216px; }
+.pr-filter-outdated { --sprite: "gfx/interface/production/show_outdated_0.png"; left: 183px; top: 211px; }
+.pr-filter-outdated.on { --sprite: "gfx/interface/production/show_outdated_1.png"; }
+.pr-filter-outdated-count { left: 236px; top: 216px; }
+.pr-filter-stockpiling { --sprite: "gfx/interface/production/show_stockpiling_0.png"; left: 268px; top: 211px; }
+.pr-filter-stockpiling.on { --sprite: "gfx/interface/production/show_stockpiling_1.png"; }
+.pr-filter-stockpiling-count { left: 322px; top: 216px; }
+.pr-filter-reinforcing { --sprite: "gfx/interface/production/show_reinforcing_0.png"; left: 353px; top: 211px; }
+.pr-filter-reinforcing.on { --sprite: "gfx/interface/production/show_reinforcing_1.png"; }
+.pr-filter-reinforcing-count { left: 408px; top: 216px; }
+.pr-filter-upgrading { --sprite: "gfx/interface/production/show_upgrading_0.png"; left: 440px; top: 211px; }
+.pr-filter-upgrading.on { --sprite: "gfx/interface/production/show_upgrading_1.png"; }
+.pr-filter-upgrading-count { left: 492px; top: 216px; }
+
+/* production_lines: the gui puts it at military_tab (y 30) + 223, but production_win_top (y 44, 253 high) reaches
+   297 and HOI4 shows the lines under both filter rows, so they start there; item_grid at (14, 5) */
+.pr-lines-frame {
+    --sprite: "gfx/interface/production/lines_border.png"; left: 0; top: 293px; width: 550px; bottom: 0;
+    -unity-slice-left: 64; -unity-slice-right: 64; -unity-slice-top: 64; -unity-slice-bottom: 64;
+}
+.pr-lines { position: absolute; left: 14px; top: 302px; right: 4px; bottom: 12px; }
+.pr-lines .unity-scroller--vertical { width: 8px; background-color: rgba(10, 13, 13, 0.85); }
+.pr-lines .unity-scroller__low-button, .pr-lines .unity-scroller__high-button { display: none; }
+.pr-lines .unity-scroller__slider { margin: 0; border-width: 0; background-color: rgba(0, 0, 0, 0); }
+
+/* one line: production_military_line_entry, 500 x 111 */
+.pl-entry { position: relative; width: 511px; height: 111px; flex-shrink: 0; }
+.pl-bg { --sprite: "gfx/interface/production/item.png"; left: 0; top: 0; width: 511px; height: 108px; }
+.pl-priority-frame { --sprite: "gfx/interface/production/priority_frame.png"; left: 2px; top: 1px; width: 27px; height: 27px; }
+.pl-priority { left: 3px; top: 4px; width: 25px; height: 22px; font-size: 15px; -unity-font-style: bold; }
+.pl-name { left: 40px; top: 3px; width: 180px; height: 22px; font-size: 17px; -unity-font-style: bold; }
+
+.pl-eff-icon { --sprite: "gfx/interface/production/efficiency_icon.png"; left: 225px; top: 4px; width: 24px; height: 21px; }
+.pl-eff-bg { --sprite: "gfx/interface/production/efficiency_bar_bg.png"; left: 252px; top: 8px; width: 131px; height: 9px; }
+.pl-eff-clip { position: absolute; left: 252px; top: 8px; width: 93px; height: 9px; overflow: hidden; }
+/* efficiency_bar_max: red with the yellow tick at its right end, right-aligned in the clip */
+.pl-eff-max-img { --sprite: "gfx/interface/production/efficiency_bar_max.png"; right: 0; top: 0; width: 93px; height: 9px; }
+/* efficiency_bar.png has three 9 px rows; the grey fill is the middle one */
+.pl-eff-fill-img { --sprite: "gfx/interface/production/efficiency_bar.png"; left: 0; top: -9px; width: 93px; height: 27px; }
+.pl-eff-frame { --sprite: "gfx/interface/production/efficiency_frame.png"; left: 248px; top: 7px; width: 98px; height: 15px; }
+
+.pl-factory-icon { --sprite: "gfx/interface/production/factory_0.png"; left: 358px; top: 7px; width: 22px; height: 18px; }
+.pl-sub { --sprite: "gfx/interface/production/sub_1.png"; left: 379px; top: 2px; width: 25px; height: 25px; }
+.pl-sub.x5 { --sprite: "gfx/interface/production/sub_5.png"; }
+.pl-sub.x10 { --sprite: "gfx/interface/production/sub_10.png"; }
+.pl-factories { left: 403px; top: 3px; width: 50px; height: 25px; font-size: 17px; -unity-font-style: bold; }
+.pl-add { --sprite: "gfx/interface/production/add_1.png"; left: 453px; top: 2px; width: 26px; height: 26px; }
+.pl-add.x5 { --sprite: "gfx/interface/production/add_5.png"; }
+.pl-add.x10 { --sprite: "gfx/interface/production/add_10.png"; }
+.pl-delete { --sprite: "gfx/interface/production/delete.png"; left: 481px; top: 2px; width: 31px; height: 31px; }
+
+.pl-equipment-bg { --sprite: "gfx/interface/production/equipment_bg.png"; left: 1px; top: 27px; width: 279px; height: 81px; }
+.pl-picture { left: 30px; top: 50px; width: 146px; height: 54px; -unity-background-scale-mode: scale-to-fit; }
+.pl-general { left: 10px; top: 30px; width: 145px; height: 18px; font-size: 13px; }
+.pl-progress-bg { --sprite: "gfx/interface/production/progress_bar_bg.png"; left: 157px; top: 27px; width: 118px; height: 21px; }
+.pl-progress-clip { position: absolute; left: 157px; top: 27px; width: 0; height: 21px; overflow: hidden; }
+/* prod_progress_bar2: three 21 px rows, the fill is the first */
+.pl-progress-img { --sprite: "gfx/interface/production/progress_bar.png"; left: 0; top: 0; width: 118px; height: 63px; }
+.pl-speed { left: 155px; top: 28px; width: 120px; height: 20px; font-size: 15px; -unity-font-style: bold; }
+.pl-need { left: 145px; top: 85px; width: 100px; height: 20px; font-size: 14px; }
+.pl-need-icon { left: 245px; top: 78px; width: 27px; height: 24px; }
+
+.pl-up { --sprite: "gfx/interface/production/arrow_up.png"; left: 4px; top: 48px; width: 22px; height: 28px; }
+.pl-down { --sprite: "gfx/interface/production/arrow_down.png"; left: 4px; top: 75px; width: 22px; height: 28px; }
+
+.pl-x10 { --sprite: "gfx/interface/production/btn_x10_0.png"; left: 278px; top: 30px; width: 38px; height: 38px; }
+.pl-x5 { --sprite: "gfx/interface/production/btn_x5_0.png"; left: 278px; top: 68px; width: 38px; height: 38px; }
+.pl-x10.on { --sprite: "gfx/interface/production/btn_x10_1.png"; }
+.pl-x5.on { --sprite: "gfx/interface/production/btn_x5_1.png"; }
+.pl-grid { position: absolute; left: 317px; top: 33px; width: 145px; height: 69px; flex-direction: row; flex-wrap: wrap; }
+.pl-slot { position: relative; width: 29px; height: 23px; }
+.pl-slot-bg { --sprite: "gfx/interface/production/factory_bg.png"; left: 0; top: 0; width: 28px; height: 22px; }
+.pl-slot-icon { left: 3px; top: 2px; width: 22px; height: 18px; }
+/* prod_line_glow: free factories to assign */
+.pl-glow { --sprite: "gfx/interface/production/line_glow_1.png"; left: 315px; top: 31px; width: 148px; height: 70px; display: none; }
+
+/* production_equipment_window_military, beside the window */
+.pr-picker { position: absolute; left: 550px; top: 78px; bottom: 0; width: 495px; display: none; }
+.pr-picker-title { left: 25px; top: 18px; width: 380px; height: 30px; font-size: 20px; -unity-font-style: bold; }
+.pr-picker-close { --sprite: "gfx/interface/production/close.png"; left: 445px; top: 5px; width: 32px; height: 33px; }
+.pr-picker-list { position: absolute; left: 10px; top: 85px; right: 4px; bottom: 12px; }
+.pp-entry { position: relative; width: 470px; height: 84px; flex-shrink: 0; }
+.pp-bg { --sprite: "gfx/interface/production/picker_item_0.png"; left: 5px; top: 4px; width: 458px; height: 80px; }
+.pp-entry:hover .pp-bg { --sprite: "gfx/interface/production/picker_item_1.png"; }
+.pp-picture { left: 190px; top: 28px; width: 146px; height: 54px; -unity-background-scale-mode: scale-to-fit; }
+.pp-name { left: 20px; top: 6px; width: 300px; height: 20px; font-size: 17px; -unity-font-style: bold; }
+.pp-general { left: 20px; top: 24px; width: 300px; height: 18px; font-size: 13px; color: rgb(190, 190, 170); }
+.pp-cost { left: 15px; top: 59px; width: 150px; height: 18px; font-size: 13px; }

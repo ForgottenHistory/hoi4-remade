@@ -34,6 +34,8 @@
         <ui:VisualElement name="step-5" class="spr hoi4-button tb-step tb-step-5" picking-mode="Position" />
         <ui:Label name="date" class="tb-label right tb-date" picking-mode="Ignore" />
 
+        <ui:VisualElement name="production-button" class="spr hoi4-button tb-production" picking-mode="Position" />
+
         <ui:VisualElement class="spr hoi4-button tb-menu" picking-mode="Position" />
         <ui:VisualElement class="spr hoi4-button tb-help" picking-mode="Position" />
         <ui:VisualElement class="spr hoi4-button tb-threat" picking-mode="Position" />

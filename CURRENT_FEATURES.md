@@ -12,19 +12,19 @@
 
 **Armies and battle plans:** Armies with bottom-of-screen cards, front lines that divisions fill and hold, offensive plans (drag over targets) that advance as a broad front when executed, planning bonus
 
-**Production:** Military factories from owned states, production lines in priority order with per-factory efficiency growth, commands for adding, sizing, reordering and deleting lines, AI that puts free factories to work (no production screen yet)
+**Production:** Military factories from owned states, production lines in priority order with per-factory efficiency growth, commands for adding, sizing, reordering and deleting lines, AI that puts free factories to work, HOI4 production screen
 
 **AI:** Enemy war AI with odds-based attacks off its own front lines; production AI
 
 **Simulation:** Every decision is a command, one fixed-order hourly tick, fixed-point maths and adjacency-based fronts (deterministic, lockstep-ready), session recordings for debugging
 
-**UI:** Top bar, state panel, division panel, army cards, battle plan window, diplomacy panel (UI Toolkit: UXML + USS + C#), all sprites loaded at runtime from the converted data
+**UI:** Top bar, production screen, state panel, division panel, army cards, battle plan window, diplomacy panel (UI Toolkit: UXML + USS + C#), all sprites loaded at runtime from the converted data
 
 **Data:** One Python converter turns the HOI4 install into an Archon data directory
 
 **War and peace:** War participation, surrender progress from victory points, capitulation, a basic peace conference (take states)
 
-**Not Implemented:** production screen (the commands exist, the UI doesn't yet), strategic resources and trade, research, politics, supply, generals, air and naval, factions, conditional surrender, saving/loading of HOI4-specific state, multiplayer in practice
+**Not Implemented:** strategic resources and trade, research, politics, supply, generals, air and naval, factions, conditional surrender, saving/loading of HOI4-specific state, multiplayer in practice
 
 The goal is to stress-test Archon-Engine, not to ship a game. Big visual wins are preferred over exact HOI4 fidelity.
 
@@ -88,9 +88,11 @@ The goal is to stress-test Archon-Engine, not to ship a game. Big visual wins ar
 - **Production lines** - Per country, in priority order, starting from the 1936 lines in the OOB. Each day the lines take factories top-down (requested, at most 150 per line) until the country's factories run out; a lost factory comes off the bottom and loses its efficiency, an added one starts at 10%
 - **Output** - 4.5 IC per active factory x its efficiency a day; whole units come out when the line's progress reaches the equipment's `build_cost_ic`, the rest carries over, and go into the stockpile
 - **Efficiency** - Per factory slot, growing by 0.001 x cap² / current a day up to the 50% cap (about 500 days from nothing)
+- **First day** - Until the first game day has passed, factories move freely between the 1936 lines without losing efficiency (added ones start at the line's starting efficiency); a line made that day starts at 10% like any new line
 - **Buildable equipment** - Per country and archetype, the newest equipment its 1936 technologies unlock (a tank design needs its chassis technology), written by the converter; a 1936 line's equipment always counts
 - **Commands** - Add a line (bottom of the queue), set its factories, move it in the queue, delete it, all through `TryExecuteCommand`
 - **Production AI** - Weekly, each country but the player's on its own weekday: free factories go one at a time to the archetype with the most need per factory already making it (what its divisions lack beyond the stockpile, plus a 10% reserve of their total use); never takes factories off a line. Host only, through the same commands
+- **Production screen** - HOI4's `countryproductionlineview.gui` layout and art, opened by the top bar's production button (glows while factories are free) or Y. Resource strip (the country's own states), efficiency cap, military factories used/total, add-line buttons for infantry/artillery and armour opening the equipment picker (design name, general name, cost, picture), category filters with factory counts. Each line: priority, design name, efficiency bar relative to the cap, +/- factories (Shift x5, Ctrl x10, or the x5/x10 buttons), delete, priority arrows, picture, units a day or week with progress to the next one, what the divisions lack (reinforcing) or the stock (stockpiling), the 5x3 factory grid (x5/x10 icons past 15, grey where the line wants more than it gets) glowing while factories are free. A new line asks for the free factories, 1 to 15
 - **Recording** - Weekly `production` notes (factories, free, each line's factories, efficiency, IC), `ai_assign` notes, a Production section in `report.py`, `production` and `ai_production` columns in `perf.tsv`
 
 ---
@@ -153,6 +155,7 @@ All panels follow one pattern: structure in `.uxml`, look in `*Style.uss` + `Hoi
 - **Army cards and battle plan window** - See Armies and Battle Plans
 - **Diplomacy panel** - Right-click a country's land (with no divisions selected): country, relation, Declare War / Make Peace. Opens the diplomatic map mode; X or Escape closes it and restores the previous mode. Declaring war ends guarantees and military access between the two
 - **Scroll capture** - The mouse wheel scrolls panels instead of zooming the map while the pointer is over one
+- **Production screen** - See Production
 - **HOI4 font** - Oswald, applied to all panels
 
 ---
@@ -177,7 +180,7 @@ All panels follow one pattern: structure in `.uxml`, look in `*Style.uss` + `Hoi
 
 ## Prototypes
 
-Tricky map algorithms are prototyped in Python under `Tools/prototypes/<topic>/` and checked as preview PNGs before porting to C# or HLSL: borders, rivers, river crossings, labels, highlight outline, move arrows, counters, country fill, top bar, units, battle plans (front line, offensive arrow, drag), peace conference (costs and score checked against a live HOI4 conference, map stripes).
+Tricky map algorithms are prototyped in Python under `Tools/prototypes/<topic>/` and checked as preview PNGs before porting to C# or HLSL: borders, rivers, river crossings, labels, highlight outline, move arrows, counters, country fill, top bar, units, battle plans (front line, offensive arrow, drag), peace conference (costs and score checked against a live HOI4 conference, map stripes), production screen.
 
 ## Analysis and Reference Tools
 
@@ -192,7 +195,7 @@ Tricky map algorithms are prototyped in Python under `Tools/prototypes/<topic>/`
 - Combat ignores forts, generals, supply, night, stacking and per-unit terrain modifiers (only the terrain's base penalty applies); max entrenchment ignores the division's own entrenchment stat (engineers)
 - Offensives are broad-front only; no spearhead or encirclement logic
 - AI does not use offensives or armies, only odds-based border attacks
-- Production has no screen yet, no strategic resources or trade, no factory construction, no factory output modifiers (real Germany makes about 17% more per factory), no civilian factories; air and naval lines are not converted, so their factories end up free (the AI puts them on land equipment)
+- Production has no strategic resources or trade, no factory construction, no factory output modifiers (real Germany makes about 17% more per factory), no civilian factories; air and naval lines are not converted, so their factories end up free (the AI puts them on land equipment)
 - Equipment designs and variants are not modelled: an archetype is one kind of equipment, stats from the 1936 design
 - No recruiting new divisions; manpower only reinforces
 - Province selection does not persist after the state panel closes (HOI4 keeps it)

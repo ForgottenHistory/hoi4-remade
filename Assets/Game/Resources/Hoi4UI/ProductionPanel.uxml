@@ -1,0 +1,70 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <!-- HOI4 production screen (interface/countryproductionlineview.gui), positions in HOI4 pixels.
+         Prototype: Tools/prototypes/production/render_production.py -->
+    <ui:VisualElement name="production-panel" class="pr-window" picking-mode="Position">
+        <ui:VisualElement class="spr pr-plain-bg" picking-mode="Ignore" />
+
+        <!-- production_lines: the list under the top part -->
+        <ui:VisualElement class="spr pr-lines-frame" picking-mode="Ignore" />
+        <ui:ScrollView name="pr-lines" class="pr-lines" mode="Vertical" horizontal-scroller-visibility="Hidden" />
+
+        <!-- production_win_top -->
+        <ui:VisualElement class="pr-top" picking-mode="Ignore">
+            <ui:VisualElement class="spr pr-top-bg" picking-mode="Ignore" />
+            <ui:VisualElement name="pr-resources" class="pr-resources" picking-mode="Ignore" />
+
+            <ui:VisualElement class="spr pr-output-icon" picking-mode="Ignore" />
+            <ui:Label name="pr-output" class="hoi4-label pr-mod pr-output" text="+0%" picking-mode="Ignore" />
+            <ui:VisualElement class="spr pr-cap-icon" picking-mode="Ignore" />
+            <ui:Label name="pr-cap" class="hoi4-label pr-mod pr-cap" text="50%" picking-mode="Ignore" />
+            <ui:VisualElement class="spr pr-growth-icon" picking-mode="Ignore" />
+            <ui:Label name="pr-growth" class="hoi4-label pr-mod pr-growth" text="+0%" picking-mode="Ignore" />
+
+            <ui:VisualElement class="spr pr-factory-icon" picking-mode="Ignore" />
+            <ui:Label class="hoi4-label pr-factories-label" text="Military Factories" picking-mode="Ignore" />
+            <ui:Label name="pr-factories" class="hoi4-label right pr-factories" picking-mode="Ignore" />
+
+            <ui:VisualElement name="pr-add-inf" class="spr hoi4-button pr-add pr-add-inf" picking-mode="Position" />
+            <ui:VisualElement name="pr-add-inf-glow" class="spr pr-add-glow pr-add-inf-glow" picking-mode="Ignore" />
+            <ui:VisualElement name="pr-add-armour" class="spr hoi4-button pr-add pr-add-armour" picking-mode="Position" />
+            <ui:VisualElement name="pr-add-armour-glow" class="spr pr-add-glow pr-add-armour-glow" picking-mode="Ignore" />
+
+            <ui:VisualElement name="pr-filter-inf" class="spr hoi4-button pr-filter pr-filter-inf on" picking-mode="Position" />
+            <ui:Label name="pr-filter-inf-count" class="hoi4-label right pr-filter-count pr-filter-inf-count" text="0" picking-mode="Ignore" />
+            <ui:VisualElement name="pr-filter-armour" class="spr hoi4-button pr-filter pr-filter-armour on" picking-mode="Position" />
+            <ui:Label name="pr-filter-armour-count" class="hoi4-label right pr-filter-count pr-filter-armour-count" text="0" picking-mode="Ignore" />
+            <ui:VisualElement name="pr-filter-air" class="spr pr-filter pr-filter-air on" picking-mode="Ignore" />
+            <ui:Label name="pr-filter-air-count" class="hoi4-label right pr-filter-count pr-filter-air-count" text="0" picking-mode="Ignore" />
+            <ui:VisualElement name="pr-filter-capital" class="spr pr-filter pr-filter-capital on" picking-mode="Ignore" />
+            <ui:Label name="pr-filter-capital-count" class="hoi4-label right pr-filter-count pr-filter-capital-count" text="0" picking-mode="Ignore" />
+            <ui:VisualElement name="pr-filter-screen" class="spr pr-filter pr-filter-screen on" picking-mode="Ignore" />
+            <ui:Label name="pr-filter-screen-count" class="hoi4-label right pr-filter-count pr-filter-screen-count" text="0" picking-mode="Ignore" />
+            <ui:VisualElement name="pr-filter-other" class="spr pr-filter pr-filter-other on" picking-mode="Ignore" />
+            <ui:Label name="pr-filter-other-count" class="hoi4-label right pr-filter-count pr-filter-other-count" text="0" picking-mode="Ignore" />
+            <ui:VisualElement name="pr-filter-refit" class="spr pr-filter pr-filter-refit on" picking-mode="Ignore" />
+            <ui:Label name="pr-filter-refit-count" class="hoi4-label center pr-filter-count pr-filter-refit-count" text="0" picking-mode="Ignore" />
+            <ui:VisualElement name="pr-filter-resources" class="spr pr-filter pr-filter-resources on" picking-mode="Ignore" />
+            <ui:Label name="pr-filter-resources-count" class="hoi4-label center pr-filter-count pr-filter-resources-count" text="0" picking-mode="Ignore" />
+            <ui:VisualElement name="pr-filter-outdated" class="spr pr-filter pr-filter-outdated on" picking-mode="Ignore" />
+            <ui:Label name="pr-filter-outdated-count" class="hoi4-label center pr-filter-count pr-filter-outdated-count" text="0" picking-mode="Ignore" />
+            <ui:VisualElement name="pr-filter-stockpiling" class="spr hoi4-button pr-filter pr-filter-stockpiling on" picking-mode="Position" />
+            <ui:Label name="pr-filter-stockpiling-count" class="hoi4-label center pr-filter-count pr-filter-stockpiling-count" text="0" picking-mode="Ignore" />
+            <ui:VisualElement name="pr-filter-reinforcing" class="spr hoi4-button pr-filter pr-filter-reinforcing on" picking-mode="Position" />
+            <ui:Label name="pr-filter-reinforcing-count" class="hoi4-label center pr-filter-count pr-filter-reinforcing-count" text="0" picking-mode="Ignore" />
+            <ui:VisualElement name="pr-filter-upgrading" class="spr pr-filter pr-filter-upgrading on" picking-mode="Ignore" />
+            <ui:Label name="pr-filter-upgrading-count" class="hoi4-label center pr-filter-count pr-filter-upgrading-count" text="0" picking-mode="Ignore" />
+        </ui:VisualElement>
+
+        <ui:VisualElement class="spr pr-header-bg" picking-mode="Ignore" />
+        <ui:Label class="hoi4-label pr-title" text="PRODUCTION" picking-mode="Ignore" />
+        <ui:VisualElement name="pr-close" class="spr hoi4-button pr-close" picking-mode="Position" />
+    </ui:VisualElement>
+
+    <!-- production_equipment_window_military: the equipment to add a line for, right of the window -->
+    <ui:VisualElement name="production-picker" class="pr-picker" picking-mode="Position">
+        <ui:VisualElement class="spr pr-plain-bg" picking-mode="Ignore" />
+        <ui:Label name="pr-picker-title" class="hoi4-label pr-picker-title" picking-mode="Ignore" />
+        <ui:VisualElement name="pr-picker-close" class="spr hoi4-button pr-picker-close" picking-mode="Position" />
+        <ui:ScrollView name="pr-picker-list" class="pr-picker-list" mode="Vertical" horizontal-scroller-visibility="Hidden" />
+    </ui:VisualElement>
+</ui:UXML>

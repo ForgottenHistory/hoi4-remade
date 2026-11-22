@@ -521,6 +521,7 @@ def convert(hoi4: Path, out: Path):
     convert_army_cards(hoi4, out)
     convert_battleplan_gfx(hoi4, out)
     convert_peace_gfx(hoi4, out)
+    convert_production_gfx(hoi4, out, oob_countries)
     convert_front_line(hoi4, out)
     convert_state_view(hoi4, out, state_centers)
     convert_move_arrow(hoi4, out)
@@ -904,7 +905,7 @@ def load_equipment_info(hoi4: Path):
                 except (TypeError, ValueError):
                     year = 0
                 entries[name] = {"archetype": name if get(eq, "is_archetype") == "yes" else get(eq, "archetype"),
-                                 "parent": get(eq, "parent"), "cost": cost, "year": year,
+                                 "parent": get(eq, "parent"), "cost": cost, "year": year, "picture": get(eq, "picture"),
                                  "buildable": get(eq, "is_buildable") != "no" and get(eq, "is_archetype") != "yes"}
 
     def cost_of(name, depth=0):
@@ -920,8 +921,50 @@ def load_equipment_info(hoi4: Path):
                     return c
         return None
 
-    return {n: {"archetype": e["archetype"], "cost": cost_of(n), "year": e["year"], "buildable": e["buildable"]}
+    def picture_of(name, depth=0):
+        e = entries.get(name)
+        if e is None or depth > 8:
+            return None
+        if e["picture"]:
+            return e["picture"]
+        for link in (e["parent"], e["archetype"]):
+            if link and link != name:
+                pic = picture_of(link, depth + 1)
+                if pic:
+                    return pic
+        return None
+
+    return {n: {"archetype": e["archetype"], "cost": cost_of(n), "year": e["year"], "buildable": e["buildable"],
+                "picture": picture_of(n)}
             for n, e in entries.items() if e["archetype"]}
+
+
+def describe_equipment(tag, buildable, equipment, tech_equipment, loc, sprite_names):
+    """Adds what the production screen shows to each of a country's buildable equipment (in place): `name` (the
+    country's design name, FRA_infantry_equipment_1 "MAS-36", else the generic one), `general` (infantry_equipment_1
+    "Infantry Equipment I"), `archetype_name` and `sprite`, the picture HOI4 uses: the technology that unlocks it
+    (GFX_FRA_infantry_weapons1_medium, then GFX_infantry_weapons1_medium), then the equipment, then its `picture`."""
+    tech_of = {}
+    for tech, es in sorted(tech_equipment.items()):
+        for e in es:
+            tech_of.setdefault(e, tech)
+    for arch, b in buildable.items():
+        eq = b["equipment"]
+        general = loc.get(eq) or loc.get(arch) or eq
+        b["name"] = loc.get(f"{tag}_{eq}") or general
+        b["general"] = general
+        b["archetype_name"] = loc.get(arch) or arch
+        techs = [tech_of.get(eq), tech_of.get(eq.replace("_equipment_", "_chassis_"))]
+        names = []
+        for tech in [x for x in techs if x]:
+            for v in (tech, tech.replace("_chassis", "")):
+                names += [f"GFX_{tag}_{v}_medium", f"GFX_{v}_medium"]
+        names += [f"GFX_{tag}_{eq}_medium", f"GFX_{eq}_medium"]
+        pic = (equipment.get(eq) or {}).get("picture")
+        if pic:
+            names += [f"GFX_{tag}_{pic}_medium", f"GFX_{pic}_medium"]
+        names.append(f"GFX_archetype_{arch}_medium")
+        b["sprite"] = next((n for n in names if n in sprite_names), None)
 
 
 def load_tech_equipment(hoi4: Path):
@@ -1022,8 +1065,17 @@ def convert_oob(hoi4: Path, out: Path, existing_tags, ruling_party):
     at the start (releasables) are skipped."""
     names = load_division_name_groups(hoi4)
     subs = load_sub_units(hoi4)
+    import hoi4_gui as gui
     equipment = load_equipment_info(hoi4)
     tech_equipment = load_tech_equipment(hoi4)
+    loc = load_localisation(hoi4 / "localisation" / "english")
+    def has_texture(s):
+        tex = s.get("texture")
+        if not tex:
+            return False
+        f = hoi4 / tex
+        return any(f.with_suffix(ext).exists() for ext in (f.suffix, ".dds", ".tga", ".png"))
+    sprite_names = {n for n, s in gui.load_sprites(hoi4).items() if has_texture(s)}  # pictures that exist
     land_archetypes = {a for s in subs.values() for a in s["need"]}
     countries = {}
     used_subs = set()
@@ -1085,6 +1137,7 @@ def convert_oob(hoi4: Path, out: Path, existing_tags, ruling_party):
             buildable = available_equipment(country_root, equipment, tech_equipment, land_archetypes)
             for p in lines_:  # what a 1936 line builds is buildable, whatever the technology check says
                 buildable[p["archetype"]] = {"equipment": p["equipment"], "cost": p["cost"]}
+            describe_equipment(tag, buildable, equipment, tech_equipment, loc, sprite_names)
             countries[tag] = {"ideology": ruling_party.get(tag) or "neutrality",
                               "equipment": buildable,
                               "templates": {k: {kk: vv for kk, vv in v.items() if kk != "names_group"}
@@ -1252,6 +1305,7 @@ TOPBAR_KEEP = [
     "pause_button_date", "button_speeddown", "button_speedup",
     "button_speedstep1", "button_speedstep2", "button_speedstep3", "button_speedstep4", "button_speedstep5",
     "DateText", "menu_button", "help_button", "threat_button", "threat_value",
+    "production_button", "production_button_glow",
 ]
 # Sprite overrides: the extended background has room for DLC menu buttons we don't show
 TOPBAR_SPRITE = {"background": "GFX_topbar_background"}
@@ -1484,6 +1538,73 @@ def convert_peace_gfx(hoi4: Path, out: Path):
         for i, fr in enumerate(frames):
             fr.save(dst / (f"{name}.png" if len(frames) == 1 else f"{name}_{i}.png"))
     print("Peace conference sprites written")
+
+
+# Production screen (interface/countryproductionlineview.gui) sprites: file name -> GFX sprite. Multi-frame ones are
+# written as name_0.png, name_1.png...; tiled ones (corneredTileSpriteType) are 9-sliced in USS with their borderSize.
+PRODUCTION_SPRITES = {
+    "plain_bg": "GFX_tiled_plain_bg", "header_bg": "GFX_header_bg", "close": "GFX_closebutton",
+    "win_top": "GFX_production_win_top", "lines_border": "GFX_tiled_window2_1b_border",
+    "item": "GFX_production_item", "item_selected": "GFX_production_line_selected",
+    "priority_frame": "GFX_conveyor_group_btn_frame", "efficiency_frame": "GFX_efficiency_progressbar_frame",
+    "efficiency_icon": "GFX_efficiency_icon", "equipment_bg": "GFX_prod_land_equipment_item_large",
+    "line_glow": "GFX_prod_line_glow", "btn_x10": "GFX_btn_x10", "btn_x5": "GFX_btn_x5", "delete": "GFX_NV_btn_delete",
+    "need_strip": "GFX_prod_line_target_strip", "factory": "GFX_factory_item", "factory_bg": "GFX_factory_bg",
+    "sub_1": "GFX_subtract_one", "sub_5": "GFX_subtract_5", "sub_10": "GFX_subtract_10",
+    "add_1": "GFX_add_one", "add_5": "GFX_add_5", "add_10": "GFX_add_10",
+    "arrow_up": "GFX_arrow_up_small", "arrow_down": "GFX_arrow_down_small",
+    "add_inf_art": "GFX_add_prod_inf_art_line", "add_armour": "GFX_add_prod_armour_line",
+    "add_aircraft": "GFX_add_prod_aircraft_line", "new_equipment_glow": "GFX_prod_new_equipment_glow",
+    "military_factory_icon": "GFX_military_factory_icon", "output_icon": "GFX_production_output_icon",
+    "efficiency_cap_icon": "GFX_efficiency_cap_icon", "efficiency_loss_icon": "GFX_production_efficiency_loss_icon",
+    "show_inf_art": "GFX_inf_art_checkbox", "show_armour": "GFX_armour_checkbox", "show_air": "GFX_air_checkbox",
+    "show_stockpiling": "GFX_stockpiling_checkbox", "show_reinforcing": "GFX_reinforcing_checkbox",
+    "show_capital_ships": "GFX_capital_ships_checkbox", "show_screen_ships": "GFX_screen_ships_checkbox",
+    "show_other_ships": "GFX_other_ships_checkbox", "show_refitting": "GFX_refit_ships_checkbox",
+    "show_resources": "GFX_resources_checkbox", "show_outdated": "GFX_outdated_checkbox",
+    "show_upgrading": "GFX_upgrading_checkbox",
+    "picker_item": "GFX_equipment_item_large_02", "picker_glow": "GFX_new_equipment_glow_large",
+    "resource_item": "resource_item_background",
+}
+# Progress bars (progressbartype): file name -> texture under the HOI4 install (fill, background)
+PRODUCTION_BARS = {
+    "efficiency_bar": "gfx/interface/efficiency_progressbar.dds",
+    "efficiency_bar_max": "gfx/interface/efficiency_progressbar_bg_max.dds",
+    "efficiency_bar_bg": "gfx/interface/efficiency_progressbar_bg.dds",
+    "progress_bar": "gfx/interface/prod_progress_bar2.dds",
+    "progress_bar_bg": "gfx/interface/prod_progress_bar2_bg.dds",
+}
+
+
+def convert_production_gfx(hoi4: Path, out: Path, oob_countries):
+    """Sprites of the production screen under gfx/interface/production/ for Hoi4ProductionPanel: PRODUCTION_SPRITES,
+    PRODUCTION_BARS, and every equipment picture a country can build (equipment/<GFX name>.png, named by the
+    `sprite` describe_equipment put in the OOB's equipment block)."""
+    import hoi4_gui as gui
+    dst = out / "gfx" / "interface" / "production"
+    (dst / "equipment").mkdir(parents=True, exist_ok=True)
+    sprites = gui.load_sprites(hoi4)
+    for name, spr in PRODUCTION_SPRITES.items():
+        frames = gui.sprite_frames(hoi4, sprites, spr)
+        if not frames:
+            print(f"  production: no sprite {spr}")
+            continue
+        for i, fr in enumerate(frames):
+            fr.save(dst / (f"{name}.png" if len(frames) == 1 else f"{name}_{i}.png"))
+    for name, rel in PRODUCTION_BARS.items():
+        img = gui.load_image(hoi4, rel)
+        if img is None:
+            print(f"  production: no texture {rel}")
+            continue
+        img.save(dst / f"{name}.png")
+    pictures = {b["sprite"] for c in oob_countries.values() for b in c.get("equipment", {}).values() if b.get("sprite")}
+    for spr in sorted(pictures):
+        frames = gui.sprite_frames(hoi4, sprites, spr)
+        if frames:
+            frames[0].save(dst / "equipment" / f"{spr}.png")
+        else:
+            print(f"  production: no picture {spr}")
+    print(f"Production sprites written ({len(pictures)} equipment pictures)")
 
 
 # State view (interface/countrystateview.gui) sprites: name -> GFX sprite

@@ -25,6 +25,7 @@ namespace Hoi4.Production
         public int Active;             // factories it got today (priority order, up to the country's total)
         public readonly List<FP> Efficiency = new List<FP>(); // per factory slot, kept for slots < Active
         public FP Progress;            // IC toward the next unit
+        public FP StartEfficiency;     // a 1936 line's starting efficiency (zero for lines made in the game)
         public FP OutputToday;         // IC made today (all active factories)
         public int MadeToday;          // whole units made today
 
@@ -51,6 +52,9 @@ namespace Hoi4.Production
     ///   and its slot loses its efficiency, a newly added one starts at BASE_FACTORY_START_EFFICIENCY_FACTOR 10%.
     /// - Output: per active factory POWERED_FACTORY_SPEED_MIL 4.5 IC x its efficiency a day. Whole units come out
     ///   once the line's progress reaches the equipment's build_cost_ic; the rest carries over.
+    /// - First day: until the first game day has passed, factories move freely between the 1936 lines: one added to
+    ///   such a line starts at the line's starting efficiency and one taken off costs nothing (HOI4 lets the player
+    ///   rearrange the start lines). A line made that day starts at the base like any other new line.
     /// - Efficiency grows per active factory by 0.001 x cap^2 / current a day, up to
     ///   BASE_FACTORY_MAX_EFFICIENCY_FACTOR 50% (500 days from 0 to the cap).
     /// - Not modelled: strategic resources and trade, factory output modifiers (technology, laws, stability), equipment
@@ -71,8 +75,9 @@ namespace Hoi4.Production
 
         public static Hoi4Production Instance { get; private set; }
 
-        /// <summary>What a country can build of an archetype: the equipment and its cost.</summary>
-        public struct Buildable { public string Equipment; public FP Cost; }
+        /// <summary>What a country can build of an archetype: the equipment, its cost, and for the production screen
+        /// its design name (FRA "MAS-36"), general name ("Infantry Equipment I") and picture (a data-directory path).</summary>
+        public struct Buildable { public string Equipment; public FP Cost; public string Name, General, Picture; }
 
         sealed class CountryProduction
         {
@@ -184,7 +189,8 @@ namespace Hoi4.Production
             while (Hoi4Divisions.Instance == null || !Hoi4Divisions.Instance.IsLoaded
                    || Engine.ArchonEngine.Instance == null || Engine.ArchonEngine.Instance.GameState == null
                    || Engine.ArchonEngine.Instance.GameState.Provinces == null || !DataFileResolver.IsInitialized
-                   || Hoi4Equipment.Instance == null || !Hoi4Equipment.Instance.IsReady)
+                   || Hoi4Equipment.Instance == null || !Hoi4Equipment.Instance.IsReady
+                   || !Hoi4StateData.Available || !Hoi4Regions.Available) // factories come from the states
                 yield return null;
             gameState = Engine.ArchonEngine.Instance.GameState;
             var archetypes = Hoi4Divisions.Archetypes;
@@ -209,8 +215,14 @@ namespace Hoi4.Production
                     foreach (var e in eq.Properties())
                     {
                         FP cost = Num(e.Value["cost"]);
+                        string sprite = (string)e.Value["sprite"];
                         if (index.TryGetValue(e.Name, out int a) && cost > FP.Zero)
-                            cp.Buildable[a] = new Buildable { Equipment = (string)e.Value["equipment"], Cost = cost };
+                            cp.Buildable[a] = new Buildable
+                            {
+                                Equipment = (string)e.Value["equipment"], Cost = cost,
+                                Name = (string)e.Value["name"] ?? e.Name, General = (string)e.Value["general"] ?? e.Name,
+                                Picture = string.IsNullOrEmpty(sprite) ? null : $"gfx/interface/production/equipment/{sprite}.png",
+                            };
                     }
                 if (p.Value["production"] is JArray list)
                     foreach (var l in list)
@@ -227,8 +239,10 @@ namespace Hoi4.Production
                             Requested = factories,
                         };
                         for (int i = 0; i < factories; i++) line.Efficiency.Add(eff);
+                        line.StartEfficiency = eff;
                         cp.Lines.Add(line);
-                        if (!cp.Buildable.ContainsKey(a)) cp.Buildable[a] = new Buildable { Equipment = line.Equipment, Cost = cost };
+                        if (!cp.Buildable.ContainsKey(a))
+                            cp.Buildable[a] = new Buildable { Equipment = line.Equipment, Cost = cost, Name = line.Equipment, General = line.Equipment };
                         lineCount++;
                     }
                 countries[country] = cp;
@@ -248,10 +262,10 @@ namespace Hoi4.Production
         {
             var provinces = gameState.Provinces;
             if (countedOwnership == provinces.OwnershipVersion && countedControl == provinces.ControlVersion) return;
+            if (!Hoi4StateData.Available || !Hoi4Regions.Available) return; // not loaded yet: count later, never cache an empty count
             countedOwnership = provinces.OwnershipVersion;
             countedControl = provinces.ControlVersion;
             factoryCount.Clear();
-            if (!Hoi4StateData.Available || !Hoi4Regions.Available) return;
             Hoi4Occupation.Snapshot(gameState, 0, out var ctrl, out var owner);
             var tally = new Dictionary<ushort, int>();
             foreach (int state in Hoi4Regions.States)
@@ -280,8 +294,11 @@ namespace Hoi4.Production
             }
         }
 
-        /// <summary>Lines take factories top-down: Active per line, slots beyond it lose their efficiency, new
-        /// slots start at the base efficiency.</summary>
+        /// <summary>Lines take factories top-down (Active). Each line keeps an efficiency slot per requested factory:
+        /// a slot that loses its factory (it was active, now the lines above took it or the country lost it) drops to
+        /// the base efficiency, a newly requested slot starts there, a request lowered drops slots off the end. Slots
+        /// waiting for a factory keep their value, so a line that has not had its factories yet (the 1936 lines before
+        /// the first count) keeps its starting efficiency.</summary>
         void AllocateFactories()
         {
             CountFactories();
@@ -290,10 +307,15 @@ namespace Hoi4.Production
                 factoryCount.TryGetValue(kv.Key, out int left);
                 foreach (var l in kv.Value.Lines)
                 {
-                    l.Active = System.Math.Max(0, System.Math.Min(System.Math.Min(l.Requested, MaxFactoriesPerLine), left));
+                    int was = l.Active;
+                    int slots = System.Math.Min(l.Requested, MaxFactoriesPerLine);
+                    l.Active = System.Math.Max(0, System.Math.Min(slots, left));
                     left -= l.Active;
-                    if (l.Efficiency.Count > l.Active) l.Efficiency.RemoveRange(l.Active, l.Efficiency.Count - l.Active);
-                    while (l.Efficiency.Count < l.Active) l.Efficiency.Add(BaseEfficiency);
+                    if (l.Efficiency.Count > slots) l.Efficiency.RemoveRange(slots, l.Efficiency.Count - slots);
+                    // first day: a 1936 line's new or freed slots stay at its starting efficiency
+                    FP fresh = day == 0 && l.StartEfficiency > FP.Zero ? l.StartEfficiency : BaseEfficiency;
+                    while (l.Efficiency.Count < slots) l.Efficiency.Add(fresh);
+                    for (int i = l.Active; i < was && i < l.Efficiency.Count; i++) l.Efficiency[i] = fresh;
                 }
             }
         }

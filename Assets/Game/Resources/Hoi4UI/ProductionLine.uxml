@@ -1,0 +1,44 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <!-- One production line (countryproductionlineview.gui production_military_line_entry, 500 x 111) -->
+    <ui:VisualElement class="pl-entry" picking-mode="Position">
+        <ui:VisualElement class="spr pl-bg" picking-mode="Ignore" />
+        <ui:VisualElement class="spr pl-priority-frame" picking-mode="Ignore" />
+        <ui:Label name="pl-priority" class="hoi4-label center pl-priority" picking-mode="Ignore" />
+        <ui:Label name="pl-name" class="hoi4-label pl-name" picking-mode="Ignore" />
+
+        <ui:VisualElement class="spr pl-eff-icon" picking-mode="Ignore" />
+        <ui:VisualElement class="spr pl-eff-bg" picking-mode="Ignore" />
+        <ui:VisualElement name="pl-eff-max" class="pl-eff-clip" picking-mode="Ignore">
+            <ui:VisualElement name="pl-eff-max-img" class="spr pl-eff-max-img" picking-mode="Ignore" />
+        </ui:VisualElement>
+        <ui:VisualElement name="pl-eff-fill" class="pl-eff-clip" picking-mode="Ignore">
+            <ui:VisualElement class="spr pl-eff-fill-img" picking-mode="Ignore" />
+        </ui:VisualElement>
+        <ui:VisualElement class="spr pl-eff-frame" picking-mode="Ignore" />
+
+        <ui:VisualElement class="spr pl-factory-icon" picking-mode="Ignore" />
+        <ui:VisualElement name="pl-sub" class="spr hoi4-button pl-sub" picking-mode="Position" />
+        <ui:Label name="pl-factories" class="hoi4-label center pl-factories" picking-mode="Ignore" />
+        <ui:VisualElement name="pl-add" class="spr hoi4-button pl-add" picking-mode="Position" />
+        <ui:VisualElement name="pl-delete" class="spr hoi4-button pl-delete" picking-mode="Position" />
+
+        <ui:VisualElement class="spr pl-equipment-bg" picking-mode="Ignore" />
+        <ui:VisualElement name="pl-picture" class="spr pl-picture" picking-mode="Ignore" />
+        <ui:Label name="pl-general" class="hoi4-label pl-general" picking-mode="Ignore" />
+        <ui:VisualElement class="spr pl-progress-bg" picking-mode="Ignore" />
+        <ui:VisualElement name="pl-progress" class="pl-progress-clip" picking-mode="Ignore">
+            <ui:VisualElement class="spr pl-progress-img" picking-mode="Ignore" />
+        </ui:VisualElement>
+        <ui:Label name="pl-speed" class="hoi4-label center pl-speed" picking-mode="Ignore" />
+        <ui:Label name="pl-need" class="hoi4-label right pl-need" picking-mode="Ignore" />
+        <ui:VisualElement name="pl-need-icon" class="spr pl-need-icon" picking-mode="Ignore" />
+
+        <ui:VisualElement name="pl-up" class="spr hoi4-button pl-up" picking-mode="Position" />
+        <ui:VisualElement name="pl-down" class="spr hoi4-button pl-down" picking-mode="Position" />
+
+        <ui:VisualElement name="pl-x10" class="spr hoi4-button pl-x10" picking-mode="Position" />
+        <ui:VisualElement name="pl-x5" class="spr hoi4-button pl-x5" picking-mode="Position" />
+        <ui:VisualElement name="pl-grid" class="pl-grid" picking-mode="Ignore" />
+        <ui:VisualElement name="pl-glow" class="spr pl-glow" picking-mode="Ignore" />
+    </ui:VisualElement>
+</ui:UXML>
