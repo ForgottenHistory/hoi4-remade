@@ -1,0 +1,20 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <!-- production_building_line_entry (countryconstructionsview.gui): one construction order, 400 x 52 -->
+    <ui:VisualElement class="cl-entry" picking-mode="Position">
+        <ui:VisualElement class="spr cl-bg" picking-mode="Ignore" />
+        <ui:Label name="cl-location" class="hoi4-label cl-location" picking-mode="Ignore" />
+        <ui:VisualElement name="cl-picture" class="spr cl-picture" picking-mode="Ignore" />
+        <ui:Label name="cl-count" class="hoi4-label right cl-count" picking-mode="Ignore" />
+        <ui:VisualElement name="cl-add" class="spr hoi4-button cl-add" picking-mode="Position" />
+        <ui:VisualElement name="cl-sub" class="spr hoi4-button cl-sub" picking-mode="Position" />
+        <ui:VisualElement name="cl-ongoing" class="spr cl-ongoing" picking-mode="Ignore" />
+        <ui:Label name="cl-factories" class="hoi4-label center cl-factories" picking-mode="Ignore" />
+        <ui:VisualElement class="spr cl-progress-bg" picking-mode="Ignore" />
+        <ui:VisualElement name="cl-progress" class="cl-progress-clip" picking-mode="Ignore">
+            <ui:VisualElement class="spr cl-progress-fill" picking-mode="Ignore" />
+        </ui:VisualElement>
+        <ui:VisualElement name="cl-up" class="spr hoi4-button cl-up" picking-mode="Position" />
+        <ui:VisualElement name="cl-down" class="spr hoi4-button cl-down" picking-mode="Position" />
+        <ui:VisualElement name="cl-delete" class="spr hoi4-button cl-delete" picking-mode="Position" />
+    </ui:VisualElement>
+</ui:UXML>

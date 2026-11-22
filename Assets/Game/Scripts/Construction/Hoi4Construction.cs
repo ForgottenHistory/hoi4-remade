@@ -12,14 +12,16 @@ using FP = Core.Data.FixedPoint64;
 
 namespace Hoi4.Construction
 {
-    /// <summary>One queued construction: one level of a building in a state.</summary>
+    /// <summary>One construction order: Count levels of a building in a state, built one after another (HOI4: queueing
+    /// the same building in the same state again adds a level to its order).</summary>
     public sealed class ConstructionItem
     {
         public int Id;               // unique within the country
         public int State;
         public string Building;      // industrial_complex, arms_factory, infrastructure
-        public FP Cost;              // set when queued: base_cost + per_level_extra_cost x the level it builds
-        public FP Progress;
+        public int Count = 1;        // levels left to build, the one in progress included
+        public FP Cost;              // of the level in progress: base_cost + per_level_extra_cost x the state's level
+        public FP Progress;          // towards the level in progress
         public int Factories;        // civilian factories on it today
         public FP SpeedToday;        // IC a day it gets today
     }
@@ -31,7 +33,8 @@ namespace Hoi4.Construction
     ///   economy law's share x (1 + consumer goods factor)), at least 10% and 1 (MINIMUM_NUMBER_OF_FACTORIES_TAKEN_BY_
     ///   CONSUMER_GOODS_*); the rest are available. Checked against real HOI4: Germany 15 of 63, 20 available; France
     ///   14 of 41. Laws and factors per country from common/hoi4_country_economy.json5 (its 1936 ideas and techs).
-    /// - Queue: per country, in order. Each item takes up to 15 available civilian factories (MAX_CIV_FACTORIES_PER_LINE)
+    /// - Queue: per country, in order; an order holds one or more levels of one building in one state and builds them
+    ///   one at a time. Each order takes up to 15 available civilian factories (MAX_CIV_FACTORIES_PER_LINE)
     ///   until they run out; each gives 5 IC a day (POWERED_FACTORY_SPEED) x (1 + construction speed + the building's
     ///   own speed) x (1 + state infrastructure / 5) for buildings infrastructure speeds up
     ///   (INFRA_MAX_CONSTRUCTION_COST_EFFECT 1, infrastructure max 5). A level is done when its progress reaches the
@@ -200,17 +203,29 @@ namespace Hoi4.Construction
             return null;
         }
 
-        /// <summary>Levels of a building already queued in a state (by any country: a state has one user).</summary>
-        int Queued(int state, string building, bool sharedOnly = false)
+        /// <summary>Levels of a building already queued in a state (by any country: a state has one user); with
+        /// sharedOnly, the levels of every shared building there.</summary>
+        public int Queued(int state, string building, bool sharedOnly = false)
         {
             int n = 0;
             foreach (var c in countries.Values)
                 foreach (var i in c.Queue)
                 {
                     if (i.State != state) continue;
-                    if (sharedOnly ? (Hoi4StateData.Def(i.Building)?.Shared ?? false) : i.Building == building) n++;
+                    if (sharedOnly ? (Hoi4StateData.Def(i.Building)?.Shared ?? false) : i.Building == building) n += i.Count;
                 }
             return n;
+        }
+
+        /// <summary>Most levels the state can hold of the building: for a shared building the state's shared slots
+        /// less the other shared buildings there, else its own cap (infrastructure 5).</summary>
+        public int MaxLevel(int state, string building)
+        {
+            var def = Hoi4StateData.Def(building);
+            if (def == null) return 0;
+            if (def.Shared)
+                return Hoi4Buildings.SharedSlots(state) - Hoi4Buildings.SharedUsed(state) + Hoi4Buildings.Level(state, building);
+            return building == "infrastructure" ? MaxInfrastructure : def.StateMax;
         }
 
         /// <summary>Shared slots of the state still free, counting what is queued there.</summary>
@@ -280,8 +295,14 @@ namespace Hoi4.Construction
                     kv.Value.Built++;
                     Core.Recording.SessionRecorder.Note("construction", "done", country, 0, 0, 0,
                         $"{i.Building} in state {i.State} (now {Hoi4Buildings.Level(i.State, i.Building)})");
-                    queue.RemoveAt(k--);
                     changed = true;
+                    if (--i.Count > 0)
+                    {
+                        i.Progress = FP.Zero; // the order's next level
+                        i.Cost = LevelCost(i.State, i.Building, Hoi4Buildings.Level(i.State, i.Building));
+                        continue;
+                    }
+                    queue.RemoveAt(k--);
                 }
                 if (changed) QueueChanged?.Invoke(country);
             }
@@ -308,21 +329,56 @@ namespace Hoi4.Construction
 
         // ---- changes (commands only) ---------------------------------------------------------------------
 
-        /// <summary>One level at the end of the queue. Returns its id (0 when not allowed).</summary>
+        static FP LevelCost(int state, string building, int level)
+        {
+            var def = Hoi4StateData.Def(building);
+            return def == null ? FP.One : FP.FromDouble(System.Math.Max(1.0, def.Cost + def.CostPerLevel * level));
+        }
+
+        /// <summary>One level: onto the country's order for the building in the state when it has one, else a new
+        /// order at the end of the queue. Returns the order's id (0 when not allowed).</summary>
         public int Enqueue(ushort country, int state, string building)
         {
             if (!CanQueue(country, state, building)) return 0;
             if (!countries.TryGetValue(country, out var c)) countries[country] = c = new CountryConstruction();
-            var def = Hoi4StateData.Def(building);
-            int level = Hoi4Buildings.Level(state, building) + Queued(state, building);
+            foreach (var o in c.Queue)
+                if (o.State == state && o.Building == building)
+                {
+                    o.Count++;
+                    QueueChanged?.Invoke(country);
+                    return o.Id;
+                }
             var item = new ConstructionItem
             {
                 Id = c.NextId++, State = state, Building = building,
-                Cost = FP.FromDouble(def.Cost + def.CostPerLevel * level),
+                Cost = LevelCost(state, building, Hoi4Buildings.Level(state, building)),
             };
             c.Queue.Add(item);
             QueueChanged?.Invoke(country);
             return item.Id;
+        }
+
+        /// <summary>More levels of the building the state can still take, counting what is built and queued there
+        /// (for a shared building also the free shared slots).</summary>
+        public int Room(int state, string building)
+        {
+            int room = MaxLevel(state, building) - Hoi4Buildings.Level(state, building) - Queued(state, building);
+            var def = Hoi4StateData.Def(building);
+            if (def != null && def.Shared) room = System.Math.Min(room, FreeSharedSlots(state));
+            return System.Math.Max(0, room);
+        }
+
+        /// <summary>Set an order's levels: at least 1, and more only while the state has room.</summary>
+        public bool SetCount(ushort country, int id, int count)
+        {
+            var item = Item(country, id);
+            if (item == null || count < 1) return false;
+            if (count > item.Count)
+                count = item.Count + System.Math.Max(0, System.Math.Min(Room(item.State, item.Building), count - item.Count));
+            if (count == item.Count) return false;
+            item.Count = count;
+            QueueChanged?.Invoke(country);
+            return true;
         }
 
         public bool Remove(ushort country, int id)

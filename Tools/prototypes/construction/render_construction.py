@@ -64,9 +64,34 @@ def country_factories(tag):
     return sd["buildings"], civ, mil
 
 
+def draw_entry(canvas, ox, oy, location, frame, count, factories, progress, tick):
+    """One production_building_line_entry at (ox, oy): location, building icon with the order's level count, +/- levels,
+    the factories box (animated while factories work on it) with the progress bar under it, priority arrows, delete."""
+    d = ImageDraw.Draw(canvas)
+    canvas.alpha_composite(img("entry_bg.png"), (ox, oy))
+    text(d, (ox + 20, oy + 26), location, 17, anchor="lm")
+    canvas.alpha_composite(img(f"buildings_{frame - 1}.png", STATEVIEW), (ox + 172, oy + 5))
+    text(d, (ox + 212, oy + 39), str(count), 15, anchor="rm")
+    for k, y in (("amount_add", 3), ("amount_sub", 27)):
+        s = img(f"{k}.png")
+        s = s.resize((int(s.width * 0.9), int(s.height * 0.9)))
+        canvas.alpha_composite(s, (ox + 214, oy + y))
+    if factories > 0:
+        canvas.alpha_composite(img(f"ongoing_{tick * 5 % 12}.png"), (ox + 252, oy + 8))
+    text(d, (ox + 279, oy + 19), f"{factories}/15", 16, anchor="mm")
+    canvas.alpha_composite(img("progress_bar_bg.png"), (ox + 249, oy + 36))
+    w = int(60 * progress)
+    if w > 0:
+        canvas.alpha_composite(img("progress_bar.png").crop((0, 0, w, 9)), (ox + 249, oy + 36))
+    canvas.alpha_composite(img("arrow_up.png"), (ox + 318, oy + 14))
+    canvas.alpha_composite(img("arrow_down.png"), (ox + 341, oy + 14))
+    canvas.alpha_composite(img("delete.png"), (ox + 370, oy + 14))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("tag", nargs="?", default="FRA")
+    ap.add_argument("--queue", action="store_true", help="draw three demo orders like the HOI4 screenshot")
     a = ap.parse_args()
 
     defs, civ, mil = country_factories(a.tag)
@@ -120,6 +145,15 @@ def main():
     cgi = img("consumer_goods_icon.png")
     canvas.alpha_composite(cgi, (ex + 210 - cgi.width // 2, ey + 26 - cgi.height // 2))
     text(d, (ex + 254 + 25, ey + 27), str(cg), 16, anchor="mm")
+    # queue entries (production_building_line_entry, 400 x 52, one per order, under the consumer goods row)
+    if a.queue:
+        free = civ - cg
+        demo = (("Ile de France", "industrial_complex", 2, 0.6), ("Centre", "industrial_complex", 1, 0.2),
+                ("Bourgogne", "arms_factory", 4, 0.0))
+        for n, (loc, building, count, prog) in enumerate(demo):
+            f = max(0, min(15, free))
+            free -= f
+            draw_entry(canvas, ex, ey + 52 * (n + 1) + 4 * (n + 1), loc, defs[building]["frame"], count, f, prog, n)
 
     # count container (factories per new construction, - / +) and the priority button, minimize and close
     canvas.alpha_composite(img("count_bg.png"), P("bg"))
@@ -150,7 +184,7 @@ def main():
             canvas.alpha_composite(img(f"buildings_{b['frame'] - 1}.png", STATEVIEW), (bx, by))
         y += 52 + math.ceil(len(items) / 4) * 44
 
-    path = OUT / f"construction_{a.tag}.png"
+    path = OUT / f"construction_{a.tag}{'_queue' if a.queue else ''}.png"
     canvas.save(path)
     print(f"{a.tag}: civ {civ}, mil {mil}, consumer goods {cg} -> {path}")
 

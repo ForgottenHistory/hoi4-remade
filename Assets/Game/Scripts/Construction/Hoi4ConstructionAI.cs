@@ -6,7 +6,7 @@ namespace Hoi4.Construction
     /// <summary>
     /// GAME: the simplest construction AI. Once a week (each country on its own weekday, (country id + 3) mod 7, so
     /// not the production AI's day) every country but the player's keeps its queue long enough for all its available
-    /// civilian factories (15 per item, plus one spare). What it builds: civilian factories until 1938 (HOI4's usual
+    /// civilian factories (15 per order, plus one spare), one order per state. What it builds: civilian factories until 1938 (HOI4's usual
     /// build-up), military factories from then on, or while at war. Where: the state with a free shared slot and the
     /// best infrastructure (it speeds construction up), then the most free slots, then the lowest id. With no shared
     /// slot left anywhere it raises infrastructure where it is lowest. Orders go through the same commands as the player's.
@@ -48,16 +48,20 @@ namespace Hoi4.Construction
                 bool atWar = gameState.Diplomacy != null && gameState.Diplomacy.IsAtWar(country);
                 string factory = year >= MilitaryFromYear || atWar ? "arms_factory" : "industrial_complex";
 
+                // one order per state: queueing where the country has an order only adds a level to it
+                var busy = new HashSet<int>();
+                foreach (var o in construction.Queue(country)) busy.Add(o.State);
                 for (int n = queued; n < wanted; n++)
                 {
-                    int state = BestFactoryState(construction, country, states, factory);
+                    int state = BestFactoryState(construction, country, states, factory, busy);
                     string building = factory;
                     if (state == 0)
                     {
-                        state = LowestInfrastructure(construction, country, states);
+                        state = LowestInfrastructure(construction, country, states, busy);
                         building = "infrastructure";
                     }
                     if (state == 0) break;
+                    busy.Add(state);
                     if (!gameState.TryExecuteCommand(new QueueConstructionCommand { CountryId = country, State = state, Building = building }, out _))
                         break;
                     Core.Recording.SessionRecorder.Note("construction", "ai_queue", country, 0, 0, 0,
@@ -66,11 +70,12 @@ namespace Hoi4.Construction
             }
         }
 
-        static int BestFactoryState(Hoi4Construction construction, ushort country, List<int> states, string building)
+        static int BestFactoryState(Hoi4Construction construction, ushort country, List<int> states, string building, HashSet<int> busy)
         {
             int best = 0, bestInfra = -1, bestFree = 0;
             foreach (int s in states)
             {
+                if (busy.Contains(s)) continue;
                 int free = construction.FreeSharedSlots(s);
                 if (free <= 0 || !construction.CanQueue(country, s, building)) continue;
                 int infra = Hoi4Buildings.Level(s, "infrastructure");
@@ -82,11 +87,12 @@ namespace Hoi4.Construction
             return best;
         }
 
-        static int LowestInfrastructure(Hoi4Construction construction, ushort country, List<int> states)
+        static int LowestInfrastructure(Hoi4Construction construction, ushort country, List<int> states, HashSet<int> busy)
         {
             int best = 0, bestInfra = int.MaxValue;
             foreach (int s in states)
             {
+                if (busy.Contains(s)) continue;
                 if (!construction.CanQueue(country, s, "infrastructure")) continue;
                 int infra = Hoi4Buildings.Level(s, "infrastructure");
                 if (infra < bestInfra) { best = s; bestInfra = infra; }

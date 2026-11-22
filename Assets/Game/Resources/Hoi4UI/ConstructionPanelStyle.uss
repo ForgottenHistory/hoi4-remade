@@ -90,3 +90,22 @@
 
 .co-minimize { --sprite: "gfx/interface/construction/minimize.png"; left: 607px; top: 10px; width: 32px; height: 28px; }
 .co-close { --sprite: "gfx/interface/construction/close.png"; left: 657px; top: 9px; width: 32px; height: 33px; }
+
+/* production_building_line_entry: one order, 400 x 52 (ConstructionLine.uxml) */
+.cl-entry { position: relative; width: 400px; height: 52px; margin-top: 1px; }
+.cl-bg { --sprite: "gfx/interface/construction/entry_bg.png"; left: 0; top: 0; width: 402px; height: 54px; }
+.cl-location { left: 20px; top: 4px; width: 150px; height: 44px; font-size: 17px; -unity-font-style: bold; white-space: normal; }
+.cl-picture { left: 172px; top: 5px; width: 46px; height: 46px; }
+.cl-count { left: 162px; top: 29px; width: 50px; height: 20px; font-size: 15px; -unity-font-style: bold; }
+.cl-add { --sprite: "gfx/interface/construction/amount_add.png"; left: 214px; top: 3px; width: 24px; height: 24px; }
+.cl-sub { --sprite: "gfx/interface/construction/amount_sub.png"; left: 214px; top: 27px; width: 24px; height: 24px; }
+.cl-ongoing { left: 252px; top: 8px; width: 54px; height: 20px; }
+.cl-factories { left: 254px; top: 9px; width: 50px; height: 20px; font-size: 16px; -unity-font-style: bold; }
+.cl-progress-bg { --sprite: "gfx/interface/construction/progress_bar_bg.png"; left: 249px; top: 36px; width: 60px; height: 9px; }
+.cl-progress-clip { position: absolute; left: 249px; top: 36px; width: 0; height: 9px; overflow: hidden; }
+.cl-progress-fill { --sprite: "gfx/interface/construction/progress_bar.png"; left: 0; top: 0; width: 60px; height: 9px; }
+.cl-up { --sprite: "gfx/interface/construction/arrow_up.png"; left: 318px; top: 14px; width: 22px; height: 28px; }
+.cl-down { --sprite: "gfx/interface/construction/arrow_down.png"; left: 341px; top: 14px; width: 22px; height: 28px; }
+.cl-delete { --sprite: "gfx/interface/construction/delete.png"; left: 370px; top: 14px; width: 26px; height: 26px; }
+.co-factories.all-used { color: rgb(140, 220, 100); }
+.cl-add.disabled, .cl-add.disabled:hover { -unity-background-image-tint-color: rgb(90, 90, 90); }

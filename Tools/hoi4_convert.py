@@ -1709,6 +1709,15 @@ CONSTRUCTION_SPRITES = {
     "count_bg": "GFX_generic_box_80", "factory_wrench": "GFX_factory_icon_with_wrench",
     "sub_1": "GFX_subtract_one", "add_1": "GFX_add_one", "button_94": "GFX_button_94x31",
     "lines_overlay": "GFX_tiled_generic_overlay_bg1_small",
+    # queue entries (production_building_line_entry)
+    "ongoing": "GFX_ongoing_contruction_anim", "amount_add": "GFX_zoom_in", "amount_sub": "GFX_zoom_out",
+    "arrow_up": "GFX_arrow_up_small", "arrow_down": "GFX_arrow_down_small", "delete": "GFX_closebutton_small",
+    "line_glow": "GFX_construction_line_glow",
+}
+# Progress bar textures (progressbartype GFX_construction_progressbar): file name -> texture under the HOI4 install
+CONSTRUCTION_BARS = {
+    "progress_bar": "gfx/interface/construction_progressbar.dds",
+    "progress_bar_bg": "gfx/interface/construction_progressbar_bg.dds",
 }
 
 
@@ -1725,6 +1734,12 @@ def convert_construction_gfx(hoi4: Path, out: Path):
             continue
         for i, fr in enumerate(frames):
             fr.save(dst / (f"{name}.png" if len(frames) == 1 else f"{name}_{i}.png"))
+    for name, rel in CONSTRUCTION_BARS.items():
+        img = gui.load_image(hoi4, rel)
+        if img is None:
+            print(f"  construction: no texture {rel}")
+            continue
+        img.save(dst / f"{name}.png")
     print("Construction sprites written")
 
 

@@ -136,6 +136,7 @@ namespace Hoi4.UI
         void OnProvinceClicked(ushort id)
         {
             if (id == 0 || panel == null || !HasCountry()) return;
+            if (Hoi4ConstructionPanel.Placing != null) return; // the click queues construction instead
             province = id;
             dirty = true;
         }

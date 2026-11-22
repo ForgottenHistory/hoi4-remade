@@ -4,7 +4,8 @@ using Core.Commands;
 
 namespace Hoi4.Construction
 {
-    /// <summary>Queue Count levels of a building in a state, at the end of the country's construction queue.</summary>
+    /// <summary>Queue Count levels of a building in a state: onto the country's order for it there, else a new order at
+    /// the end of the construction queue.</summary>
     public sealed class QueueConstructionCommand : BaseCommand
     {
         public ushort CountryId;
@@ -27,7 +28,23 @@ namespace Hoi4.Construction
         public override void Deserialize(BinaryReader r) { CountryId = r.ReadUInt16(); State = r.ReadInt32(); Building = r.ReadString(); Count = r.ReadInt32(); }
     }
 
-    /// <summary>Take an item off the construction queue; its progress is lost.</summary>
+    /// <summary>Set how many levels a construction order builds (the +/- on the order).</summary>
+    public sealed class SetConstructionCountCommand : BaseCommand
+    {
+        public ushort CountryId;
+        public int ItemId;
+        public int Count;
+
+        public override bool Validate(GameState gameState) =>
+            Count >= 1 && Count <= Hoi4Construction.MaxQueue && Hoi4Construction.Instance?.Item(CountryId, ItemId) != null;
+
+        public override void Execute(GameState gameState) => Hoi4Construction.Instance.SetCount(CountryId, ItemId, Count);
+        public override void Undo(GameState gameState) { }
+        public override void Serialize(BinaryWriter w) { w.Write(CountryId); w.Write(ItemId); w.Write(Count); }
+        public override void Deserialize(BinaryReader r) { CountryId = r.ReadUInt16(); ItemId = r.ReadInt32(); Count = r.ReadInt32(); }
+    }
+
+    /// <summary>Take an order off the construction queue; its progress is lost.</summary>
     public sealed class RemoveConstructionCommand : BaseCommand
     {
         public ushort CountryId;

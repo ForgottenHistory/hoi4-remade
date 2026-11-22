@@ -203,7 +203,7 @@ namespace Hoi4.UI
             return "plains";
         }
 
-        static string StateName(int stateId)
+        public static string StateName(int stateId)
         {
             string key = $"STATE_{stateId}";
             string name = LocalizationManager.Get(key);
