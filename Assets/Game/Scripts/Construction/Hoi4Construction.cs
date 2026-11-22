@@ -39,8 +39,12 @@ namespace Hoi4.Construction
     ///   own speed) x (1 + state infrastructure / 5) for buildings infrastructure speeds up
     ///   (INFRA_MAX_CONSTRUCTION_COST_EFFECT 1, infrastructure max 5). A level is done when its progress reaches the
     ///   cost (civilian factory 10800, military factory 7200, infrastructure 6000); the state gets the level.
-    /// - Limits: shared buildings (factories) need a free shared slot (state category, at most 25, counting what is
-    ///   queued); infrastructure up to 5. Only in states whose buildings work for the country; an item in a state the
+    /// - Buildings: civilian and military factories, infrastructure, air bases, anti-air, radar, dockyards (coastal
+    ///   states only), synthetic refineries and fuel silos. Technology-gated ones (HOI4 enable_building: anti-air,
+    ///   radar, refinery, fuel silo) need the country's 1936 technologies and go only as high as they allow.
+    /// - Limits: shared buildings (factories) need a free shared slot (state category plus extra slots from history,
+    ///   at most 25, counting what is queued); state buildings up to their own cap (infrastructure 5, air base 10,
+    ///   anti-air 5, radar 6), air bases lower on islands (large 6, small 4, tiny 2: state category caps). Only in states whose buildings work for the country; an item in a state the
     ///   country loses is dropped.
     /// - Not modelled: trade, the international market, repairs, conversion, province buildings (forts, naval bases,
     ///   railways), other state buildings, slot bonuses from technology, law changes during the game.
@@ -58,8 +62,22 @@ namespace Hoi4.Construction
         public const int MaxQueue = 200;
         const int ReportEveryDays = 7;
 
-        /// <summary>The buildings construction can build here.</summary>
-        public static readonly string[] Buildable = { "industrial_complex", "arms_factory", "infrastructure" };
+        /// <summary>The buildings construction can build here: the factories and the state buildings.</summary>
+        public static readonly string[] Buildable =
+        {
+            "industrial_complex", "arms_factory", "infrastructure", "air_base", "anti_air_building", "radar_station",
+            "dockyard", "synthetic_refinery", "fuel_silo",
+        };
+
+        /// <summary>Most levels the country's technologies allow of the building: int.MaxValue when no technology
+        /// gates it, 0 while it is not researched (HOI4 greys the building out), else the highest level unlocked
+        /// (radar 1..6 by technology).</summary>
+        public int TechCap(ushort country, string building) =>
+            EconomyOf(country).Unlocked.TryGetValue(building, out int n) ? n : int.MaxValue;
+
+        /// <summary>Whether the country can build it at all: researched, and one of Buildable.</summary>
+        public bool Researched(ushort country, string building) =>
+            System.Array.IndexOf(Buildable, building) >= 0 && TechCap(country, building) > 0;
 
         public static Hoi4Construction Instance { get; private set; }
 
@@ -71,6 +89,8 @@ namespace Hoi4.Construction
             public FP Speed;                // construction speed
             public readonly Dictionary<string, FP> BuildingSpeed = new Dictionary<string, FP>();
             public readonly List<string> Laws = new List<string>();
+            // tech-gated buildings (HOI4 enable_building) -> most levels the country's technologies allow (0: locked)
+            public readonly Dictionary<string, int> Unlocked = new Dictionary<string, int>();
         }
 
         sealed class CountryConstruction
@@ -133,6 +153,7 @@ namespace Hoi4.Construction
                     };
                     if (o["speed"] is JObject s) foreach (var b in s.Properties()) e.BuildingSpeed[b.Name] = Num(b.Value);
                     if (o["laws"] is JArray laws) foreach (var l in laws) e.Laws.Add((string)l);
+                    if (o["unlocked"] is JObject unlocked) foreach (var u in unlocked.Properties()) e.Unlocked[u.Name] = (int)u.Value;
                     economies[country] = e;
                 }
             else
@@ -217,15 +238,32 @@ namespace Hoi4.Construction
             return n;
         }
 
-        /// <summary>Most levels the state can hold of the building: for a shared building the state's shared slots
-        /// less the other shared buildings there, else its own cap (infrastructure 5).</summary>
+        /// <summary>Most levels the state can hold of the building, 0 where it can't be built (a coastal building
+        /// inland). Shared: the state's shared slots less the other shared buildings there, at most the building's own
+        /// cap (refinery 3, dockyard 20). Others: their cap (infrastructure 5, air base 10, anti-air 5, radar 6), air
+        /// bases lower on islands. Both at most what the technologies of the country using the state allow.</summary>
+        public bool CanHold(int state, string building) => MaxLevel(state, building) > 0;
+
         public int MaxLevel(int state, string building)
         {
             var def = Hoi4StateData.Def(building);
-            if (def == null) return 0;
+            var info = Hoi4StateData.Get(state);
+            if (def == null || info == null) return 0;
+            if (def.Coastal && !info.Coastal) return 0;
+            int max;
             if (def.Shared)
-                return Hoi4Buildings.SharedSlots(state) - Hoi4Buildings.SharedUsed(state) + Hoi4Buildings.Level(state, building);
-            return building == "infrastructure" ? MaxInfrastructure : def.StateMax;
+            {
+                max = Hoi4Buildings.SharedSlots(state) - Hoi4Buildings.SharedUsed(state) + Hoi4Buildings.Level(state, building);
+                if (def.StateMax > 0) max = System.Math.Min(max, def.StateMax);
+            }
+            else
+            {
+                int cap = Hoi4StateData.CategoryCap(info.Category, building);
+                max = cap > 0 ? System.Math.Min(cap, def.StateMax) : def.StateMax;
+            }
+            ushort user = IsReady ? Hoi4Buildings.UserOf(gameState, state) : (ushort)0;
+            if (user != 0) max = System.Math.Min(max, TechCap(user, building));
+            return max;
         }
 
         /// <summary>Shared slots of the state still free, counting what is queued there.</summary>
@@ -239,10 +277,8 @@ namespace Hoi4.Construction
             if (Hoi4Buildings.UserOf(gameState, state) != country) return false;
             if (countries.TryGetValue(country, out var c) && c.Queue.Count >= MaxQueue) return false;
             var def = Hoi4StateData.Def(building);
-            if (def == null || def.Cost <= 0) return false;
-            if (def.Shared) return FreeSharedSlots(state) > 0;
-            int max = building == "infrastructure" ? MaxInfrastructure : def.StateMax;
-            return max <= 0 || Hoi4Buildings.Level(state, building) + Queued(state, building) < max;
+            if (def == null || def.Cost <= 0 || !Researched(country, building)) return false;
+            return Room(state, building) > 0;
         }
 
         /// <summary>IC a day one civilian factory gives an item: base x (1 + construction speed + the building's

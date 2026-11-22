@@ -38,6 +38,8 @@ namespace Hoi4.Map
             public Dictionary<string, int> Buildings = new Dictionary<string, int>();
             public Dictionary<int, Dictionary<string, int>> Provincial = new Dictionary<int, Dictionary<string, int>>();
             public double Value;           // HOI4 state value at the start (peace conference costs and score)
+            public int ExtraSlots;         // shared building slots on top of the category's (history: Belgium +2)
+            public bool Coastal;           // has a coastal province (dockyards, only_costal buildings)
             public bool HasCenter;
             public int CenterX, CenterY;   // centre on the map, px (y down): peace conference influence distances
         }
@@ -48,6 +50,8 @@ namespace Hoi4.Map
         static readonly Dictionary<string, BuildingDef> defs = new Dictionary<string, BuildingDef>();
         static readonly List<BuildingDef> defOrder = new List<BuildingDef>();
         static readonly Dictionary<string, int> categories = new Dictionary<string, int>();
+        // category -> building -> most levels (islands: air_base 6/4/2, naval_base 8/6/3)
+        static readonly Dictionary<string, Dictionary<string, int>> categoryCaps = new Dictionary<string, Dictionary<string, int>>();
         static readonly Dictionary<int, StateInfo> states = new Dictionary<int, StateInfo>();
         static bool loaded;
         static bool available;
@@ -61,10 +65,14 @@ namespace Hoi4.Map
         public static IReadOnlyList<BuildingDef> Defs => EnsureLoaded() ? defOrder : (IReadOnlyList<BuildingDef>)System.Array.Empty<BuildingDef>();
         public static int Slots(string category) => EnsureLoaded() && categories.TryGetValue(category ?? "", out int n) ? n : 0;
 
+        /// <summary>The state category's cap on a building's levels, 0 when it has none (only the building's own).</summary>
+        public static int CategoryCap(string category, string building) =>
+            EnsureLoaded() && categoryCaps.TryGetValue(category ?? "", out var caps) && caps.TryGetValue(building, out int n) ? n : 0;
+
         [UnityEngine.RuntimeInitializeOnLoadMethod(UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]
         static void Reset()
         {
-            defs.Clear(); defOrder.Clear(); categories.Clear(); states.Clear();
+            defs.Clear(); defOrder.Clear(); categories.Clear(); categoryCaps.Clear(); states.Clear();
             loaded = false; available = false;
         }
 
@@ -98,6 +106,13 @@ namespace Hoi4.Map
                 }
                 foreach (var p in (root["categories"] as JObject).Properties())
                     categories[p.Name] = (int)p.Value;
+                if (root["category_caps"] is JObject caps)
+                    foreach (var p in caps.Properties())
+                    {
+                        var d = new Dictionary<string, int>();
+                        Fill(p.Value as JObject, d);
+                        categoryCaps[p.Name] = d;
+                    }
                 foreach (var p in (root["states"] as JObject).Properties())
                 {
                     var j = p.Value;
@@ -107,6 +122,8 @@ namespace Hoi4.Map
                         Manpower = (int?)j["manpower"] ?? 0,
                         Owner = (string)j["owner"] ?? "",
                         Value = (double?)j["value"] ?? 0.0,
+                        ExtraSlots = (int?)j["extra_slots"] ?? 0,
+                        Coastal = (bool?)j["coastal"] ?? false,
                     };
                     if (j["center"] is JArray centre && centre.Count == 2)
                     {

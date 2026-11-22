@@ -66,11 +66,12 @@ namespace Hoi4.Construction
             Version++;
         }
 
-        /// <summary>Shared slots the state has (its category, at most 25) and those its shared buildings use.</summary>
+        /// <summary>Shared slots the state has (its category's plus extra ones from its history, at most 25) and those
+        /// its shared buildings use.</summary>
         public static int SharedSlots(int state)
         {
             var info = Hoi4StateData.Get(state);
-            return info == null ? 0 : System.Math.Min(MaxSharedSlots, Hoi4StateData.Slots(info.Category));
+            return info == null ? 0 : System.Math.Min(MaxSharedSlots, Hoi4StateData.Slots(info.Category) + info.ExtraSlots);
         }
 
         public static int SharedUsed(int state)

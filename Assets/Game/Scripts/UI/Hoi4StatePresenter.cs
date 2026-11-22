@@ -42,7 +42,7 @@ namespace Hoi4.UI
             FillResources(panel.Q("resources"), info);
             // buildings as they are now (the 1936 ones plus what construction built)
             var buildings = Hoi4.Construction.Hoi4Buildings.Of(stateId);
-            FillStateBuildings(panel.Q("state-buildings"), buildings);
+            FillStateBuildings(panel.Q("state-buildings"), buildings, stateId);
             FillSlots(panel.Q("slots"), panel.Q<Label>("slots-count"), info, buildings);
 
             string terrain = TerrainKey(gameState, province);
@@ -75,7 +75,7 @@ namespace Hoi4.UI
             }
         }
 
-        static void FillStateBuildings(VisualElement row, IReadOnlyDictionary<string, int> buildings)
+        static void FillStateBuildings(VisualElement row, IReadOnlyDictionary<string, int> buildings, int stateId)
         {
             row.Clear();
             foreach (string b in StateBuildings)
@@ -83,7 +83,9 @@ namespace Hoi4.UI
                 var def = Hoi4StateData.Def(b);
                 if (def == null) continue;
                 buildings.TryGetValue(b, out int level);
-                row.Add(Entry(def, level, def.StateMax, "entry"));
+                // most levels: the building's cap, lower on islands for air bases (state category caps)
+                int cap = Hoi4StateData.CategoryCap(Hoi4StateData.Get(stateId)?.Category, b);
+                row.Add(Entry(def, level, cap > 0 ? System.Math.Min(cap, def.StateMax) : def.StateMax, "entry"));
             }
         }
 
@@ -97,7 +99,7 @@ namespace Hoi4.UI
                 if (def != null && def.Shared)
                     for (int n = 0; n < kv.Value; n++) shared.Add(def);
             }
-            int unlocked = System.Math.Max(Hoi4StateData.Slots(info.Category), shared.Count);
+            int unlocked = System.Math.Max(System.Math.Min(SharedSlots, Hoi4StateData.Slots(info.Category) + info.ExtraSlots), shared.Count);
             count.text = $"<color=#f7d45a>{unlocked}</color>/{SharedSlots} Unlocked Slots";
             for (int i = 0; i < SharedSlots; i++)
             {

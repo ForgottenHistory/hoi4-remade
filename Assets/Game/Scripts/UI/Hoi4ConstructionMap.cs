@@ -50,6 +50,7 @@ namespace Hoi4.UI
             {
                 if (kv.Value != country) continue;
                 int state = kv.Key;
+                if (!construction.CanHold(state, building)) continue; // can't be built there (dockyard inland): plain terrain
                 int queued = construction.Queued(state, building);
                 int room = construction.Room(state, building);
                 byte fill = room + queued > 0 ? Half : Full;                       // green: room without this building's orders

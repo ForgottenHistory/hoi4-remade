@@ -197,7 +197,10 @@ namespace Hoi4.UI
             button.Add(icon);
             button.Add(Hoi4Sprites.Make("co-building-glow"));
             button.userData = def.Name;
-            button.RegisterCallback<ClickEvent>(_ => Select(button));
+            button.RegisterCallback<ClickEvent>(_ =>
+            {
+                if (!button.ClassListContains("locked")) Select(button);
+            });
             return button;
         }
 
@@ -365,6 +368,14 @@ namespace Hoi4.UI
             speedLabel.text = (speed >= 0 ? "+" : "") + Mathf.RoundToInt(speed * 100) + "%";
             speedLabel.EnableInClassList("negative", speed < 0);
             consumerRow.Q<Label>("co-consumer-count").text = cg.ToString();
+            // buildings the country can't build yet (not researched) are greyed out and can't be selected
+            panel.Q("co-sections").Query(className: "co-building").ForEach(b =>
+            {
+                string building = b.userData as string;
+                bool locked = System.Array.IndexOf(Hoi4Construction.Buildable, building) >= 0 && !construction.Researched(shownCountry, building);
+                b.EnableInClassList("locked", locked);
+                if (locked && b == selected) Select(b);
+            });
 
             for (int k = 0; k < entries.Count && k < queue.Count; k++)
             {
@@ -461,6 +472,7 @@ namespace Hoi4.UI
             {
                 int s = kv.Key;
                 var box = kv.Value;
+                box.userData = construction.CanHold(s, placing); // no box where it can't be built (dockyard inland)
                 box.Q<Label>(className: "cm-levels").text = Levels(Hoi4Buildings.Level(s, placing),
                     construction.Queued(s, placing), construction.MaxLevel(s, placing));
                 int bonus = Hoi4Buildings.Level(s, "infrastructure") * 100 / Hoi4Construction.MaxInfrastructure;
@@ -481,7 +493,7 @@ namespace Hoi4.UI
             foreach (var kv in boxes)
             {
                 var sp = cam.WorldToScreenPoint(boxWorld[kv.Key]);
-                if (sp.z <= 0f) { kv.Value.style.display = DisplayStyle.None; continue; }
+                if (sp.z <= 0f || kv.Value.userData is bool holds && !holds) { kv.Value.style.display = DisplayStyle.None; continue; }
                 var pp = RuntimePanelUtils.ScreenToPanel(boxLayer.panel, new Vector2(sp.x, Screen.height - sp.y));
                 kv.Value.style.display = DisplayStyle.Flex;
                 kv.Value.style.left = pp.x;

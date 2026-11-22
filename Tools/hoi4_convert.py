@@ -1283,9 +1283,12 @@ def convert_move_arrow(hoi4: Path, out: Path, arrow_name="move_thick"):
 
 
 # Modifiers the economy uses (consumer goods and construction speed), from ideas (`modifier = {}`) and technologies
-ECONOMY_KEYS = ("consumer_goods_expected_value", "consumer_goods_factor", "production_speed_buildings_factor",
-                "production_speed_industrial_complex_factor", "production_speed_arms_factory_factor",
-                "production_speed_infrastructure_factor")
+ECONOMY_KEYS = ("consumer_goods_expected_value", "consumer_goods_factor", "production_speed_buildings_factor")
+BUILDING_SPEED = re.compile(r"production_speed_(\w+)_factor")  # production_speed_<building>_factor
+
+
+def economy_key(k):
+    return isinstance(k, str) and (k in ECONOMY_KEYS or BUILDING_SPEED.fullmatch(k) is not None)
 
 
 def load_idea_modifiers(hoi4: Path):
@@ -1303,7 +1306,7 @@ def load_idea_modifiers(hoi4: Path):
                 mods = {}
                 m = get(idea, "modifier")
                 for k, _, v in (m if isinstance(m, list) else []):
-                    if k in ECONOMY_KEYS:
+                    if economy_key(k):
                         try:
                             mods[k] = mods.get(k, 0.0) + float(v)
                         except (TypeError, ValueError):
@@ -1324,7 +1327,7 @@ def load_tech_modifiers(hoi4: Path):
                     continue
                 mods = {}
                 for k, _, v in t:
-                    if k in ECONOMY_KEYS:
+                    if economy_key(k):
                         try:
                             mods[k] = float(v)
                         except (TypeError, ValueError):
@@ -1332,6 +1335,26 @@ def load_tech_modifiers(hoi4: Path):
                 if mods:
                     techs[name] = mods
     return techs
+
+
+def load_building_techs(hoi4: Path):
+    """{building: {technology: level}}: technologies that enable a building up to a level (enable_building).
+    A building listed here needs one of them; without it HOI4 greys the building out."""
+    gated = {}
+    for f in sorted((hoi4 / "common" / "technologies").glob("*.txt")):
+        for key, _, block in parse_pdx(read_text(f)):
+            if key != "technologies" or not isinstance(block, list):
+                continue
+            for name, _, tech in block:
+                if not isinstance(tech, list):
+                    continue
+                for k, _, v in tech:
+                    if k == "enable_building" and isinstance(v, list) and get(v, "building"):
+                        try:
+                            gated.setdefault(get(v, "building"), {})[name] = int(float(get(v, "level", 1)))
+                        except (TypeError, ValueError):
+                            pass
+    return gated
 
 
 def history_values(items, key, out):
@@ -1357,6 +1380,7 @@ def write_country_economy(hoi4: Path, out: Path, tags):
     construction_speed (production_speed_buildings_factor) and per building speed (production_speed_<b>_factor)."""
     ideas = load_idea_modifiers(hoi4)
     techs = load_tech_modifiers(hoi4)
+    gated = load_building_techs(hoi4)
     defaults = {}
     for name, i in sorted(ideas.items()):
         # the generic default law of each law category, not a country's own law (ETH_chitet_law)
@@ -1371,9 +1395,12 @@ def write_country_economy(hoi4: Path, out: Path, tags):
         own = [i for i in history_values(root, "add_ideas", []) if isinstance(i, str) and i in ideas]
         cats = {ideas[i]["category"] for i in own if ideas[i]["law"]}
         own += [law for cat, law in defaults.items() if cat not in cats]
-        tech = []
+        known = set()
         for block in collect_blocks(root, "set_technology", []):
-            tech += [k for k, _, v in block if isinstance(k, str) and str(v) != "0" and k in techs]
+            known |= {k for k, _, v in block if isinstance(k, str) and str(v) != "0"}
+        tech = sorted(k for k in known if k in techs)
+        # tech-gated buildings: the most levels the country's 1936 technologies allow (0 = not researched)
+        unlocked = {b: max([lvl for tn, lvl in by.items() if tn in known] or [0]) for b, by in sorted(gated.items())}
         total = {k: 0.0 for k in ECONOMY_KEYS}
         cg_factor = 1.0
         for src in [ideas[i]["mods"] for i in own] + [techs[t] for t in tech]:
@@ -1381,13 +1408,18 @@ def write_country_economy(hoi4: Path, out: Path, tags):
                 if k == "consumer_goods_factor":
                     cg_factor *= 1.0 + v
                 else:
-                    total[k] += v
+                    total[k] = total.get(k, 0.0) + v
+        speed = {}
+        for k, v in total.items():
+            m = BUILDING_SPEED.fullmatch(k)
+            if m and m.group(1) not in ("buildings", "buildings_powered", "facility") and round(v, 4) != 0:
+                speed[m.group(1)] = round(v, 4)
         e = {"consumer_goods": round(total["consumer_goods_expected_value"], 4),
              "consumer_goods_factor": round(cg_factor - 1.0, 4),
              "construction_speed": round(total["production_speed_buildings_factor"], 4),
-             "speed": {b: round(total[f"production_speed_{b}_factor"], 4)
-                       for b in ("industrial_complex", "arms_factory", "infrastructure")},
-             "laws": sorted(i for i in own if ideas[i]["law"])}
+             "speed": speed,
+             "laws": sorted(i for i in own if ideas[i]["law"]),
+             "unlocked": unlocked}
         lines.append(f"  {tag}: {json.dumps(e)},")
     lines.append("}")
     (out / "common" / "hoi4_country_economy.json5").write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -1859,11 +1891,15 @@ def convert_state_view(hoi4: Path, out: Path, state_centers=None):
                 d["province_max"] = int(float(get(cap, "province_max")))
         defs[name] = d
 
-    categories = {}
+    categories, category_caps = {}, {}
     for f in sorted((hoi4 / "common" / "state_category").glob("*.txt")):
         for cat, _, body in get(parse_pdx(read_text(f)), "state_categories", []):
             if isinstance(body, list):
                 categories[cat] = int(float(get(body, "local_building_slots", 0) or 0))
+                # islands cap some buildings below the building's own state_max (air_base 6/4/2, naval_base 8/6/3)
+                caps = get(body, "buildings_max_level")
+                if isinstance(caps, list):
+                    category_caps[cat] = {k: int(float(v)) for k, _, v in caps if k and isinstance(v, str)}
 
     def start_ok(key):
         try:
@@ -1892,6 +1928,13 @@ def convert_state_view(hoi4: Path, out: Path, state_centers=None):
                 except ValueError:
                     pass
 
+    # coastal provinces (map/definition.csv: id;r;g;b;type;coastal;terrain;continent), for dockyards and naval bases
+    coastal = set()
+    for line in read_text(hoi4 / "map" / "definition.csv").splitlines():
+        cols = line.split(";")
+        if len(cols) > 5 and cols[0].isdigit() and cols[4] == "land" and cols[5] == "true":
+            coastal.add(int(cols[0]))
+
     states = {}
     for f in sorted((hoi4 / "history" / "states").glob("*.txt")):
         st = get(parse_pdx(read_text(f)), "state")
@@ -1903,6 +1946,9 @@ def convert_state_view(hoi4: Path, out: Path, state_centers=None):
             continue
         e = {"category": get(st, "state_category", "") or "", "manpower": int(float(get(st, "manpower", 0) or 0)),
              "owner": get(hist, "owner") or "", "cores": [c for c in get_all(hist, "add_core_of") if isinstance(c, str)]}
+        provs = get(st, "provinces", [])
+        if any(int(v) in coastal for v in (values(provs) if isinstance(provs, list) else []) if str(v).isdigit()):
+            e["coastal"] = True  # a coastal province: dockyards and other only_costal buildings allowed
         res = get(st, "resources", [])
         if isinstance(res, list):
             e["resources"] = {k: int(float(v)) for k, _, v in res if k and isinstance(v, str)}
@@ -1913,6 +1959,14 @@ def convert_state_view(hoi4: Path, out: Path, state_centers=None):
                 vps[int(vals[0])] = int(float(vals[1]))
         if vps:
             e["vps"] = vps
+        extra = 0
+        for v in get_all(hist, "add_extra_state_shared_building_slots"):
+            try:
+                extra += int(float(v))
+            except (TypeError, ValueError):
+                pass
+        if extra:
+            e["extra_slots"] = extra  # shared slots on top of the category's (Belgium +2)
         sb, pb = {}, {}
         for b in get_all(hist, "buildings"):
             if isinstance(b, list):
@@ -1946,7 +2000,7 @@ def convert_state_view(hoi4: Path, out: Path, state_centers=None):
             nflags += 1
     print(f"  state view flags: {nflags}")
 
-    doc = {"buildings": defs, "categories": categories, "states": states}
+    doc = {"buildings": defs, "categories": categories, "category_caps": category_caps, "states": states}
     (out / "map" / "hoi4_state_data.json5").write_text(
         "// Generated by hoi4_convert.py from history/states, common/buildings, common/state_category" + chr(10)
         + json.dumps(doc, indent=0) + chr(10), encoding="utf-8")

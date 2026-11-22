@@ -77,6 +77,8 @@
 .co-building { position: relative; width: 46px; height: 44px; }
 .co-building-icon { left: 0; top: 4px; width: 46px; height: 46px; }
 .co-building.selected .co-building-glow { display: flex; }
+/* not researched: greyed out, not selectable */
+.co-building.locked .co-building-icon, .co-building.locked .co-building-icon:hover { -unity-background-image-tint-color: rgb(80, 80, 80); }
 .co-building-glow { --sprite: "gfx/interface/construction/button_glow_0.png"; left: -1px; top: 3px; width: 48px; height: 48px; display: none; }
 
 /* count_container (upper right, x -220 → 330, y 12) */
