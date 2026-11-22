@@ -25,7 +25,7 @@ MonoBehaviour:
   SkipCacheWarming: 0
   WatchStyleDataFile: 1
   WatchStyleDataFileInDevelopmentBuilds: 0
-  LogLevel: 4
+  LogLevel: 3
   AutoUpdateBorders: 1
   AutoUpdateMapModeTextures: 1
   TextureUpdateBatchDelay: 0.1

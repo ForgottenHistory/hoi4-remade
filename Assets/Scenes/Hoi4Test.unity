@@ -328,6 +328,10 @@ MonoBehaviour:
   enableMultiplayer: 0
   initializeOnStart: 1
   logProgress: 1
+  enableEconomy: 0
+  enableBuildings: 0
+  enableAI: 0
+  enableProvinceHistory: 0
 --- !u!4 &625129541
 Transform:
   m_ObjectHideFlags: 0

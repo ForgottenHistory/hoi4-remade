@@ -208,7 +208,7 @@ namespace Hoi4.Units
             if (used == 0 && skip.Total > 0 && Time.unscaledTime > nextSkipLog)
             {
                 nextSkipLog = Time.unscaledTime + 5f;
-                ArchonLogger.Log($"Hoi4BattlePlanPanel: {skip.Total} line labels, none written: {skip.NoPath} without a path, " +
+                ArchonLogger.LogDebug($"Hoi4BattlePlanPanel: {skip.Total} line labels, none written: {skip.NoPath} without a path, " +
                                  $"{skip.Zoom} hidden by zoom, {skip.NoPanel} no panel, {skip.Behind} behind the camera, {skip.Bad} bad positions", "game_units");
             }
         }

@@ -272,7 +272,7 @@ namespace Hoi4.Units
             {
                 previewOffensive = null;
                 previewFront = 0;
-                ArchonLogger.Log($"Hoi4BattlePlans: no preview arrow for target {target}: no front of army {army.Id} faces its piece of land", "game_units");
+                ArchonLogger.LogDebug($"Hoi4BattlePlans: no preview arrow for target {target}: no front of army {army.Id} faces its piece of land", "game_units");
                 return;
             }
             int choice = previewStart != 0 ? fronts.FindIndex(f => f.Contains(previewStart)) : -1;
@@ -293,7 +293,7 @@ namespace Hoi4.Units
             o.Path = OffensivePath(o);
             previewOffensive = o;
             if (o.Path == null)
-                ArchonLogger.Log($"Hoi4BattlePlans: no preview arrow for target {target}: no path from front {choice + 1}/{fronts.Count} ({fronts[choice].Count} provinces)", "game_units");
+                ArchonLogger.LogDebug($"Hoi4BattlePlans: no preview arrow for target {target}: no path from front {choice + 1}/{fronts.Count} ({fronts[choice].Count} provinces)", "game_units");
         }
 
         /// <summary>The cursor on the map, in map px (y down). The engine's heightfield-corrected hit, the point

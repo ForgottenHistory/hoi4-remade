@@ -157,7 +157,7 @@ namespace Hoi4.War
                 Core.Recording.SessionRecorder.Note("ai_war", "declare", country, 0, 0, target,
                     $"{gameState.Countries.GetCountryTag(country)} ({own} div, str {mine.ToInt()}) on " +
                     $"{gameState.Countries.GetCountryTag(target)} (ratio {best.ToFloat():0.00})");
-                ArchonLogger.Log($"Hoi4AiWars: {gameState.Countries.GetCountryTag(country)} declares war on {gameState.Countries.GetCountryTag(target)} (strength ratio {best.ToFloat():0.00}, tick {tick})", "game_war");
+                ArchonLogger.LogDebug($"Hoi4AiWars: {gameState.Countries.GetCountryTag(country)} declares war on {gameState.Countries.GetCountryTag(target)} (strength ratio {best.ToFloat():0.00}, tick {tick})", "game_war");
             }
         }
     }
