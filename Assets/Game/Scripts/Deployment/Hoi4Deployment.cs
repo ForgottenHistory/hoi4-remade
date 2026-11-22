@@ -9,22 +9,25 @@ namespace Hoi4.Deployment
 {
     /// <summary>
     /// GAME: HOI4 training and deployment (recruit & deploy). Each country has deployment orders: a division template,
-    /// a province to deploy to (the capital by default) and a priority (low, normal, high). An order holds one
-    /// training line per division asked for. Daily, per country in id order, lines by priority (high first), then the order's place
+    /// a province to deploy to (the capital by default), a priority (low, normal, high) and a series amount. An order
+    /// holds training lines (Add Unit adds one), each training one division at a time: when it deploys the line starts
+    /// the next, until it has made the order's amount of them (0 = infinite, HOI4's default: it keeps training; amount
+    /// 1: the line goes after its first division). Daily, per country in id order, lines by priority (high first), then the order's place
     /// in the list, then line:
     /// - Manpower: a line takes the template's whole manpower from the pool when it starts (HOI4 does too: a German
     ///   1936 line holds its 9,600 men from day one). It waits while the pool is short, or while the men in training
     ///   would go over max(100,000, 75% of the men in the field) (MIN_POSSIBLE_TRAINING_MANPOWER,
     ///   MIN_FIELD_TO_TRAINING_MANPOWER_RATIO).
-    /// - Equipment: started lines get up to 10% of their need of each archetype a day from the stockpile, like field
-    ///   divisions, but after them (Hoi4Equipment delivers to the field first each day).
+    /// - Equipment: Hoi4Equipment hands it out each day to field divisions and started lines together, by priority
+    ///   (the order's for its lines, the country's reinforcement priority for the field): higher first, an equal share
+    ///   of what is needed within one priority, as HOI4 splits equipment between reinforcing and training.
     /// - Training: +1 day a day (BASE_DEPLOYMENT_TRAINING) of the template's training time (its slowest sub-unit's
     ///   training_time), never above the line's equipment level: in HOI4 a line's max_training follows its equipment
     ///   (105 of 910 rifles: at most 0.11 trained), so training waits for the factories.
     /// - Deploying: a fully trained line deploys on its own; the player may deploy one early from 20% training
     ///   (MIN_DIVISION_DEPLOYMENT_TRAINING) with the equipment it has. It appears at the order's province, or the
     ///   capital when the country no longer holds that province; with neither it waits.
-    /// - Fewer divisions or a cancelled order: the lines' men go back to the pool and their equipment to the stockpile.
+    /// - A cancelled line or order: the men in training go back to the pool and their equipment to the stockpile.
     /// Orders are changed only through commands (Hoi4DeploymentCommands), so every client runs the same days.
     /// </summary>
     public sealed class Hoi4Deployment : MonoBehaviour
@@ -32,7 +35,6 @@ namespace Hoi4.Deployment
         public const int MaxAmount = 99;
         public const int Low = 0, Normal = 1, High = 2;
 
-        static readonly FP DeliveryChunk = FP.FromFraction(1, 10);       // of a line's need, a day (as field divisions)
         static readonly FP MinDeployTraining = FP.FromFraction(2, 10);   // MIN_DIVISION_DEPLOYMENT_TRAINING
         static readonly FP MinTrainingManpower = FP.FromInt(100000);     // MIN_POSSIBLE_TRAINING_MANPOWER
         static readonly FP FieldToTraining = FP.FromFraction(75, 100);   // MIN_FIELD_TO_TRAINING_MANPOWER_RATIO
@@ -43,6 +45,7 @@ namespace Hoi4.Deployment
             public int Id;
             public Hoi4Division Division;   // not on the map yet: UnitId 0, its men and equipment are the line's
             public FP Training;             // 0..1
+            public int Series = 1;          // which division of the order's amount this is (1, 2, ...)
             public bool Started => Division.Men >= FP.FromInt(Division.Manpower);
         }
 
@@ -53,6 +56,7 @@ namespace Hoi4.Deployment
             public ushort Province;
             public int Priority = Normal;
             public int TrainingDays;
+            public int Amount;              // divisions each line trains in turn; 0 = infinite (keeps training)
             public readonly List<Line> Lines = new List<Line>();
         }
 
@@ -60,6 +64,7 @@ namespace Hoi4.Deployment
         {
             public readonly List<Order> Orders = new List<Order>();
             public int NextOrder = 1, NextLine = 1;
+            public int Reinforcement = Normal; // equipment priority of the divisions in the field
         }
 
         public static Hoi4Deployment Instance { get; private set; }
@@ -113,6 +118,26 @@ namespace Hoi4.Deployment
 
         public string Tag(ushort country) => gameState?.Countries.GetCountryTag(country);
 
+        /// <summary>Equipment priority of the country's divisions in the field (reinforcing), Normal by default.</summary>
+        public int ReinforcementPriority(ushort country) => countries.TryGetValue(country, out var c) ? c.Reinforcement : Normal;
+
+        public void SetReinforcementPriority(ushort country, int priority)
+        {
+            if (!countries.TryGetValue(country, out var c)) countries[country] = c = new Country();
+            c.Reinforcement = Mathf.Clamp(priority, Low, High);
+            Changed?.Invoke(country);
+        }
+
+        /// <summary>The started lines of a country with their order's priority, in the order they are served
+        /// (Hoi4Equipment's daily delivery).</summary>
+        public void StartedLines(ushort country, List<(Hoi4Division division, int priority)> into)
+        {
+            if (!countries.TryGetValue(country, out var c)) return;
+            foreach (var o in ByPriority(c.Orders))
+                foreach (var l in o.Lines)
+                    if (l.Started) into.Add((l.Division, o.Priority));
+        }
+
         public bool CanTrain(ushort country, string template) =>
             IsReady && country != 0 && Hoi4Divisions.Instance.HasTemplate(Tag(country), template)
             && Hoi4Divisions.Instance.TrainingDays(Tag(country), template) > 0;
@@ -144,8 +169,9 @@ namespace Hoi4.Deployment
 
         // ---- changes (commands only) --------------------------------------------------------------------
 
-        /// <summary>A new order of `amount` divisions of the template, deploying to the province. Returns its id.</summary>
-        public int Create(ushort country, string template, int amount, ushort province)
+        /// <summary>A new order of the template with `lines` training lines, deploying to the province, training
+        /// without end (amount infinite) until told otherwise. Returns its id.</summary>
+        public int Create(ushort country, string template, int lines, ushort province)
         {
             if (!CanTrain(country, template)) return 0;
             if (!countries.TryGetValue(country, out var c)) countries[country] = c = new Country();
@@ -157,9 +183,9 @@ namespace Hoi4.Deployment
                 TrainingDays = Hoi4Divisions.Instance.TrainingDays(Tag(country), template),
             };
             c.Orders.Add(order);
-            AddLines(country, order.Id, amount);
+            AddLines(country, order.Id, lines);
             Core.Recording.SessionRecorder.Note("deployment", "order", country, 0, province, 0,
-                $"order {order.Id}: {amount} x {template} ({order.TrainingDays} days), deploy to {province}");
+                $"order {order.Id}: {lines} x {template} ({order.TrainingDays} days), deploy to {province}");
             return order.Id;
         }
 
@@ -176,20 +202,6 @@ namespace Hoi4.Deployment
                 division.Men = FP.Zero; // taken from the pool when the line starts
                 order.Lines.Add(new Line { Id = c.NextLine++, Division = division });
             }
-            Changed?.Invoke(country);
-        }
-
-        /// <summary>Fewer divisions: the last lines go (the least trained, newest first), their men and equipment back.</summary>
-        public void RemoveLines(ushort country, int orderId, int amount)
-        {
-            var order = GetOrder(country, orderId);
-            if (order == null) return;
-            for (int i = 0; i < amount && order.Lines.Count > 0; i++)
-            {
-                Refund(country, order.Lines[order.Lines.Count - 1]);
-                order.Lines.RemoveAt(order.Lines.Count - 1);
-            }
-            if (order.Lines.Count == 0) countries[country].Orders.Remove(order);
             Changed?.Invoke(country);
         }
 
@@ -213,6 +225,16 @@ namespace Hoi4.Deployment
             countries[country].Orders.Remove(order);
             Core.Recording.SessionRecorder.Note("deployment", "cancel", country, 0, order.Province, 0,
                 $"order {order.Id}: {order.Lines.Count} x {order.Template} cancelled");
+            Changed?.Invoke(country);
+        }
+
+        /// <summary>How many divisions each line trains (0 = infinite). Lines already past it finish their division
+        /// and go.</summary>
+        public void SetAmount(ushort country, int orderId, int amount)
+        {
+            var order = GetOrder(country, orderId);
+            if (order == null) return;
+            order.Amount = Mathf.Clamp(amount, 0, MaxAmount);
             Changed?.Invoke(country);
         }
 
@@ -296,8 +318,20 @@ namespace Hoi4.Deployment
             d.Organisation = d.MaxOrganisation;
             ushort unitId = Hoi4Divisions.Instance.Deploy(d, province, country);
             if (unitId == 0) return false;
-            order.Lines.Remove(line);
-            if (order.Lines.Count == 0) countries[country].Orders.Remove(order);
+            var next = order.Amount == 0 || line.Series < order.Amount ? Hoi4Divisions.Instance.NewDivision(Tag(country), order.Template) : null;
+            if (next != null)
+            {
+                // the line trains the next division of the series: new men, new equipment, from no training
+                next.Men = FP.Zero;
+                line.Division = next;
+                line.Training = FP.Zero;
+                line.Series++;
+            }
+            else
+            {
+                order.Lines.Remove(line);
+                if (order.Lines.Count == 0) countries[country].Orders.Remove(order);
+            }
             Core.Recording.SessionRecorder.Note("deployment", "deployed", country, unitId, province, 0,
                 $"{d.Name} ({order.Template}) trained {line.Training.ToFloat():0.00}, equipment {d.EquipmentLevel.ToFloat():0.00}");
             Hoi4UnitCounters.Instance?.MarkDirty();
@@ -306,15 +340,13 @@ namespace Hoi4.Deployment
 
         // ---- daily --------------------------------------------------------------------------------------
 
-        /// <summary>Daily, from Hoi4Simulation after Hoi4Equipment (the field is equipped first) and before Hoi4Manpower:
-        /// lines start, get equipment, train, and the trained ones deploy.</summary>
+        /// <summary>Daily, from Hoi4Simulation after Hoi4Equipment (which equips the field and the started lines) and
+        /// before Hoi4Manpower: lines start, train, and the trained ones deploy.</summary>
         public void SimulateDay()
         {
             if (!IsReady || countries.Count == 0) return;
             var resources = gameState.Resources;
             var byCountry = Hoi4Equipment.DivisionsByCountry(gameState, Hoi4Divisions.Instance);
-            int n = Hoi4Divisions.Archetypes.Length;
-            var stock = new FP[n];
             var ready = new List<(Order, Line)>();
             day++;
 
@@ -327,7 +359,6 @@ namespace Hoi4.Deployment
                 byCountry.TryGetValue(country, out var field);
                 FP pool = resources.GetResource(country, Hoi4Manpower.ResourceId);
                 FP cap = TrainingCap(country, field), training = MenInTraining(country);
-                for (int a = 0; a < n; a++) stock[a] = resources.GetResource(country, (ushort)(Hoi4Equipment.StockResourceBase + a));
                 bool changed = false;
 
                 foreach (var order in ByPriority(c.Orders))
@@ -345,19 +376,11 @@ namespace Hoi4.Deployment
                             training += need;
                             changed = true;
                         }
-                        for (int a = 0; a < n; a++)
-                        {
-                            if (stock[a] <= FP.Zero || d.Have[a] >= d.Need[a]) continue;
-                            FP give = FP.Min(stock[a], FP.Min(d.Need[a] * DeliveryChunk, d.Need[a] - d.Have[a]));
-                            d.Have[a] += give;
-                            stock[a] -= give;
-                        }
                         line.Training = FP.Min(line.Training + perDay, d.EquipmentLevel);
                         if (line.Training >= FP.One) ready.Add((order, line));
                     }
                 }
                 resources.SetResource(country, Hoi4Manpower.ResourceId, pool);
-                for (int a = 0; a < n; a++) resources.SetResource(country, (ushort)(Hoi4Equipment.StockResourceBase + a), stock[a]);
 
                 foreach (var (order, line) in ready) changed |= Deploy(country, order, line);
                 ready.Clear();

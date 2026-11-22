@@ -8,7 +8,8 @@ namespace Hoi4.Deployment
     /// <summary>
     /// GAME: the simplest recruitment AI. Once a week (each country on its own weekday, (country id + 5) mod 7, not the
     /// production or construction AI's day) every country but the player's keeps enough divisions in training for its
-    /// military factories: one line per 4 military factories, at least one. It trains its most common template (its
+    /// military factories: one line per 4 military factories, at least one (its orders train without end, like HOI4's
+    /// default, so a line keeps making divisions; new lines only when the factories grow). It trains its most common template (its
     /// line infantry, as HOI4's AI mostly does in 1936), deploying to the capital, and only while its manpower pool
     /// would keep twice the template's men after the new lines start (a reserve for reinforcing the field). Orders go
     /// through the same commands as the player's.
@@ -57,8 +58,8 @@ namespace Hoi4.Deployment
                 Hoi4Deployment.Order existing = null;
                 foreach (var o in deployment.Orders(country)) if (o.Template == template) { existing = o; break; }
                 bool ok = existing != null
-                    ? gameState.TryExecuteCommand(new ChangeDeploymentAmountCommand { CountryId = country, OrderId = existing.Id, Amount = add }, out _)
-                    : gameState.TryExecuteCommand(new CreateDeploymentOrderCommand { CountryId = country, Template = template, Amount = add }, out _);
+                    ? gameState.TryExecuteCommand(new AddDeploymentLinesCommand { CountryId = country, OrderId = existing.Id, Lines = add }, out _)
+                    : gameState.TryExecuteCommand(new CreateDeploymentOrderCommand { CountryId = country, Template = template, Lines = add }, out _);
                 if (ok)
                     Core.Recording.SessionRecorder.Note("deployment", "ai_train", country, 0, 0, 0,
                         $"{add} x {template} (lines {lines + add}/{wanted}, military factories {construction.Military(country)}, pool {manpower.Available(country).ToInt()})");

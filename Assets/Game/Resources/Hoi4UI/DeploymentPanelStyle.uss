@@ -49,27 +49,34 @@
 .dpp-bar-bg { --sprite: "gfx/interface/deployment/priority_bar_bg.png"; left: 310px; top: 19px; width: 72px; height: 12px; }
 .dpp-bar-clip { position: absolute; left: 310px; top: 19px; width: 0; height: 12px; overflow: hidden; }
 .dpp-bar-fill { --sprite: "gfx/interface/deployment/priority_bar.png"; left: 0; top: 0; width: 72px; height: 12px; }
+/* GFX_deploy_priority frames: 1 off, 2 low (red), 3 normal (yellow), 4 high (green) */
 .dpp-dot { top: 15px; width: 20px; height: 21px; --sprite: "gfx/interface/deployment/priority_0.png"; }
-.dpp-dot.on { --sprite: "gfx/interface/deployment/priority_2.png"; }
+.dpp-dot.p0.on, .dpo-prio-0.on { --sprite: "gfx/interface/deployment/priority_1.png"; }
+.dpp-dot.p1.on, .dpo-prio-1.on { --sprite: "gfx/interface/deployment/priority_2.png"; }
+.dpp-dot.p2.on, .dpo-prio-2.on { --sprite: "gfx/interface/deployment/priority_3.png"; }
 
 /* ---- military_deployment_conveyor_view: one order, 488 x 84 (DeploymentOrder.uxml) --------------------------- */
 .dpo { position: relative; width: 520px; margin-left: 25px; margin-top: 2px; }
 .dpo-order { position: relative; width: 490px; height: 84px; }
 .dpo-bg { --sprite: "gfx/interface/deployment/order_bg.png"; left: 0; top: 0; width: 490px; height: 84px; }
 .dpo-icon { left: 12px; top: 22px; width: 76px; height: 42px; }
+/* division_priority_icon (GFX_div_deploy_priority_icon_strip): the TEMPLATE's reinforcement priority, frame 1 reserve
+   (red chevrons down), 2 normal (none), 3 elite (chevrons up). On a template it is clickable (cycles; HOI4 sets it in the
+   division designer). */
 .dpo-strip { left: 62px; top: 22px; width: 16px; height: 52px; --sprite: "gfx/interface/deployment/priority_strip_1.png"; }
-.dpo-strip.p0 { --sprite: "gfx/interface/deployment/priority_strip_0.png"; }
-.dpo-strip.p2 { --sprite: "gfx/interface/deployment/priority_strip_2.png"; }
-.dpo-name { left: 104px; top: 18px; width: 200px; height: 25px; font-size: 17px; -unity-font-style: bold; -unity-text-align: middle-left; overflow: hidden; }
+.dte-strip { left: 55px; top: 16px; width: 16px; height: 52px; --sprite: "gfx/interface/deployment/priority_strip_1.png"; }
+.dpo-strip.reserve, .dte-strip.reserve { --sprite: "gfx/interface/deployment/priority_strip_0.png"; }
+.dpo-strip.elite, .dte-strip.elite { --sprite: "gfx/interface/deployment/priority_strip_2.png"; }
+.dpo-name { left: 104px; top: 15px; width: 200px; height: 24px; font-size: 17px; -unity-font-style: bold; -unity-text-align: middle-left; overflow: hidden; }
 .dpo-location { --sprite: "gfx/interface/deployment/location_0.png"; left: 91px; top: 46px; width: 223px; height: 31px; }
 .dpo-location.picking { --sprite: "gfx/interface/deployment/location_1.png"; }
 .dpo-location-text { left: 0; top: 0; width: 223px; height: 31px; font-size: 15px; -unity-font-style: bold; }
 .dpo-location-text.none { color: rgb(220, 60, 50); }
 .dpo-sub { --sprite: "gfx/interface/deployment/decrease.png"; left: 312px; top: 10px; width: 33px; height: 33px; }
 .dpo-amount { left: 345px; top: 16px; width: 39px; height: 22px; font-size: 18px; -unity-font-style: bold; }
+.dpo-infinity { --sprite: "gfx/interface/deployment/infinity.png"; left: 354px; top: 17px; width: 20px; height: 20px; }
 .dpo-add { --sprite: "gfx/interface/deployment/increase.png"; left: 383px; top: 10px; width: 33px; height: 33px; }
 .dpo-prio { top: 17px; width: 20px; height: 21px; --sprite: "gfx/interface/deployment/priority_0.png"; }
-.dpo-prio.on { --sprite: "gfx/interface/deployment/priority_2.png"; }
 .dpo-prio-0 { left: 420px; }
 .dpo-prio-1 { left: 440px; }
 .dpo-prio-2 { left: 460px; }
@@ -104,10 +111,15 @@
 .dpl-eq-bg, .dpl-tr-bg { --sprite: "gfx/interface/deployment/entry_bar_bg.png"; left: 0; top: 0; width: 68px; height: 12px; }
 .dpl-eq-clip, .dpl-tr-clip { position: absolute; left: 0; top: 0; width: 0; height: 12px; overflow: hidden; }
 .dpl-eq-fill, .dpl-tr-fill { --sprite: "gfx/interface/deployment/entry_bar.png"; left: 0; top: 0; width: 68px; height: 12px; }
-.dpl-eq-fill.stalled { --sprite: "gfx/interface/deployment/entry_bar_stalled.png"; }
+/* GFX_deployment_entry_stalled_progressbar (yellow): the line can't train on (waiting for manpower, or its training has
+   caught up with its equipment) */
+.dpl-eq-fill.stalled, .dpl-tr-fill.stalled, .dpo-eq-fill.stalled { --sprite: "gfx/interface/deployment/entry_bar_stalled.png"; }
 .dpl-level { --sprite: "gfx/interface/deployment/unit_level_0.png"; left: 306px; top: 6px; width: 27px; height: 27px; }
 .dpl-tr-area { position: absolute; left: 329px; top: 13px; width: 68px; height: 12px; }
-.dpl-number { left: 395px; top: 0; width: 50px; height: 40px; font-size: 15px; -unity-font-style: bold; }
+/* left-anchored, so "1/" sits in the same place whether the infinity icon or a number follows */
+.dpl-series { position: absolute; left: 395px; top: 0; width: 50px; height: 40px; padding-left: 18px; flex-direction: row; justify-content: flex-start; align-items: center; }
+.dpl-number { position: relative; font-size: 15px; -unity-font-style: bold; }
+.dpl-infinity { --sprite: "gfx/interface/deployment/infinity.png"; position: relative; width: 16px; height: 16px; }
 .dpl-deploy { --sprite: "gfx/interface/deployment/deploy_line.png"; left: 458px; top: 7px; width: 26px; height: 26px; }
 .dpl-cancel { --sprite: "gfx/interface/deployment/cancel_line.png"; left: 484px; top: 7px; width: 26px; height: 26px; }
 

@@ -18,7 +18,11 @@
                 <ui:VisualElement class="spr dpl-tr-fill" picking-mode="Ignore" />
             </ui:VisualElement>
         </ui:VisualElement>
-        <ui:Label name="dpl-number" class="hoi4-label center dpl-number" picking-mode="Ignore" />
+        <!-- series_number: which division of the order's amount the line trains (1/infinite, 2/5) -->
+        <ui:VisualElement class="dpl-series" picking-mode="Position" tooltip="Which division of the series this line is training">
+            <ui:Label name="dpl-number" class="hoi4-label dpl-number" picking-mode="Ignore" />
+            <ui:VisualElement name="dpl-infinity" class="spr dpl-infinity" picking-mode="Ignore" />
+        </ui:VisualElement>
         <ui:VisualElement name="dpl-deploy" class="spr hoi4-button dpl-deploy" picking-mode="Position" />
         <ui:VisualElement name="dpl-cancel" class="spr hoi4-button dpl-cancel" picking-mode="Position" tooltip="Cancel this division: its manpower and equipment go back" />
     </ui:VisualElement>

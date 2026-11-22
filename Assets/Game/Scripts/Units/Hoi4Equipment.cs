@@ -18,8 +18,12 @@ namespace Hoi4.Units
     ///   StockResourceBase + index into Hoi4Divisions.Archetypes), so they are saved with the game. They start at the
     ///   country history's add_equipment_to_stockpile, which is almost nothing (Germany has none: HOI4's stockpile is a
     ///   pass-through, production goes straight to the divisions).
-    /// - Daily delivery: every division short of an archetype gets up to 10% of its need of it from the stockpile, in
-    ///   id order, until the stockpile is empty. Hoi4Manpower then raises strength to what equipment and men allow.
+    /// - Daily delivery: field divisions (reinforcing) and started training lines (Hoi4.Deployment) each want up to 10%
+    ///   of their need of an archetype. Highest priority first (the country's reinforcement priority for the field,
+    ///   each order's for its lines; all Normal by default), and within it field divisions by their template's priority
+    ///   (elite, normal, reserve; lines count as normal); within one tier everyone gets the same share of what they
+    ///   want when the stockpile is short (HOI4 splits equipment between reinforcing and training this way).
+    ///   Hoi4Manpower then raises strength to what equipment and men allow.
     /// Countries, lines and divisions all go in id or file order: the same on every machine.
     /// </summary>
     public sealed class Hoi4Equipment : MonoBehaviour
@@ -148,29 +152,60 @@ namespace Hoi4.Units
             int n = Hoi4Divisions.Archetypes.Length;
             var byCountry = DivisionsByCountry(gameState, Hoi4Divisions.Instance);
             var stock = new FP[n];
+            var deployment = Hoi4.Deployment.Hoi4Deployment.Instance;
+            var consumers = new List<(Hoi4Division division, int priority)>();
             day++;
 
             resources.BeginBatch();
             foreach (ushort country in countries)
             {
                 for (int a = 0; a < n; a++) stock[a] = resources.GetResource(country, (ushort)(StockResourceBase + a));
+                consumers.Clear();
+                // tier = equipment priority x 3 + template priority (0..8, served from the top)
+                int fieldPriority = deployment != null ? deployment.ReinforcementPriority(country) : Hoi4.Deployment.Hoi4Deployment.Normal;
+                var divisions = Hoi4Divisions.Instance;
                 if (byCountry.TryGetValue(country, out var list))
+                    foreach (var d in list) consumers.Add((d, fieldPriority * 3 + divisions.TemplatePriority(d.Tag, d.Template)));
+                int lines = consumers.Count;
+                deployment?.StartedLines(country, consumers);
+                for (int i = lines; i < consumers.Count; i++)
+                    consumers[i] = (consumers[i].division, consumers[i].priority * 3 + Hoi4Divisions.Normal);
+                if (consumers.Count > 0)
                     for (int a = 0; a < n; a++)
-                        foreach (var d in list)
-                        {
-                            if (stock[a] <= FP.Zero) break;
-                            if (d.Need == null || d.Have[a] >= d.Need[a]) continue;
-                            FP give = FP.Min(stock[a], FP.Min(d.Need[a] * DeliveryChunk, d.Need[a] - d.Have[a]));
-                            d.Have[a] += give;
-                            stock[a] -= give;
-                            delivered[country][a] += give;
-                        }
+                        for (int tier = 8; tier >= 0 && stock[a] > FP.Zero; tier--)
+                            delivered[country][a] += Share(consumers, tier, a, ref stock[a]);
                 for (int a = 0; a < n; a++) resources.SetResource(country, (ushort)(StockResourceBase + a), stock[a]);
             }
             resources.EndBatch();
 
             if (day % ReportEveryDays == 0) Report();
         }
+
+        /// <summary>Equipment of one archetype to everyone of one priority: what each wants (up to 10% of its need a
+        /// day), all of it when the stockpile covers the total, else the same fraction of it for each. Returns what
+        /// was given.</summary>
+        static FP Share(List<(Hoi4Division division, int priority)> consumers, int priority, int a, ref FP stock)
+        {
+            FP wanted = FP.Zero;
+            foreach (var (d, p) in consumers)
+                if (p == priority) wanted += Want(d, a);
+            if (wanted <= FP.Zero) return FP.Zero;
+            FP fraction = stock >= wanted ? FP.One : stock / wanted;
+            FP given = FP.Zero;
+            foreach (var (d, p) in consumers)
+            {
+                if (p != priority) continue;
+                FP give = FP.Min(Want(d, a) * fraction, stock - given);
+                if (give <= FP.Zero) continue;
+                d.Have[a] += give;
+                given += give;
+            }
+            stock -= given;
+            return given;
+        }
+
+        static FP Want(Hoi4Division d, int a) =>
+            d.Need == null || d.Have[a] >= d.Need[a] ? FP.Zero : FP.Min(d.Need[a] * DeliveryChunk, d.Need[a] - d.Have[a]);
 
         /// <summary>A note per country with lines or deliveries in the last week: made, delivered, stockpile
         /// ("made infantry_equipment=378 ... | delivered ... | stock ...", Tools/recorder/report.py reads it).</summary>

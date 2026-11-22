@@ -66,9 +66,9 @@ def bar(canvas, x, y, fill_name, bg_name, value):
 
 
 def prio(canvas, x, y, selected):
-    """Low/normal/high dots (GFX_deploy_priority: frame 1 off, frame 3 on)."""
+    """Low/normal/high dots (GFX_deploy_priority: frame 1 off, 2 low red, 3 normal yellow, 4 high green)."""
     for i in range(3):
-        canvas.alpha_composite(img(f"priority_{2 if i == selected else 0}.png"), (x + 20 * i, y))
+        canvas.alpha_composite(img(f"priority_{i + 1 if i == selected else 0}.png"), (x + 20 * i, y))
 
 
 def json5(path):
@@ -99,14 +99,14 @@ def template_icon(canvas, x, y, main):
     canvas.alpha_composite(icon, (x + (bg.width - icon.width) // 2, y + (bg.height - icon.height) // 2))
 
 
-def draw_order(canvas, ox, oy, name, main, location, lines, priority):
+def draw_order(canvas, ox, oy, name, main, location, lines, priority, template_priority=1):
     """military_deployment_conveyor_view (490x84), its summary row, the training lines and the end line. Returns the
     y below it."""
     d = ImageDraw.Draw(canvas)
     canvas.alpha_composite(img("order_bg.png"), (ox, oy))
     template_icon(canvas, ox + 12, oy + 22, main)
-    canvas.alpha_composite(img(f"priority_strip_{priority}.png"), (ox + 62, oy + 22))
-    text(d, (ox + 104, oy + 31), name, 17, anchor="lm")
+    canvas.alpha_composite(img(f"priority_strip_{template_priority}.png"), (ox + 62, oy + 22))  # the template's, not the order's
+    text(d, (ox + 104, oy + 27), name, 17, anchor="lm")  # the name box is y 15..38 in the sprite
     canvas.alpha_composite(img("decrease.png"), (ox + 312, oy + 10))
     text(d, (ox + 364, oy + 27), str(len(lines)), 18, anchor="mm")
     canvas.alpha_composite(img("increase.png"), (ox + 383, oy + 10))
@@ -225,6 +225,7 @@ def main():
         bg = img("template_bg.png")
         canvas.alpha_composite(bg, (ex - 5, ey))
         template_icon(canvas, ex + 5, ey + 16, t["main"])
+        canvas.alpha_composite(img(f"priority_strip_{t.get('priority', 1)}.png"), (ex + 55, ey + 16))  # reserve/normal/elite
         canvas.alpha_composite(img("obsolete_toggle_0.png"), (ex + 302, ey + 22))
         text(d, (ex + 102 + 120, ey + 32), name, 17, anchor="mm")
         canvas.alpha_composite(img("small_button.png"), (ex + 158, ey + 48))

@@ -1110,7 +1110,9 @@ def convert_oob(hoi4: Path, out: Path, existing_tags, ruling_party):
                 continue
             # HOI4 shows a division by its highest-priority regiment
             main = max(regs, key=lambda r: subs[r]["priority"])
+            # priority: reinforcement priority of the template, 0 reserve, 1 normal (default), 2 elite
             templates[get(t, "name")] = {"regiments": regs, "support": sups, "main": main,
+                                         "priority": int(get(t, "priority", 1) or 0),
                                          "names_group": get(t, "division_names_group")}
 
         # new divisions are named from the template's names group: its fallback format, numbered after the
@@ -1821,6 +1823,9 @@ DEPLOYMENT_SPRITES = {
     "foreign_templates": "GFX_foreign_templates_dropdown_button", "template_bg": "GFX_deployment_named_division_bg",
     "small_button": "GFX_small_button_71x26", "delete_template": "GFX_delete_template_button",
     "obsolete_toggle": "GFX_toggle_obsolete_button",
+    # a division's template priority in the division list (unitview.gui army_division_view unitlist_priority_icon)
+    "unit_priority": "GFX_unitlist_priority_icon_strip",
+    "infinity": "GFX_infinity_icon",  # an order that keeps training (INFINITY = "£infinity_icon!")
 }
 # Progress bars (progressbartype): file name -> texture
 DEPLOYMENT_BARS = {

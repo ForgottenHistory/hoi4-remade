@@ -91,6 +91,12 @@ namespace Hoi4.Units
             Hoi4Sprites.Apply(icon, iconPath);
             card.Add(icon);
             card.Add(Hoi4Sprites.Make("dv-level"));
+            int priority = d != null && Hoi4Divisions.Instance != null ? Hoi4Divisions.Instance.TemplatePriority(d.Tag, d.Template) : Hoi4Divisions.Normal;
+            var marker = Hoi4Sprites.Make("dv-priority", priority == Hoi4Divisions.Reserve ? "reserve" : priority == Hoi4Divisions.Elite ? "elite" : "normal");
+            marker.pickingMode = PickingMode.Position;
+            marker.tooltip = priority == Hoi4Divisions.Reserve ? "Reserve template: reinforced after the others"
+                           : priority == Hoi4Divisions.Elite ? "Elite template: reinforced before the others" : "";
+            card.Add(marker);
             // unitview.gui bar_prepare: the planning bonus, of its maximum
             card.Add(Bar("dv-bar-plan", d != null ? d.Planning.ToFloat() / Hoi4BattlePlans.MaxPlanning.ToFloat() : 0f));
             // unitview.gui unitlist_dig_in_icon and dig_in_bonus: entrenchment, of its maximum

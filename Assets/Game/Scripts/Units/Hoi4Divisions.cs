@@ -131,6 +131,23 @@ namespace Hoi4.Units
         public bool HasTemplate(string tag, string template) =>
             tag != null && template != null && templatesByTag.TryGetValue(tag, out var t) && t[template] is JObject;
 
+        public const int Reserve = 0, Normal = 1, Elite = 2;
+        readonly Dictionary<string, int> templatePriority = new Dictionary<string, int>(); // "TAG/template" -> changed priority
+
+        /// <summary>The template's reinforcement priority (HOI4 division template priority): 0 reserve, 1 normal,
+        /// 2 elite. From the 1936 history (54 reserve templates, 12 elite), changed by SetTemplatePriority.</summary>
+        public int TemplatePriority(string tag, string template)
+        {
+            if (tag == null || template == null) return Normal;
+            if (templatePriority.TryGetValue(tag + "/" + template, out int p)) return p;
+            return HasTemplate(tag, template) ? Mathf.Clamp((int?)templatesByTag[tag][template]["priority"] ?? Normal, Reserve, Elite) : Normal;
+        }
+
+        public void SetTemplatePriority(string tag, string template, int priority)
+        {
+            if (HasTemplate(tag, template)) templatePriority[tag + "/" + template] = Mathf.Clamp(priority, Reserve, Elite);
+        }
+
         /// <summary>The template's main regiment type (HOI4 shows a division by it; its icon), null when unknown.</summary>
         public string TemplateMain(string tag, string template) =>
             HasTemplate(tag, template) ? (string)templatesByTag[tag][template]["main"] : null;
