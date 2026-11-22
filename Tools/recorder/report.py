@@ -371,6 +371,30 @@ def main():
         built = ", ".join(f"{k.replace('industrial_complex', 'civ').replace('arms_factory', 'mil')} +{n}" for k, n in sorted(built_by[c].items()))
         print(f"{c:8} {d}  {' | '.join(parts[:3])}  built: {built or '-'}  (AI queued {ai_queued[c]})")
 
+    # --- deployment: weekly notes (Hoi4Deployment), "lines L started S training T equipment E | waiting W | ..." ---
+    print("\n## Deployment (last week's training lines; divisions deployed over the recording)")
+    dep_last, deployed, early, ai_lines = {}, Counter(), Counter(), Counter()
+    for r in notes:
+        if r["system"] != "deployment":
+            continue
+        if r["kind"] == "week":
+            dep_last[r["country"]] = (r["date"], r["text"])
+        elif r["kind"] == "deployed":
+            deployed[r["country"]] += 1
+            m = re.search(r"trained ([\d.]+)", r["text"])
+            if m and float(m.group(1)) < 0.995:
+                early[r["country"]] += 1
+        elif r["kind"] == "ai_train":
+            ai_lines[r["country"]] += int(r["text"].split(" ")[0])
+    if not dep_last and not deployed:
+        print("no deployment notes")
+    countries_ = set(dep_last) | set(deployed)
+    shown = [player] if player in countries_ else []
+    shown += [c for c, _ in (deployed + Counter({c: 0 for c in countries_})).most_common(a.top) if c != player]
+    for c in shown[: a.top]:
+        d, t_ = dep_last.get(c, ("-", "no lines"))
+        print(f"{c:8} {d}  {t_}  deployed {deployed[c]} (early {early[c]})  (AI ordered {ai_lines[c]})")
+
     # --- war: capitulations and peace deals (Hoi4War / Hoi4PeaceConference) ---------------------------
     print("\n## War (AI declarations, capitulations, peace deals)")
     war_notes = [r for r in notes if r["system"] in ("war", "ai_war") and r["kind"] != "sent_home"]

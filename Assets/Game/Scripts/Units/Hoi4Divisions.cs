@@ -115,6 +115,79 @@ namespace Hoi4.Units
 
         public void Remove(ushort unitId) => divisions.Remove(unitId);
 
+        // ---- templates (new divisions: Hoi4.Deployment) ---------------------------------------------------
+
+        JObject subUnitData;
+        readonly Dictionary<string, JObject> templatesByTag = new Dictionary<string, JObject>();
+        readonly Dictionary<string, int> nextNumber = new Dictionary<string, int>(); // "TAG/template" -> next division number
+
+        /// <summary>The country's division templates, in file order (none when it has no 1936 army).</summary>
+        public IEnumerable<string> Templates(string tag)
+        {
+            if (tag == null || !templatesByTag.TryGetValue(tag, out var t)) yield break;
+            foreach (var p in t.Properties()) yield return p.Name;
+        }
+
+        public bool HasTemplate(string tag, string template) =>
+            tag != null && template != null && templatesByTag.TryGetValue(tag, out var t) && t[template] is JObject;
+
+        /// <summary>Days a division of the template trains: its slowest sub-unit's training_time (HOI4).</summary>
+        public int TrainingDays(string tag, string template)
+        {
+            if (!HasTemplate(tag, template) || subUnitData == null) return 0;
+            var tj = (JObject)templatesByTag[tag][template];
+            int days = 0;
+            foreach (string name in (tj["regiments"]?.Select(x => (string)x) ?? Enumerable.Empty<string>())
+                         .Concat(tj["support"]?.Select(x => (string)x) ?? Enumerable.Empty<string>()))
+                if (subUnitData[name] is JObject s) days = System.Math.Max(days, (int?)s["training_time"] ?? 0);
+            return days;
+        }
+
+        /// <summary>A new division of the template that isn't on the map yet (UnitId 0): full manpower, no equipment,
+        /// named from the template's names group with its next number (HOI4 division_names_group).</summary>
+        public Hoi4Division NewDivision(string tag, string template)
+        {
+            if (!HasTemplate(tag, template) || subUnitData == null) return null;
+            var tj = (JObject)templatesByTag[tag][template];
+            string key = tag + "/" + template;
+            int n = nextNumber.TryGetValue(key, out int v) ? v : ((int?)tj["next_number"] ?? 1);
+            nextNumber[key] = n + 1;
+            string format = (string)tj["name_format"];
+            string name = string.IsNullOrEmpty(format) ? $"{template} {n}" : FormatName(format, n);
+            var d = new JObject { ["name"] = name, ["equipment"] = 0, ["experience"] = 0 };
+            var division = Build(0, tag, d, template, tj, subUnitData);
+            division.Strength = FP.Zero;
+            return division;
+        }
+
+        /// <summary>HOI4 name formats: %d / %s the number, %dth an English ordinal (Tools/hoi4_convert.py format_division_name).</summary>
+        static string FormatName(string format, int n)
+        {
+            if (format.Contains("%dth"))
+            {
+                int h = n % 100, l = n % 10;
+                string suffix = h >= 11 && h <= 13 ? "th" : l == 1 ? "st" : l == 2 ? "nd" : l == 3 ? "rd" : "th";
+                format = format.Replace("%dth", n + suffix);
+            }
+            return format.Replace("%d", n.ToString()).Replace("%s", n.ToString());
+        }
+
+        /// <summary>Put a trained division on the map: an engine unit of its main type in the province, then it
+        /// counts as a division (combat, plans, supply). Returns the unit id, 0 when the unit couldn't be made.</summary>
+        public ushort Deploy(Hoi4Division division, ushort province, ushort country)
+        {
+            var gameState = Engine.ArchonEngine.Instance?.GameState;
+            var unitTypes = StarterKit.Initializer.Instance?.UnitSystem;
+            if (division == null || gameState == null || unitTypes == null || !gameState.Provinces.HasProvince(province)) return 0;
+            var unitType = unitTypes.GetUnitType(division.MainType) ?? unitTypes.GetUnitType("infantry");
+            if (unitType == null) return 0;
+            ushort unitId = gameState.Units.CreateUnit(province, country, unitType.ID);
+            if (unitId == 0) return 0;
+            division.UnitId = unitId;
+            divisions[unitId] = division;
+            return unitId;
+        }
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Spawn()
         {
@@ -170,6 +243,7 @@ namespace Hoi4.Units
             var countries = root["countries"] as JObject;
             if (subUnits == null || countries == null)
                 yield break;
+            subUnitData = subUnits;
 
             var archetypes = new SortedSet<string>(System.StringComparer.Ordinal);
             foreach (var s in subUnits.Properties())
@@ -194,6 +268,7 @@ namespace Hoi4.Units
                 var templates = country.Value["templates"] as JObject;
                 var list = country.Value["divisions"] as JArray;
                 if (templates == null || list == null) continue;
+                templatesByTag[tag] = templates;
 
                 foreach (var d in list)
                 {

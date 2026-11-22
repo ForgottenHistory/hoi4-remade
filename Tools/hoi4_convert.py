@@ -876,6 +876,7 @@ def load_sub_units(hoi4: Path):
                     "max_strength": num("max_strength"),
                     "max_organisation": num("max_organisation"),
                     "manpower": int(num("manpower")),
+                    "training_time": int(num("training_time")),  # days; a division trains as long as its slowest
                     "speed": max(speeds) if speeds else 4.0,
                     "soft_attack": round(stat("soft_attack"), 2),
                     "hard_attack": round(stat("hard_attack"), 2),
@@ -1111,6 +1112,13 @@ def convert_oob(hoi4: Path, out: Path, existing_tags, ruling_party):
             templates[get(t, "name")] = {"regiments": regs, "support": sups, "main": main,
                                          "names_group": get(t, "division_names_group")}
 
+        # new divisions are named from the template's names group: its fallback format, numbered after the
+        # highest number the 1936 divisions of the template use
+        for t in templates.values():
+            fallback, _ = names.get(t["names_group"], (None, {}))
+            t["name_format"] = fallback
+            t["next_number"] = 1
+
         divisions = []
         counters = {}
         for units in get_all(root, "units"):
@@ -1126,6 +1134,7 @@ def convert_oob(hoi4: Path, out: Path, existing_tags, ruling_party):
                     fallback, ordered = names.get(t["names_group"], (None, {}))
                     fmt = ordered.get(n) or fallback
                     name = format_division_name(fmt, n) if fmt and n else None
+                    t["next_number"] = max(t["next_number"], n + 1)
                 if not name:
                     counters[tname] = counters.get(tname, 0) + 1
                     name = f"{tname} {counters[tname]}"
