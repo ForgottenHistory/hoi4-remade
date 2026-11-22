@@ -21,8 +21,11 @@ namespace Hoi4.UI
     ///   box that animates faster the more factories work on it, progress of the level being built, priority arrows
     ///   (Shift: to the top or bottom), delete.
     /// - Building buttons per section (state, shared, province, experimental facilities) from the building data in
-    ///   HOI4's order. With one selected, clicking a province queues a level of it in that state (the state panel stays
-    ///   shut); clicking the button again, Escape or closing the screen drops the selection. Only civilian and military
+    ///   HOI4's order. While the screen is open unit counters are hidden, box selection and right clicks (diplomacy) are
+    ///   off. With a building selected, clicking a province queues a level of it in that state, right clicking takes one
+    ///   off the order there (the state panel stays
+    ///   shut) and the map shows where it fits (Hoi4ConstructionMap); clicking the button again, Escape or closing
+    ///   the screen drops the selection. Only civilian and military
     ///   factories and infrastructure can be built so far; the rest select but never queue.
     /// Values refresh four times a real second and the animation runs on real time (presentation, not game time);
     /// the list is rebuilt only when the country's queue changes.
@@ -58,6 +61,11 @@ namespace Hoi4.UI
         readonly List<VisualElement> entries = new List<VisualElement>();
         readonly List<int> shownIds = new List<int>();
         readonly List<float> phase = new List<float>();
+        // state boxes on the map while placing: state -> box, and the world point it sits on
+        VisualElement boxLayer;
+        readonly Dictionary<int, VisualElement> boxes = new Dictionary<int, VisualElement>();
+        readonly Dictionary<int, Vector3> boxWorld = new Dictionary<int, Vector3>();
+        int boxUsers = int.MinValue;
         string placing;
         bool open, structureDirty = true;
         float nextRefresh;
@@ -77,9 +85,9 @@ namespace Hoi4.UI
         void OnDestroy()
         {
             if (Instance == this) Instance = null;
+            Hoi4ConstructionMap.Hide();
             Hoi4UiHover.Remove(this);
             Hoi4UiHover.Remove(buildingsHover);
-            if (selector != null) selector.OnProvinceClicked -= OnProvinceClicked;
         }
 
         IEnumerator Start()
@@ -119,6 +127,9 @@ namespace Hoi4.UI
             root.styleSheets.Add(style);
             Hoi4Sprites.ApplyFont(root);
 
+            boxLayer = new VisualElement { pickingMode = PickingMode.Ignore };
+            boxLayer.AddToClassList("cm-layer");
+            root.Add(boxLayer); // under the panel
             panel = tree.Instantiate().Q("construction-panel");
             Hoi4Sprites.Bind(panel);
             root.Add(panel);
@@ -127,7 +138,6 @@ namespace Hoi4.UI
             consumerRow = lineList.Q(className: "co-consumer");
             panel.Q("co-close").RegisterCallback<ClickEvent>(_ => Close());
             panel.Q("co-minimize").RegisterCallback<ClickEvent>(_ => Close());
-            selector.OnProvinceClicked += OnProvinceClicked;
 
             while (!Hoi4StateData.Available) yield return null;
             BuildSections(panel.Q("co-sections"));
@@ -197,6 +207,8 @@ namespace Hoi4.UI
             selected = selected == button ? null : button;
             selected?.AddToClassList("selected");
             placing = selected?.userData as string;
+            if (placing == null) { Hoi4ConstructionMap.Hide(); ClearBoxes(); }
+            nextRefresh = 0f; // repaint the map for the new building now
         }
 
         static string BuildingName(string building)
@@ -205,17 +217,39 @@ namespace Hoi4.UI
             return string.IsNullOrEmpty(name) || name == building ? building : name;
         }
 
-        /// <summary>A province click while a building is selected: one level of it in the province's state.</summary>
-        void OnProvinceClicked(ushort province)
+        /// <summary>From Hoi4UnitSelection's click interceptor. While the screen is open it owns right clicks (no
+        /// diplomacy) and, with a building selected, left clicks: left queues a level of it in the clicked state, right
+        /// takes one off the order for it there (Shift: 5). Without a building selected, left clicks pass (state view).</summary>
+        public bool OnClick(int button, Vector2 screen)
         {
-            if (!open || placing == null || province == 0 || shownCountry == 0) return;
-            int state = Hoi4Regions.State(province);
-            if (state < 0) return;
-            int count = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift) ? 5 : 1;
-            for (int i = 0; i < count; i++)
-                if (!gameState.TryExecuteCommand(new QueueConstructionCommand { CountryId = shownCountry, State = state, Building = placing }, out _))
+            if (!open) return false;
+            if (placing == null) return button != 0;
+            var cam = Camera.main;
+            if (cam == null || selector == null || shownCountry == 0) return true;
+            ushort province = selector.GetProvinceAtScreenPosition(screen, cam);
+            int state = province != 0 ? Hoi4Regions.State(province) : -1;
+            if (state < 0) return true;
+            int count = ShiftOr(1, 5);
+            if (button == 0)
+            {
+                for (int i = 0; i < count; i++)
+                    if (!gameState.TryExecuteCommand(new QueueConstructionCommand { CountryId = shownCountry, State = state, Building = placing }, out _))
+                        break;
+            }
+            else
+            {
+                foreach (var item in Hoi4Construction.Instance.Queue(shownCountry))
+                {
+                    if (item.State != state || item.Building != placing) continue;
+                    if (item.Count > count)
+                        gameState.TryExecuteCommand(new SetConstructionCountCommand { CountryId = shownCountry, ItemId = item.Id, Count = item.Count - count }, out _);
+                    else
+                        Remove(item.Id);
                     break;
+                }
+            }
             nextRefresh = 0f;
+            return true;
         }
 
         // ---- open / close -----------------------------------------------------------------------------
@@ -230,16 +264,24 @@ namespace Hoi4.UI
         {
             if (panel == null || Player == 0) return;
             if (Hoi4ProductionPanel.IsOpen) Hoi4ProductionPanel.Instance.Toggle();
+            if (Hoi4DiplomacyPanel.IsOpen) Hoi4DiplomacyPanel.Instance?.Close(); // construction takes the map
             open = true;
             panel.style.display = DisplayStyle.Flex;
+            if (Hoi4.Units.Hoi4UnitCounters.Instance != null) Hoi4.Units.Hoi4UnitCounters.Instance.Hidden = true;
+            Hoi4.Units.Hoi4UnitSelection.Instance?.Clear();
             structureDirty = true;
             nextRefresh = 0f;
         }
 
         public void Close()
         {
-            open = false;
             if (selected != null) Select(selected);
+            Hoi4ConstructionMap.Hide();
+            ClearBoxes();
+            // show the counters again, unless a peace conference (which hides them too) closed the screen
+            if (open && Hoi4.Units.Hoi4UnitCounters.Instance != null && Hoi4.War.Hoi4War.Instance?.Conference == null)
+                Hoi4.Units.Hoi4UnitCounters.Instance.Hidden = false;
+            open = false;
             if (panel != null) panel.style.display = DisplayStyle.None;
         }
 
@@ -356,6 +398,97 @@ namespace Hoi4.UI
             }
         }
 
+        // ---- state boxes ------------------------------------------------------------------------------
+
+        void ClearBoxes()
+        {
+            boxLayer?.Clear();
+            boxes.Clear();
+            boxWorld.Clear();
+            boxUsers = int.MinValue;
+        }
+
+        /// <summary>One box per state whose buildings work for the player (rebuilt when ownership or control
+        /// changes), in the middle of the state: the mean of its land provinces' centres.</summary>
+        void BuildBoxes()
+        {
+            ClearBoxes();
+            var counters = Hoi4.Units.Hoi4UnitCounters.Instance;
+            if (counters == null || boxLayer == null) return;
+            boxUsers = Hoi4Buildings.UsersVersion(gameState);
+            foreach (var kv in Hoi4Buildings.Users(gameState))
+            {
+                if (kv.Value != shownCountry) continue;
+                int s = kv.Key;
+                Vector3 sum = Vector3.zero;
+                int n = 0;
+                foreach (ushort p in Hoi4Regions.ProvincesOf(s))
+                    if (!Hoi4Regions.IsWater(p) && counters.TryGetProvincePoint(p, out var point)) { sum += point; n++; }
+                if (n == 0) continue;
+                var world = sum / n;
+                var box = new VisualElement { pickingMode = PickingMode.Ignore };
+                box.AddToClassList("cm-box");
+                box.Add(Hoi4Sprites.Make("cm-bg"));
+                box.Add(BoxLabel("cm-levels", "center"));
+                box.Add(Hoi4Sprites.Make("cm-infra-icon"));
+                box.Add(BoxLabel("cm-infra", null));
+                box.Add(Hoi4Sprites.Make("cm-slots-icon"));
+                box.Add(BoxLabel("cm-slots", null));
+                boxLayer.Add(box);
+                boxes[s] = box;
+                boxWorld[s] = world;
+            }
+        }
+
+        static Label BoxLabel(string cls, string align)
+        {
+            var l = new Label { pickingMode = PickingMode.Ignore, enableRichText = true };
+            l.AddToClassList("hoi4-label");
+            l.AddToClassList("spr");
+            l.AddToClassList(cls);
+            if (align != null) l.AddToClassList(align);
+            return l;
+        }
+
+        /// <summary>"built/most", with the queued levels in gold: "8+2/10".</summary>
+        static string Levels(int built, int queued, int most) =>
+            queued > 0 ? $"{built}<color=#f7d45a>+{queued}</color>/{most}" : $"{built}/{most}";
+
+        void UpdateBoxes(Hoi4Construction construction)
+        {
+            if (boxUsers != Hoi4Buildings.UsersVersion(gameState)) BuildBoxes();
+            foreach (var kv in boxes)
+            {
+                int s = kv.Key;
+                var box = kv.Value;
+                box.Q<Label>(className: "cm-levels").text = Levels(Hoi4Buildings.Level(s, placing),
+                    construction.Queued(s, placing), construction.MaxLevel(s, placing));
+                int bonus = Hoi4Buildings.Level(s, "infrastructure") * 100 / Hoi4Construction.MaxInfrastructure;
+                var infra = box.Q<Label>(className: "cm-infra");
+                infra.text = $"{bonus}%";
+                infra.EnableInClassList("mid", bonus >= 40 && bonus < 80);
+                infra.EnableInClassList("low", bonus < 40);
+                box.Q<Label>(className: "cm-slots").text = Levels(Hoi4Buildings.SharedUsed(s),
+                    construction.Queued(s, null, true), Hoi4Buildings.SharedSlots(s));
+            }
+        }
+
+        void LateUpdate()
+        {
+            if (boxes.Count == 0 || boxLayer?.panel == null) return;
+            var cam = Camera.main;
+            if (cam == null) return;
+            foreach (var kv in boxes)
+            {
+                var sp = cam.WorldToScreenPoint(boxWorld[kv.Key]);
+                if (sp.z <= 0f) { kv.Value.style.display = DisplayStyle.None; continue; }
+                var pp = RuntimePanelUtils.ScreenToPanel(boxLayer.panel, new Vector2(sp.x, Screen.height - sp.y));
+                kv.Value.style.display = DisplayStyle.Flex;
+                kv.Value.style.left = pp.x;
+                kv.Value.style.top = pp.y;
+            }
+        }
+
         void Update()
         {
             if (panel == null) return;
@@ -363,6 +496,8 @@ namespace Hoi4.UI
             if (Player == 0 || construction == null || !construction.IsReady || Hoi4.War.Hoi4War.Instance?.Conference != null)
             {
                 if (open) Close();
+                Hoi4ConstructionMap.Hide();
+                ClearBoxes();
                 return;
             }
             if (Input.GetKeyDown(KeyCode.T)) Toggle();
@@ -384,6 +519,11 @@ namespace Hoi4.UI
             if (Time.unscaledTime < nextRefresh) return;
             nextRefresh = Time.unscaledTime + RefreshSeconds;
             Refresh(construction);
+            if (placing != null)
+            {
+                Hoi4ConstructionMap.Show(gameState, shownCountry, placing);
+                UpdateBoxes(construction);
+            }
         }
     }
 }

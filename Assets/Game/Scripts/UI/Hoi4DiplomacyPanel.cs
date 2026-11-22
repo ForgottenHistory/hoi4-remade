@@ -32,6 +32,7 @@ namespace Hoi4.UI
         IDisposable[] subscriptions;
 
         public static bool IsOpen { get; private set; }
+        public static Hoi4DiplomacyPanel Instance { get; private set; }
 
         ushort target;
         bool open, dirty;
@@ -45,6 +46,8 @@ namespace Hoi4.UI
             DontDestroyOnLoad(go);
             go.AddComponent<Hoi4DiplomacyPanel>();
         }
+
+        void Awake() => Instance = this;
 
         IEnumerator Start()
         {
@@ -117,6 +120,7 @@ namespace Hoi4.UI
 
         void OnDestroy()
         {
+            if (Instance == this) Instance = null;
             if (selector != null) selector.OnProvinceRightClicked -= OnRightClicked;
             if (selector != null) selector.OnProvinceClicked -= OnLeftClicked;
             if (subscriptions != null)
@@ -163,7 +167,8 @@ namespace Hoi4.UI
             Refresh();
         }
 
-        void Close()
+        /// <summary>Leave diplomacy mode (also when another screen takes the map, like construction).</summary>
+        public void Close()
         {
             if (!open) return;
             open = false;
@@ -184,6 +189,9 @@ namespace Hoi4.UI
             Hoi4UiHover.Report(this, panel);
             if (!open) return;
             if (!HasCountry() || Input.GetKeyDown(KeyCode.Escape)) { Close(); return; }
+            // selecting divisions leaves diplomacy mode, back to the normal map
+            var units = Hoi4.Units.Hoi4UnitSelection.Instance;
+            if (units != null && units.Selected.Count > 0) { Close(); return; }
             if (dirty)
             {
                 dirty = false;

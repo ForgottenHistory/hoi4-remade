@@ -1713,6 +1713,9 @@ CONSTRUCTION_SPRITES = {
     "ongoing": "GFX_ongoing_contruction_anim", "amount_add": "GFX_zoom_in", "amount_sub": "GFX_zoom_out",
     "arrow_up": "GFX_arrow_up_small", "arrow_down": "GFX_arrow_down_small", "delete": "GFX_closebutton_small",
     "line_glow": "GFX_construction_line_glow",
+    # state boxes on the map while placing (mapicons.gui construction_info_mapicon)
+    "map_box": "GFX_construction_province_background", "infra_texticon": "GFX_infrastructure_texticon",
+    "backhoe": "GFX_backhoe_icon_small",
 }
 # Progress bar textures (progressbartype GFX_construction_progressbar): file name -> texture under the HOI4 install
 CONSTRUCTION_BARS = {

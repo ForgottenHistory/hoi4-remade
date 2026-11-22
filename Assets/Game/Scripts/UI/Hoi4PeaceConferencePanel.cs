@@ -116,6 +116,15 @@ namespace Hoi4.UI
             if (Hoi4War.Instance.Conference != null) Open(Hoi4War.Instance.Conference);
         }
 
+        // shader globals outlive play mode in the editor: a session stopped mid-conference would start with the stripes
+        // on and occupation hidden
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetShaderGlobals()
+        {
+            Shader.SetGlobalFloat(PeaceActiveId, 0f);
+            Shader.SetGlobalFloat(HideOccupationId, 0f);
+        }
+
         void OnDestroy()
         {
             if (Hoi4War.Instance != null)

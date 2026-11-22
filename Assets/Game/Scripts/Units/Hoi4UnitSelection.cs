@@ -149,6 +149,7 @@ namespace Hoi4.Units
         {
             if (selector == null) return;
             if (Hoi4BattlePlans.Instance != null && Hoi4BattlePlans.Instance.Active) return; // drawing a plan: no box selection
+            if (Hoi4.UI.Hoi4ConstructionPanel.IsOpen) { boxActive = false; return; }       // construction screen: none either
             if (selector.IsLeftDragging && !boxActive)
             {
                 boxActive = true;
@@ -199,6 +200,8 @@ namespace Hoi4.Units
         {
             var peace = Hoi4.UI.Hoi4PeaceConferencePanel.Instance; // the peace conference owns the map while open
             if (peace != null && peace.OnClick(button, screen)) return true;
+            var construction = Hoi4.UI.Hoi4ConstructionPanel.Instance; // the construction screen owns map clicks it uses
+            if (construction != null && construction.OnClick(button, screen)) return true;
             if (Hoi4BattlePlans.Instance != null && Hoi4BattlePlans.Instance.OnClick(button, screen)) return true;
             var counters = Hoi4UnitCounters.Instance;
             if (button == 0)

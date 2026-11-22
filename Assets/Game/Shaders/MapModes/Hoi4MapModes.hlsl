@@ -163,6 +163,13 @@ float Hoi4CountryRim(float2 uv)
     return saturate(_Hoi4Gradient.w) * (1.0 - smoothstep(0.5, 2.0, dist));
 }
 
+// Construction placing (Hoi4ConstructionMap): province-indexed RGBA, r = fill (0.5 green: the state has room for the
+// building, 1 blue: full; the building's own orders not counted), g = bands (0.5 yellow: an order for the building,
+// room left; 1 blue: the order fills the state). Broad '/' bands at 40 degrees, 7.4 map px apart.
+// Prototype: Tools/prototypes/construction/construction_map.py
+TEXTURE2D(_Hoi4ConstructionTex);
+float _Hoi4ConstructionActive;
+
 float4 RenderMapMode(int mapMode, uint provinceID, float2 uv, float3 positionWS)
 {
     float blend = HOI4_OR(_Hoi4PoliticalBlend, 0.65);
@@ -177,7 +184,8 @@ float4 RenderMapMode(int mapMode, uint provinceID, float2 uv, float3 positionWS)
         return Hoi4Render(uv, positionWS, float4(palette.rgb, palette.a < 0.01 ? 0 : blend));
     }
 
-    // Political (0) and fallback
+    // Political (0) and fallback; plain terrain while construction paints the states (Hoi4ConstructionOverlay)
+    if (_Hoi4ConstructionActive > 0.5) return Hoi4Render(uv, positionWS, 0);
     float4 country = Hoi4CountryColor(uv);
     country.rgb = lerp(dot(country.rgb, float3(0.299, 0.587, 0.114)).xxx, country.rgb, (_Hoi4DiplomacyActive > 0.5 ? 1.0 : _CountryColorSaturation));
     country.rgb *= 1.0 - Hoi4CountryRim(uv) * 0.5;
@@ -248,6 +256,46 @@ float3 Hoi4PlanOverlay(float3 rgb, ArchonMapContext ctx)
     return lerp(rgb, tint, k) + hot * 0.05;
 }
 
+float3 Hoi4ConstructionOverlay(float3 rgb, ArchonMapContext ctx)
+{
+    if (_Hoi4ConstructionActive < 0.5 || ctx.provinceID == 0u) return rgb;
+    uint w, h;
+    _ProvinceOwnerTexture.GetDimensions(w, h);
+    float2 texel = 1.0 / float2(w, h);
+
+    // coverage blurred over a disc (the id texture is pixelated): soft state edges
+    float green = 0.0, blue = 0.0, yellowBand = 0.0, blueBand = 0.0;
+    const float radius = 1.4; // map px
+    [unroll] for (int i = 0; i < 13; i++)
+    {
+        float ang = i * 2.39996;
+        float r = i == 0 ? 0.0 : radius * sqrt(i / 12.0);
+        float2 uv = ctx.uv + float2(cos(ang), -sin(ang)) * r * texel;
+        uint id = SampleProvinceID(uv);
+        float4 c = LOAD_TEXTURE2D(_Hoi4ConstructionTex, int2(id % 256u, id / 256u));
+        green += (c.r > 0.25 && c.r < 0.75) ? 1.0 : 0.0;
+        blue += c.r >= 0.75 ? 1.0 : 0.0;
+        yellowBand += (c.g > 0.25 && c.g < 0.75) ? 1.0 : 0.0;
+        blueBand += c.g >= 0.75 ? 1.0 : 0.0;
+    }
+    green /= 13.0; blue /= 13.0; yellowBand /= 13.0; blueBand /= 13.0;
+    if (green + blue < 0.01) return rgb;
+
+    rgb = lerp(rgb, float3(0.30, 0.85, 0.25), green * 0.55);
+    rgb = lerp(rgb, float3(0.20, 0.35, 1.00), blue * 0.60);
+    float bands = yellowBand + blueBand;
+    if (bands > 0.01)
+    {
+        float2 mapPx = float2(ctx.uv.x * w, (1.0 - ctx.uv.y) * h);
+        float across = -0.6428 * mapPx.x - 0.7660 * mapPx.y;   // 40 degrees, rising to the right ('/')
+        float band = saturate((sin(across * 6.2832 / 7.4) + 0.05) / 0.35);
+        float core = saturate((bands - 0.35) / 0.5);
+        float3 colour = (yellowBand * float3(1.0, 0.9, 0.1) + blueBand * float3(0.2, 0.35, 1.0)) / bands;
+        rgb = lerp(rgb, colour, core * band * 0.9);
+    }
+    return rgb;
+}
+
 // Peace conference (Hoi4PeaceConferencePanel): province-indexed RGBA, rgb = band colour (green on the table,
 // blue demanded), a > 0 = one of the loser's states. Broad bands rising to the right at ~35 degrees, 6.4 map px
 // apart, fading in from the country's edge, where a glow of the loser's colour (_Hoi4PeaceGlow) shows; the land
@@ -300,6 +348,7 @@ float3 Hoi4PeaceOverlay(float3 rgb, ArchonMapContext ctx)
 float4 ArchonLighting(float4 color, ArchonMapContext ctx)
 {
     color.rgb = Hoi4PlanOverlay(color.rgb, ctx);
+    color.rgb = Hoi4ConstructionOverlay(color.rgb, ctx);
     color.rgb = Hoi4PeaceOverlay(color.rgb, ctx);
     return color;
 }
