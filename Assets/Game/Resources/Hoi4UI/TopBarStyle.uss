@@ -61,6 +61,8 @@
 .tb-threat { --sprite: "gfx/interface/topbar/threat_button_0.png"; right: 51px; top: 19px; width: 49px; height: 49px; }
 .tb-threat-value { right: 47px; top: 73px; width: 55px; }
 
-/* menu buttons (topbar.gui): production opens the production screen; frame 1 while it is open */
+/* menu buttons (topbar.gui): construction and production open their screens; frame 1 while open */
+.tb-construction { --sprite: "gfx/interface/topbar/construction_button_0.png"; left: 401px; top: 35px; width: 55px; height: 41px; }
+.tb-construction.open { --sprite: "gfx/interface/topbar/construction_button_1.png"; }
 .tb-production { --sprite: "gfx/interface/topbar/production_button_0.png"; left: 456px; top: 35px; width: 55px; height: 41px; }
 .tb-production.open { --sprite: "gfx/interface/topbar/production_button_1.png"; }

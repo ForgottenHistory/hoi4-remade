@@ -522,6 +522,7 @@ def convert(hoi4: Path, out: Path):
     convert_battleplan_gfx(hoi4, out)
     convert_peace_gfx(hoi4, out)
     convert_production_gfx(hoi4, out, oob_countries)
+    convert_construction_gfx(hoi4, out)
     convert_front_line(hoi4, out)
     convert_state_view(hoi4, out, state_centers)
     convert_move_arrow(hoi4, out)
@@ -1422,7 +1423,7 @@ TOPBAR_KEEP = [
     "pause_button_date", "button_speeddown", "button_speedup",
     "button_speedstep1", "button_speedstep2", "button_speedstep3", "button_speedstep4", "button_speedstep5",
     "DateText", "menu_button", "help_button", "threat_button", "threat_value",
-    "production_button", "production_button_glow",
+    "production_button", "production_button_glow", "construction_button",
 ]
 # Sprite overrides: the extended background has room for DLC menu buttons we don't show
 TOPBAR_SPRITE = {"background": "GFX_topbar_background"}
@@ -1693,6 +1694,40 @@ PRODUCTION_BARS = {
 }
 
 
+# Construction screen (interface/countryconstructionsview.gui) sprites: file name -> GFX sprite (frames as name_N.png).
+# The building buttons use the state view's building strip (gfx/interface/stateview/buildings_N.png).
+CONSTRUCTION_SPRITES = {
+    "window_bg": "GFX_tiled_window_thin_border", "plain_bg": "GFX_tiled_plain_bg",
+    "column_border": "GFX_tiled_window2_1b_border", "top_bg": "GFX_construction_screen_top_bg",
+    "header_bg": "GFX_construction_header_bg", "close": "GFX_closebutton", "minimize": "GFX_production_line_arrow_left",
+    "civ_factory_icon": "GFX_non_available_factory_icon", "civ_output_icon": "GFX_civ_factory_output_icon",
+    "speed_icon": "GFX_construction_speed_icon", "section_bg": "GFX_diplo_details_header",
+    "state_constructions": "GFX_state_constructions", "shared_constructions": "GFX_shared_constructions",
+    "province_constructions": "GFX_province_constructions", "facility_constructions": "GFX_facility_constructions",
+    "special_entry_bg": "GFX_construction_special_entry_bg", "entry_bg": "GFX_construction_entry_bg",
+    "consumer_goods_icon": "GFX_consumer_goods_icon", "button_glow": "GFX_construction_glow_overlay",
+    "count_bg": "GFX_generic_box_80", "factory_wrench": "GFX_factory_icon_with_wrench",
+    "sub_1": "GFX_subtract_one", "add_1": "GFX_add_one", "button_94": "GFX_button_94x31",
+    "lines_overlay": "GFX_tiled_generic_overlay_bg1_small",
+}
+
+
+def convert_construction_gfx(hoi4: Path, out: Path):
+    """Sprites of the construction screen under gfx/interface/construction/ for Hoi4ConstructionPanel."""
+    import hoi4_gui as gui
+    dst = out / "gfx" / "interface" / "construction"
+    dst.mkdir(parents=True, exist_ok=True)
+    sprites = gui.load_sprites(hoi4)
+    for name, spr in CONSTRUCTION_SPRITES.items():
+        frames = gui.sprite_frames(hoi4, sprites, spr)
+        if not frames:
+            print(f"  construction: no sprite {spr}")
+            continue
+        for i, fr in enumerate(frames):
+            fr.save(dst / (f"{name}.png" if len(frames) == 1 else f"{name}_{i}.png"))
+    print("Construction sprites written")
+
+
 def convert_production_gfx(hoi4: Path, out: Path, oob_countries):
     """Sprites of the production screen under gfx/interface/production/ for Hoi4ProductionPanel: PRODUCTION_SPRITES,
     PRODUCTION_BARS, and every equipment picture a country can build (equipment/<GFX name>.png, named by the
@@ -1782,6 +1817,22 @@ def convert_state_view(hoi4: Path, out: Path, state_centers=None):
         except (TypeError, ValueError):
             pass
         d["infra_speed"] = get(body, "infrastructure_construction_effect") == "yes"
+        # construction screen section (countryconstructionsview possible_*_constructions), in file order:
+        # facility (special project buildings), province, shared, state; none for what the screen never offers
+        # (not buildable, hidden until a tech we don't model, built through naval base modules)
+        special = get(body, "special_icon") or ""
+        if get(body, "is_buildable") == "no" or get(body, "hide_if_missing_tech") == "yes" or get(body, "modules") is not None:
+            section = ""
+        elif special.startswith("GFX_specialization_"):
+            section = "facility"
+        elif isinstance(cap, list) and get(cap, "province_max") is not None:
+            section = "province"
+        elif isinstance(cap, list) and get(cap, "shares_slots") == "yes":
+            section = "shared"
+        else:
+            section = "state"
+        if section:
+            d["section"] = section
         if isinstance(cap, list):
             d["shared"] = get(cap, "shares_slots") == "yes"
             if get(cap, "state_max") is not None:

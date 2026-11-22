@@ -23,6 +23,8 @@ namespace Hoi4.Map
             public double Cost;      // construction: base_cost of a level
             public double CostPerLevel; // + this x the level being built (naval bases, forts)
             public bool InfraSpeed;  // the state's infrastructure speeds its construction up
+            public string Name = "";
+            public string Section = ""; // construction screen section: state, shared, province, facility ("" never offered)
         }
 
         public sealed class StateInfo
@@ -44,6 +46,7 @@ namespace Hoi4.Map
         public static readonly string[] ResourceOrder = { "oil", "aluminium", "rubber", "tungsten", "steel", "chromium", "coal" };
 
         static readonly Dictionary<string, BuildingDef> defs = new Dictionary<string, BuildingDef>();
+        static readonly List<BuildingDef> defOrder = new List<BuildingDef>();
         static readonly Dictionary<string, int> categories = new Dictionary<string, int>();
         static readonly Dictionary<int, StateInfo> states = new Dictionary<int, StateInfo>();
         static bool loaded;
@@ -53,12 +56,15 @@ namespace Hoi4.Map
 
         public static StateInfo Get(int state) => EnsureLoaded() && states.TryGetValue(state, out var s) ? s : null;
         public static BuildingDef Def(string building) => EnsureLoaded() && defs.TryGetValue(building, out var d) ? d : null;
+
+        /// <summary>Every building definition in HOI4's file order (the construction screen's button order).</summary>
+        public static IReadOnlyList<BuildingDef> Defs => EnsureLoaded() ? defOrder : (IReadOnlyList<BuildingDef>)System.Array.Empty<BuildingDef>();
         public static int Slots(string category) => EnsureLoaded() && categories.TryGetValue(category ?? "", out int n) ? n : 0;
 
         [UnityEngine.RuntimeInitializeOnLoadMethod(UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]
         static void Reset()
         {
-            defs.Clear(); categories.Clear(); states.Clear();
+            defs.Clear(); defOrder.Clear(); categories.Clear(); states.Clear();
             loaded = false; available = false;
         }
 
@@ -74,8 +80,11 @@ namespace Hoi4.Map
             {
                 JObject root = Json5Loader.LoadJson5File(path);
                 foreach (var p in (root["buildings"] as JObject).Properties())
-                    defs[p.Name] = new BuildingDef
+                {
+                    var def = defs[p.Name] = new BuildingDef
                     {
+                        Name = p.Name,
+                        Section = (string)p.Value["section"] ?? "",
                         Frame = (int?)p.Value["frame"] ?? 0,
                         Coastal = (bool?)p.Value["coastal"] ?? false,
                         Shared = (bool?)p.Value["shared"] ?? false,
@@ -85,6 +94,8 @@ namespace Hoi4.Map
                         CostPerLevel = (double?)p.Value["cost_per_level"] ?? 0.0,
                         InfraSpeed = (bool?)p.Value["infra_speed"] ?? false,
                     };
+                    defOrder.Add(def);
+                }
                 foreach (var p in (root["categories"] as JObject).Properties())
                     categories[p.Name] = (int)p.Value;
                 foreach (var p in (root["states"] as JObject).Properties())

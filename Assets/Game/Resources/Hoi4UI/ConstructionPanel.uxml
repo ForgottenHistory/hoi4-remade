@@ -1,0 +1,60 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <!-- HOI4 construction screen (interface/countryconstructionsview.gui), positions in HOI4 pixels.
+         Prototype: Tools/prototypes/construction/render_construction.py -->
+    <ui:VisualElement name="construction-panel" class="co-window" picking-mode="Position">
+        <ui:VisualElement class="spr co-window-bg" picking-mode="Ignore" />
+        <ui:VisualElement class="spr co-top-bg" picking-mode="Ignore" />
+
+        <!-- production_win_top: civilian factories, from trade / owned, construction speed -->
+        <ui:VisualElement class="spr co-civ-icon" picking-mode="Ignore" />
+        <ui:Label name="co-factories" class="hoi4-label center co-factories" text="0/0" picking-mode="Ignore" />
+        <ui:Label class="hoi4-label co-trade-label" text="From trade:" picking-mode="Ignore" />
+        <ui:Label name="co-trade" class="hoi4-label right co-trade" text="0" picking-mode="Ignore" />
+        <ui:Label class="hoi4-label co-owned-label" text="Owned:" picking-mode="Ignore" />
+        <ui:Label name="co-owned" class="hoi4-label right co-owned" text="0" picking-mode="Ignore" />
+        <ui:VisualElement class="spr co-speed-icon" picking-mode="Ignore" />
+        <ui:Label name="co-speed" class="hoi4-label right co-speed" text="+0%" picking-mode="Ignore" />
+
+        <!-- column headers -->
+        <ui:Label class="hoi4-label center co-col co-col-location" text="Location" picking-mode="Ignore" />
+        <ui:Label class="hoi4-label center co-col co-col-task" text="Task" picking-mode="Ignore" />
+        <ui:VisualElement class="spr co-col-factory-icon" picking-mode="Ignore" />
+        <ui:Label class="hoi4-label center co-col co-col-count" text="#" picking-mode="Ignore" />
+        <ui:Label class="hoi4-label center co-col co-col-priority" text="Priority" picking-mode="Ignore" />
+
+        <!-- production_lines: the queue, consumer goods first -->
+        <ui:VisualElement class="spr co-lines-overlay" picking-mode="Ignore" />
+        <ui:VisualElement class="spr co-lines-frame" picking-mode="Ignore" />
+        <ui:ScrollView name="co-lines" class="co-lines" mode="Vertical" horizontal-scroller-visibility="Hidden">
+            <ui:VisualElement class="co-consumer" picking-mode="Ignore">
+                <ui:VisualElement class="spr co-consumer-bg" picking-mode="Ignore" />
+                <ui:Label class="hoi4-label co-consumer-name" text="Consumer Goods" picking-mode="Ignore" />
+                <ui:VisualElement class="spr co-consumer-icon" picking-mode="Ignore" />
+                <ui:Label name="co-consumer-count" class="hoi4-label center co-consumer-count" text="0" picking-mode="Ignore" />
+            </ui:VisualElement>
+        </ui:ScrollView>
+
+        <!-- possible_constructions: the building buttons, one section each (filled from the building data) -->
+        <ui:VisualElement class="co-buildings" picking-mode="Position">
+            <ui:VisualElement class="spr co-buildings-bg" picking-mode="Ignore" />
+            <ui:VisualElement class="spr co-buildings-frame" picking-mode="Ignore" />
+            <ui:VisualElement name="co-sections" class="co-sections" picking-mode="Ignore" />
+        </ui:VisualElement>
+
+        <ui:VisualElement class="spr co-header-bg" picking-mode="Ignore" />
+        <ui:Label class="hoi4-label co-title" text="CONSTRUCTION" picking-mode="Ignore" />
+
+        <!-- count_container: factories for a new construction, and the priority button -->
+        <ui:VisualElement class="spr co-count-bg" picking-mode="Ignore" />
+        <ui:VisualElement class="spr co-count-icon" picking-mode="Ignore" />
+        <ui:VisualElement name="co-count-sub" class="spr hoi4-button co-count-sub" picking-mode="Position" />
+        <ui:Label name="co-count" class="hoi4-label center co-count" text="0" picking-mode="Ignore" />
+        <ui:VisualElement name="co-count-add" class="spr hoi4-button co-count-add" picking-mode="Position" />
+        <ui:VisualElement name="co-priority" class="spr hoi4-button co-priority" picking-mode="Position">
+            <ui:Label class="hoi4-label center co-priority-text" text="Priority" picking-mode="Ignore" />
+        </ui:VisualElement>
+
+        <ui:VisualElement name="co-minimize" class="spr hoi4-button co-minimize" picking-mode="Position" />
+        <ui:VisualElement name="co-close" class="spr hoi4-button co-close" picking-mode="Position" />
+    </ui:VisualElement>
+</ui:UXML>

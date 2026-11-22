@@ -144,6 +144,7 @@ namespace Hoi4.UI
         void Open()
         {
             if (panel == null || Player == 0) return;
+            if (Hoi4ConstructionPanel.IsOpen) Hoi4ConstructionPanel.Instance.Close(); // they share the left side
             open = true;
             panel.style.display = DisplayStyle.Flex;
             structureDirty = true;

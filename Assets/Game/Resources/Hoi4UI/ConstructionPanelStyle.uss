@@ -1,0 +1,92 @@
+/* HOI4 construction screen (interface/countryconstructionsview.gui). Positions and sizes are HOI4's, in HOI4 pixels.
+   Sprites from gfx/interface/construction/ (converter: convert_construction_gfx), building icons from
+   gfx/interface/stateview/; tiled ones are 9-sliced with their borderSize. The building column (x 433, 267 wide)
+   hangs past the 550 wide window like HOI4's (clipping = no). Prototype: Tools/prototypes/construction/render_construction.py */
+
+.co-window { position: absolute; left: 0; top: 78px; bottom: 0; width: 550px; display: none; }
+.co-window-bg {
+    --sprite: "gfx/interface/construction/window_bg.png"; left: 0; top: 0; right: 0; bottom: 0;
+    -unity-slice-left: 64; -unity-slice-right: 64; -unity-slice-top: 64; -unity-slice-bottom: 64;
+}
+.co-top-bg { --sprite: "gfx/interface/construction/top_bg.png"; left: 5px; top: 37px; width: 433px; height: 98px; }
+.co-header-bg { --sprite: "gfx/interface/construction/header_bg.png"; left: 10px; top: 5px; width: 689px; height: 43px; }
+.co-title { left: 45px; top: 10px; height: 34px; font-size: 22px; letter-spacing: 3px; }
+
+/* production_win_top (28, 26) */
+.co-civ-icon { --sprite: "gfx/interface/construction/civ_factory_icon.png"; left: 17px; top: 55px; width: 27px; height: 23px; }
+.co-factories { left: 38px; top: 58px; width: 87px; height: 20px; font-size: 17px; -unity-font-style: bold; color: rgb(230, 80, 60); }
+.co-trade-label, .co-owned-label { left: 122px; width: 65px; height: 20px; font-size: 16px; -unity-font-style: bold; }
+.co-trade-label { top: 50px; }
+.co-owned-label { top: 70px; }
+.co-trade, .co-owned { left: 187px; width: 70px; height: 20px; font-size: 16px; -unity-font-style: bold; }
+.co-trade { top: 50px; }
+.co-owned { top: 70px; }
+.co-speed-icon { --sprite: "gfx/interface/construction/speed_icon.png"; left: 288px; top: 61px; width: 28px; height: 19px; }
+.co-speed { left: 278px; top: 60px; width: 70px; height: 20px; font-size: 16px; color: rgb(140, 220, 100); }
+.co-speed.negative { color: rgb(230, 80, 60); }
+
+/* column headers (y 106) */
+.co-col { top: 106px; height: 20px; font-size: 17px; -unity-font-style: bold; }
+.co-col-location { left: 20px; width: 150px; }
+.co-col-task { left: 180px; width: 80px; }
+.co-col-factory-icon { --sprite: "gfx/interface/construction/civ_factory_icon.png"; left: 270px; top: 104px; width: 27px; height: 23px; }
+.co-col-count { left: 262px; width: 120px; }
+.co-col-priority { left: 330px; width: 110px; }
+
+/* production_lines (0, 130), 440 wide, margin 13; entries at grid (1, 5) */
+.co-lines-overlay {
+    --sprite: "gfx/interface/construction/lines_overlay.png"; left: 0; top: 130px; width: 440px; bottom: 0;
+    -unity-slice-left: 144; -unity-slice-right: 144; -unity-slice-top: 144; -unity-slice-bottom: 144;
+}
+.co-lines-frame {
+    --sprite: "gfx/interface/construction/column_border.png"; left: 0; top: 130px; width: 440px; bottom: 0;
+    -unity-slice-left: 64; -unity-slice-right: 64; -unity-slice-top: 64; -unity-slice-bottom: 64;
+}
+.co-lines { position: absolute; left: 14px; top: 148px; width: 413px; bottom: 15px; }
+.co-lines .unity-scroller--vertical { width: 8px; background-color: rgba(10, 13, 13, 0.85); }
+.co-lines .unity-scroller__low-button, .co-lines .unity-scroller__high-button { display: none; }
+.co-lines .unity-scroller__slider { margin: 0; border-width: 0; background-color: rgba(0, 0, 0, 0); }
+
+/* static_consumer_goods_entry: 400 x 52 */
+.co-consumer { position: relative; width: 400px; height: 52px; }
+.co-consumer-bg { --sprite: "gfx/interface/construction/special_entry_bg.png"; left: 0; top: 0; width: 402px; height: 54px; }
+.co-consumer-name { left: 20px; top: 16px; width: 150px; height: 20px; font-size: 17px; -unity-font-style: bold; }
+.co-consumer-icon { --sprite: "gfx/interface/construction/consumer_goods_icon.png"; left: 188px; top: 8px; width: 44px; height: 35px; }
+.co-consumer-count { left: 254px; top: 17px; width: 50px; height: 20px; font-size: 16px; -unity-font-style: bold; }
+
+/* possible_constructions (433, 40), 267 wide; sections stack: header 52 + 44 per row of 4 buttons */
+.co-buildings { position: absolute; left: 433px; top: 40px; width: 267px; bottom: 0; }
+.co-buildings-bg {
+    --sprite: "gfx/interface/construction/plain_bg.png"; left: 0; top: 0; right: 0; bottom: 0;
+    -unity-slice-left: 64; -unity-slice-right: 64; -unity-slice-top: 64; -unity-slice-bottom: 64;
+}
+.co-buildings-frame {
+    --sprite: "gfx/interface/construction/column_border.png"; left: 0; top: 0; right: 0; bottom: 0;
+    -unity-slice-left: 64; -unity-slice-right: 64; -unity-slice-top: 64; -unity-slice-bottom: 64;
+}
+.co-sections { position: absolute; left: 0; top: 0; width: 267px; }
+.co-section { position: relative; width: 267px; }
+.co-section-bg { --sprite: "gfx/interface/construction/section_bg.png"; left: 5px; top: 9px; width: 241px; height: 51px; }
+.co-section-icon { left: 5px; top: 9px; width: 41px; height: 39px; }
+.co-section-state { --sprite: "gfx/interface/construction/state_constructions.png"; }
+.co-section-shared { --sprite: "gfx/interface/construction/shared_constructions.png"; }
+.co-section-province { --sprite: "gfx/interface/construction/province_constructions.png"; }
+.co-section-facility { --sprite: "gfx/interface/construction/facility_constructions.png"; }
+.co-section-name { left: 60px; top: 18px; width: 170px; height: 20px; font-size: 15px; -unity-font-style: bold; }
+.co-section-grid { position: absolute; left: 28px; top: 52px; width: 184px; flex-direction: row; flex-wrap: wrap; }
+.co-building { position: relative; width: 46px; height: 44px; }
+.co-building-icon { left: 0; top: 4px; width: 46px; height: 46px; }
+.co-building.selected .co-building-glow { display: flex; }
+.co-building-glow { --sprite: "gfx/interface/construction/button_glow_0.png"; left: -1px; top: 3px; width: 48px; height: 48px; display: none; }
+
+/* count_container (upper right, x -220 → 330, y 12) */
+.co-count-bg { --sprite: "gfx/interface/construction/count_bg.png"; left: 365px; top: 13px; width: 80px; height: 26px; }
+.co-count-icon { --sprite: "gfx/interface/construction/factory_wrench.png"; left: 333px; top: 14px; width: 27px; height: 23px; }
+.co-count-sub { --sprite: "gfx/interface/construction/sub_1.png"; left: 361px; top: 14px; width: 25px; height: 25px; }
+.co-count-add { --sprite: "gfx/interface/construction/add_1.png"; left: 425px; top: 14px; width: 26px; height: 26px; }
+.co-count { left: 380px; top: 16px; width: 50px; height: 22px; font-size: 16px; -unity-font-style: bold; }
+.co-priority { --sprite: "gfx/interface/construction/button_94.png"; left: 452px; top: 11px; width: 94px; height: 31px; }
+.co-priority-text { left: 0; top: 0; width: 94px; height: 31px; font-size: 15px; -unity-font-style: bold; }
+
+.co-minimize { --sprite: "gfx/interface/construction/minimize.png"; left: 607px; top: 10px; width: 32px; height: 28px; }
+.co-close { --sprite: "gfx/interface/construction/close.png"; left: 657px; top: 9px; width: 32px; height: 33px; }
