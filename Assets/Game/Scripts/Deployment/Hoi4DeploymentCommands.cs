@@ -179,6 +179,32 @@ namespace Hoi4.Deployment
 
     /// <summary>A division template's reinforcement priority: 0 reserve, 1 normal, 2 elite (HOI4 sets it in the division
     /// designer; here the template's chevrons on the recruit screen cycle it).</summary>
+    /// <summary>Delete a division template no division uses, in the field or in training.</summary>
+    public sealed class DeleteTemplateCommand : BaseCommand
+    {
+        public ushort CountryId;
+        public string Template;
+
+        public override bool Validate(GameState gameState)
+        {
+            var divisions = Hoi4.Units.Hoi4Divisions.Instance;
+            var d = Hoi4Deployment.Instance;
+            return divisions != null && d != null && d.IsReady
+                   && divisions.HasTemplate(gameState.Countries.GetCountryTag(CountryId), Template)
+                   && !d.TemplateInUse(CountryId, Template);
+        }
+
+        public override void Execute(GameState gameState)
+        {
+            Hoi4.Units.Hoi4Divisions.Instance.DeleteTemplate(gameState.Countries.GetCountryTag(CountryId), Template);
+            Core.Recording.SessionRecorder.Note("deployment", "delete_template", CountryId, 0, 0, 0, Template);
+        }
+
+        public override void Undo(GameState gameState) { }
+        public override void Serialize(BinaryWriter w) { w.Write(CountryId); w.Write(Template ?? ""); }
+        public override void Deserialize(BinaryReader r) { CountryId = r.ReadUInt16(); Template = r.ReadString(); }
+    }
+
     public sealed class SetTemplatePriorityCommand : BaseCommand
     {
         public ushort CountryId;

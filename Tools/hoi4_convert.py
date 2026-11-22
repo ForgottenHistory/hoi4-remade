@@ -1551,6 +1551,8 @@ UNITPANEL_SPRITES = {
     "unitinfo": "GFX_unitlist_unitinfo_button", "level": "GFX_unit_level", "sort": "GFX_tiling_sort_button_thin",
     "column": "GFX_division_list_column_button", "close_small": "GFX_NV_btn_close",
     "dig_in": "GFX_unitlist_dig_in_icon",
+    # disband confirmation (interface/popupwindow.gui default_confirmation_popup)
+    "popup_bg": "GFX_tiled_window_pol_goal", "button_148": "GFX_button_148x34",
 }
 
 

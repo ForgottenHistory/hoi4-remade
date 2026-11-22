@@ -32,7 +32,8 @@ namespace Hoi4.UI
     ///   (yellow while stalled), its place in the series (2/5, 3/infinite), deploy early (from 20%), cancel.
     /// - Division templates window: the country's templates with their icons and priority chevrons (click to cycle
     ///   reserve, normal, elite: HOI4 sets it in the division designer); Train starts an order of one at the
-    ///   capital. Edit, delete, the designer and decommissioning wait for a division designer (greyed out).
+    ///   capital. Delete (red, right of Edit) removes a template no division uses, in the field or in training (greyed
+    ///   out otherwise). Edit, the designer and decommissioning wait for a division designer (greyed out).
     /// Values refresh four times a real second (presentation, not game time); the order list is rebuilt only when the
     /// orders or their lines change.
     /// </summary>
@@ -70,6 +71,7 @@ namespace Hoi4.UI
         VisualElement reinforcementBar;
         readonly List<VisualElement> reinforcementDots = new List<VisualElement>();
         readonly Dictionary<string, VisualElement> templateStrips = new Dictionary<string, VisualElement>();
+        readonly Dictionary<string, VisualElement> templateDeletes = new Dictionary<string, VisualElement>();
         string shownStructure = "", shownTemplates;
         int pickingOrder; // the order whose location the next map click sets (0: none)
         int hoverState;   // while picking: the state under the cursor
@@ -520,13 +522,11 @@ namespace Hoi4.UI
         {
             templateList.Clear();
             templateStrips.Clear();
+            templateDeletes.Clear();
             var divisions = Hoi4Divisions.Instance;
             string tag = Hoi4Deployment.Instance.Tag(shownCountry);
             shownTemplates = tag;
             if (divisions == null) return;
-            var inUse = new HashSet<string>();
-            foreach (var d in divisions.All.Values)
-                if (d.Tag == tag) inUse.Add(d.Template);
             foreach (string name in divisions.Templates(tag))
             {
                 string template = name;
@@ -565,11 +565,21 @@ namespace Hoi4.UI
                 edit.tooltip = "Division designer: not available yet";
                 edit.Add(MakeLabel("Edit", "center", "dte-button-text"));
                 entry.Add(edit);
-                var delete = Hoi4Sprites.Make("dte-delete", "disabled");
+                var delete = Hoi4Sprites.Make("dte-delete", "hoi4-button");
                 delete.pickingMode = PickingMode.Position;
-                delete.tooltip = inUse.Contains(template) ? "Divisions use this template" : "Deleting templates: not available yet";
-                if (!inUse.Contains(template)) delete.RemoveFromClassList("disabled"); // HOI4: red while nothing uses it
+                delete.RegisterCallback<ClickEvent>(evt =>
+                {
+                    if (delete.ClassListContains("disabled") || Hoi4ConfirmDialog.Instance == null) return;
+                    ushort country = shownCountry;
+                    // HOI4 deployment_l_english DELETE_TEMPLATE_TITLE / _DESC
+                    Hoi4ConfirmDialog.Instance.Show("Delete Template", "Are you sure to delete this template?", () =>
+                    {
+                        if (gameState.TryExecuteCommand(new DeleteTemplateCommand { CountryId = country, Template = template }, out _))
+                            shownTemplates = null; // rebuild the list without it
+                    });
+                });
                 entry.Add(delete);
+                templateDeletes[template] = delete;
                 templateList.Add(entry);
             }
         }
@@ -596,6 +606,12 @@ namespace Hoi4.UI
             if (reinforcementBar != null)
                 SetBar(reinforcementBar, fieldCount > 0 ? (fieldEquipment / fieldCount).ToFloat() : 1f, PriorityBarWidth);
             foreach (var kv in templateStrips) SetPriorityStrip(kv.Value, divisions.TemplatePriority(tag, kv.Key), true);
+            foreach (var kv in templateDeletes)
+            {
+                bool inUse = Hoi4Deployment.Instance.TemplateInUse(shownCountry, kv.Key);
+                kv.Value.EnableInClassList("disabled", inUse); // HOI4: red while nothing uses it, else greyed out
+                kv.Value.tooltip = inUse ? "Can't delete: divisions use this template, in the field or in training" : "Delete this template";
+            }
             int reinforce = Hoi4Deployment.Instance.ReinforcementPriority(shownCountry);
             for (int i = 0; i < reinforcementDots.Count; i++) reinforcementDots[i].EnableInClassList("on", i == reinforce);
         }
@@ -624,7 +640,7 @@ namespace Hoi4.UI
                 return;
             }
             if (Input.GetKeyDown(KeyCode.U)) Toggle();
-            if (open && Input.GetKeyDown(KeyCode.Escape))
+            if (open && Input.GetKeyDown(KeyCode.Escape) && !Hoi4ConfirmDialog.IsOpen)
             {
                 if (pickingOrder != 0) SetPicking(0); else Close();
             }
@@ -649,7 +665,11 @@ namespace Hoi4.UI
                 Rebuild(orders);
                 nextRefresh = 0f;
             }
-            if (shownTemplates != deployment.Tag(shownCountry)) RebuildTemplates();
+            if (shownTemplates != deployment.Tag(shownCountry))
+            {
+                RebuildTemplates();
+                RefreshTemplates(); // the new buttons' state now, not on the next refresh (they'd flash enabled)
+            }
             if (pickingOrder != 0 && UpdateHover())
             {
                 Hoi4ConstructionMap.ShowStates(deployableStates, hoverState);

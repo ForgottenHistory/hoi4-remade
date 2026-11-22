@@ -1,7 +1,7 @@
 <ui:UXML xmlns:ui="UnityEngine.UIElements">
     <ui:VisualElement name="division-panel" class="division-panel" picking-mode="Position">
         <ui:VisualElement class="spr dv-header" picking-mode="Ignore" />
-        <ui:VisualElement class="spr hoi4-button dv-delete" />
+        <ui:VisualElement name="delete" class="spr hoi4-button dv-delete" tooltip="Disband the selected divisions" />
         <ui:Label name="header" class="hoi4-label dv-title" picking-mode="Ignore" enable-rich-text="true" />
         <ui:VisualElement name="select-half" class="spr hoi4-button dv-select-half" />
         <ui:VisualElement class="spr hoi4-button dv-hold" />

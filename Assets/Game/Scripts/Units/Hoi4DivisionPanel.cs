@@ -1,4 +1,6 @@
 using System.Collections;
+using System.Collections.Generic;
+using System.Text;
 using Hoi4.UI;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -10,6 +12,9 @@ namespace Hoi4.Units
     /// top bar. View of the UI Presenter pattern: structure is Resources/Hoi4UI/DivisionPanel.uxml, look is
     /// DivisionPanelStyle.uss + Hoi4Theme.uss, display logic is Hoi4DivisionPresenter. Sprites are loaded at
     /// runtime from the data directory (Hoi4Sprites). Clicking an entry selects only that division.
+    /// The delete button (top left) asks to disband the selected divisions (HOI4's "Disband divisions" popup, texts
+    /// from core_l_english CONFIRMDELETE*): what comes back, manpower and equipment per type; OK (Enter) disbands them,
+    /// Cancel (Escape) keeps them.
     /// </summary>
     public sealed class Hoi4DivisionPanel : MonoBehaviour
     {
@@ -68,12 +73,72 @@ namespace Hoi4.Units
             panel.Q("close").RegisterCallback<ClickEvent>(_ => selection.Clear());
             panel.Q("select-half").RegisterCallback<ClickEvent>(_ => Hoi4DivisionPresenter.SelectHalf(selection));
             root.Add(panel);
+            panel.Q("delete").RegisterCallback<ClickEvent>(_ => AskDisband());
 
             selection.Changed += OnChanged;
             dirty = true;
         }
 
         void OnChanged() => dirty = true;
+
+        // ---- disbanding ---------------------------------------------------------------------------------
+
+        static ushort Player
+        {
+            get
+            {
+                var p = StarterKit.Initializer.Instance?.PlayerState;
+                return p != null && p.HasPlayerCountry ? p.PlayerCountryId : (ushort)0;
+            }
+        }
+
+        void AskDisband()
+        {
+            var gameState = Engine.ArchonEngine.Instance?.GameState;
+            var divisions = Hoi4Divisions.Instance;
+            var disbanding = new List<ushort>();
+            if (gameState == null || divisions == null || Hoi4ConfirmDialog.Instance == null) return;
+            foreach (ushort id in Hoi4UnitSelection.Instance.Selected)
+                if (gameState.Units.HasUnit(id) && gameState.Units.GetUnit(id).countryID == Player) disbanding.Add(id);
+            if (disbanding.Count == 0) return;
+
+            double men = 0;
+            var equipment = new SortedDictionary<int, double>();
+            string name = null;
+            foreach (ushort id in disbanding)
+            {
+                var d = divisions.Get(id);
+                if (d == null) continue;
+                name = d.Name;
+                men += d.Men.ToFloat();
+                for (int a = 0; a < d.Have.Length; a++)
+                {
+                    double have = d.Have[a].ToFloat();
+                    if (have <= 0) continue;
+                    equipment.TryGetValue(a, out double sum);
+                    equipment[a] = sum + have;
+                }
+            }
+
+            const string Y = "<color=#F7D45A>", R = "<color=#E0453A>", E = "</color>";
+            string what = disbanding.Count == 1 ? $"{Y}{name}{E}" : $"{Y}{disbanding.Count}{E} divisions";
+            var text = new StringBuilder();
+            text.Append($"The {Y}equipment{E} will be returned to {Y}storage{E} and the {Y}manpower{E} will go back to the {Y}manpower pool{E}.\n\n");
+            text.Append($"Are you sure you want to {R}DISBAND{E} {what}?\n\n");
+            text.Append("Will gain:");
+            if (men >= 1) text.Append($"\n{Y}{System.Math.Round(men):0}{E} Manpower");
+            var production = Hoi4.Production.Hoi4Production.Instance;
+            foreach (var kv in equipment)
+            {
+                long amount = (long)System.Math.Round(kv.Value);
+                if (amount <= 0) continue;
+                string label = production != null ? production.ArchetypeName(kv.Key) : Hoi4Divisions.Archetypes[kv.Key];
+                text.Append($"\n{Y}{amount}{E} {label}");
+            }
+            ushort country = Player;
+            Hoi4ConfirmDialog.Instance.Show(disbanding.Count == 1 ? "Disband division" : "Disband divisions", text.ToString(),
+                () => gameState.TryExecuteCommand(new DisbandDivisionsCommand { CountryId = country, UnitIds = disbanding }, out _));
+        }
 
         void OnDestroy()
         {

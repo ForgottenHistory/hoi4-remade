@@ -145,6 +145,19 @@ namespace Hoi4.Deployment
             IsReady && country != 0 && Hoi4Divisions.Instance.HasTemplate(Tag(country), template)
             && Hoi4Divisions.Instance.TrainingDays(Tag(country), template) > 0;
 
+        /// <summary>Whether divisions of the country use the template, in the field or in training (HOI4 then won't
+        /// delete it).</summary>
+        public bool TemplateInUse(ushort country, string template)
+        {
+            string tag = Tag(country);
+            foreach (var d in Hoi4.Units.Hoi4Divisions.Instance.All.Values)
+                if (d.Tag == tag && d.Template == template) return true;
+            if (countries.TryGetValue(country, out var c))
+                foreach (var order in c.Orders)
+                    if (order.Template == template) return true;
+            return false;
+        }
+
         /// <summary>Whether the country may deploy to the province: it owns and controls it, on land, in a state its own
         /// land connects to the capital (HOI4: no deploying overseas).</summary>
         public bool CanDeployTo(ushort country, ushort province) =>
@@ -330,10 +343,13 @@ namespace Hoi4.Deployment
             return null;
         }
 
-        void Refund(ushort country, Line line)
+        void Refund(ushort country, Line line) => Refund(gameState, country, line.Division);
+
+        /// <summary>A division's men back to the manpower pool and its equipment to the stockpile (cancelled training,
+        /// disbanding); it is left with neither.</summary>
+        public static void Refund(GameState gameState, ushort country, Hoi4.Units.Hoi4Division d)
         {
             var resources = gameState.Resources;
-            var d = line.Division;
             if (d.Men > FP.Zero)
                 resources.SetResource(country, Hoi4Manpower.ResourceId, resources.GetResource(country, Hoi4Manpower.ResourceId) + d.Men);
             for (int a = 0; a < d.Have.Length; a++)

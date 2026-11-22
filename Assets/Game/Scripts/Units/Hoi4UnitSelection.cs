@@ -122,7 +122,7 @@ namespace Hoi4.Units
         {
             if (gameState == null) return;
             bool drawing = Hoi4BattlePlans.Instance != null && Hoi4BattlePlans.Instance.ToolOn;
-            if (Input.GetKeyDown(KeyCode.Escape) && selection.Count > 0 && !drawing)
+            if (Input.GetKeyDown(KeyCode.Escape) && selection.Count > 0 && !drawing && !Hoi4.UI.Hoi4ConfirmDialog.IsOpen)
                 Clear();
             if (Input.GetKeyDown(KeyCode.S) && !Input.GetKey(KeyCode.LeftControl) && !Input.GetKey(KeyCode.RightControl))
                 Hoi4DivisionPresenter.SelectHalf(this);

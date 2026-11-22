@@ -177,6 +177,14 @@ namespace Hoi4.Units
             if (HasTemplate(tag, template)) templatePriority[tag + "/" + template] = Mathf.Clamp(priority, Reserve, Elite);
         }
 
+        /// <summary>Remove a division template from the country (callers check nothing uses it: Hoi4Deployment.TemplateInUse).</summary>
+        public void DeleteTemplate(string tag, string template)
+        {
+            if (!HasTemplate(tag, template)) return;
+            templatesByTag[tag].Remove(template);
+            templatePriority.Remove(tag + "/" + template);
+        }
+
         /// <summary>The template's main regiment type (HOI4 shows a division by it; its icon), null when unknown.</summary>
         public string TemplateMain(string tag, string template) =>
             HasTemplate(tag, template) ? (string)templatesByTag[tag][template]["main"] : null;

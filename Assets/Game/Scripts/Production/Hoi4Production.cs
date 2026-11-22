@@ -149,6 +149,17 @@ namespace Hoi4.Production
         /// <summary>Factories no line asks for.</summary>
         public int Free(ushort country) => System.Math.Max(0, Factories(country) - Requested(country));
 
+        readonly Dictionary<int, string> archetypeNames = new Dictionary<int, string>();
+
+        /// <summary>An archetype's display name (HOI4: "Infantry Equipment", "Truck"), else its id made readable.</summary>
+        public string ArchetypeName(int archetype)
+        {
+            if (archetypeNames.TryGetValue(archetype, out var n)) return n;
+            var ids = Hoi4.Units.Hoi4Divisions.Archetypes;
+            string id = archetype >= 0 && archetype < ids.Length ? ids[archetype] : "?";
+            return id.Length > 0 ? char.ToUpper(id[0]) + id.Substring(1).Replace('_', ' ') : id;
+        }
+
         public bool TryGetBuildable(ushort country, int archetype, out Buildable b)
         {
             b = default;
@@ -216,6 +227,8 @@ namespace Hoi4.Production
                     {
                         FP cost = Num(e.Value["cost"]);
                         string sprite = (string)e.Value["sprite"];
+                        if (index.TryGetValue(e.Name, out int named) && e.Value["archetype_name"] != null)
+                            archetypeNames[named] = (string)e.Value["archetype_name"];
                         if (index.TryGetValue(e.Name, out int a) && cost > FP.Zero)
                             cp.Buildable[a] = new Buildable
                             {

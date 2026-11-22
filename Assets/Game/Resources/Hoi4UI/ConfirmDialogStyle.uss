@@ -1,0 +1,27 @@
+/* HOI4 confirmation popup (interface/popupwindow.gui default_confirmation_popup): 480 x 382, centred, the
+   GFX_tiled_window_pol_goal tile 9-sliced with its borderSize (180 x 85). Coordinates are HOI4 pixel. */
+.cd {
+    --sprite: "gfx/interface/unitpanel/popup_bg.png";
+    position: absolute; left: 50%; top: 50%; width: 480px; height: 382px; translate: -50% -50%;
+    -unity-slice-left: 180; -unity-slice-right: 180; -unity-slice-top: 85; -unity-slice-bottom: 85;
+}
+.cd-title { left: 10px; top: 16px; width: 460px; height: 50px; font-size: 22px; letter-spacing: 3px; }
+
+/* description: 430 x 215 at (24, 90), scrolling (HOI4 standardtext_slider) */
+.cd-scroll { position: absolute; left: 24px; top: 90px; width: 440px; height: 210px; }
+.cd-scroll .unity-scroll-view__content-container { padding-right: 10px; }
+.cd-text {
+    position: relative; width: 100%; font-size: 17px; -unity-font-style: bold;
+    white-space: normal; -unity-text-align: upper-center; overflow: visible;
+}
+.cd-scroll .unity-scroller--vertical { width: 8px; background-color: rgba(10, 13, 13, 0.85); }
+.cd-scroll .unity-scroller__low-button, .cd-scroll .unity-scroller__high-button { display: none; }
+.cd-scroll .unity-scroller__slider { margin: 0; border-width: 0; background-color: rgba(0, 0, 0, 0); }
+.cd-scroll .unity-base-slider__tracker { display: none; }
+.cd-scroll .unity-base-slider__dragger {
+    width: 8px; border-width: 0; border-radius: 2px; background-color: rgb(140, 158, 128);
+}
+
+.cd-cancel { --sprite: "gfx/interface/unitpanel/button_148.png"; left: 90px; top: 310px; width: 148px; height: 36px; }
+.cd-ok { --sprite: "gfx/interface/unitpanel/button_148.png"; left: 260px; top: 310px; width: 148px; height: 36px; }
+.cd-button-text { left: 0; top: 0; width: 148px; height: 36px; font-size: 16px; -unity-font-style: bold; }

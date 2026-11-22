@@ -153,6 +153,35 @@ namespace Hoi4.Units
         }
     }
 
+    /// <summary>Disband divisions (HOI4's delete button in the selected-units list): their equipment goes back to
+    /// the stockpile, their men to the manpower pool.</summary>
+    public sealed class DisbandDivisionsCommand : BaseCommand
+    {
+        public ushort CountryId;
+        public List<ushort> UnitIds;
+
+        public override bool Validate(GameState gameState) =>
+            Hoi4Divisions.Instance != null && Hoi4CommandIo.Owned(gameState, CountryId, UnitIds);
+
+        public override void Execute(GameState gameState)
+        {
+            var divisions = Hoi4Divisions.Instance;
+            foreach (ushort id in UnitIds)
+            {
+                if (!gameState.Units.HasUnit(id)) continue;
+                var d = divisions.Get(id);
+                if (d != null) Hoi4.Deployment.Hoi4Deployment.Refund(gameState, CountryId, d);
+                Core.Recording.SessionRecorder.Note("units", "disbanded", CountryId, id, gameState.Units.GetUnit(id).provinceID, 0, d?.Name ?? "");
+                divisions.Remove(id);
+                gameState.Units.DisbandUnit(id, Core.Units.DestructionReason.Disbanded);
+            }
+        }
+
+        public override void Undo(GameState gameState) { }
+        public override void Serialize(BinaryWriter w) { w.Write(CountryId); Hoi4CommandIo.WriteIds(w, UnitIds); }
+        public override void Deserialize(BinaryReader r) { CountryId = r.ReadUInt16(); UnitIds = Hoi4CommandIo.ReadIds(r); }
+    }
+
     public sealed class DisbandArmyCommand : BaseCommand
     {
         public ushort CountryId;
