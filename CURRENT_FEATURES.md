@@ -14,7 +14,9 @@
 
 **Production:** Military factories from owned states, production lines in priority order with per-factory efficiency growth, commands for adding, sizing, reordering and deleting lines, AI that puts free factories to work, HOI4 production screen
 
-**AI:** Enemy war AI with odds-based attacks off its own front lines; production AI
+**Construction:** Civilian factories and consumer goods from economy laws, a construction queue (civilian and military factories, infrastructure) with infrastructure speed-up and shared slots, construction AI (no construction screen yet)
+
+**AI:** Enemy war AI with odds-based attacks off its own front lines; production and construction AI
 
 **Simulation:** Every decision is a command, one fixed-order hourly tick, fixed-point maths and adjacency-based fronts (deterministic, lockstep-ready), session recordings for debugging
 
@@ -94,6 +96,20 @@ The goal is to stress-test Archon-Engine, not to ship a game. Big visual wins ar
 - **Production AI** - Weekly, each country but the player's on its own weekday: free factories go one at a time to the archetype with the most need per factory already making it (what its divisions lack beyond the stockpile, plus a 10% reserve of their total use); never takes factories off a line. Host only, through the same commands
 - **Production screen** - HOI4's `countryproductionlineview.gui` layout and art, opened by the top bar's production button (glows while factories are free) or Y. Resource strip (the country's own states), efficiency cap, military factories used/total, add-line buttons for infantry/artillery and armour opening the equipment picker (design name, general name, cost, picture), category filters with factory counts. Each line: priority, design name, efficiency bar relative to the cap, +/- factories (Shift x5, Ctrl x10, or the x5/x10 buttons), delete, priority arrows, picture, units a day or week with progress to the next one, what the divisions lack (reinforcing) or the stock (stockpiling), the 5x3 factory grid (x5/x10 icons past 15, grey where the line wants more than it gets) glowing while factories are free. A new line asks for the free factories, 1 to 15
 - **Recording** - Weekly `production` notes (factories, free, each line's factories, efficiency, IC), `ai_assign` notes, a Production section in `report.py`, `production` and `ai_production` columns in `perf.tsv`
+
+---
+
+## Construction
+
+`Assets/Game/Scripts/Construction/` (wiki "Construction", `NDefines.NProduction` / `NBuildings`):
+
+- **Buildings** - `Hoi4Buildings`: state building levels as they are now (the 1936 history plus what was built), and the country each state's buildings work for (the owner holding most provinces while it controls more than half). Production counts military factories from here; the state panel shows it
+- **Civilian factories and consumer goods** - Consumer goods take floor((civilian + military) x economy law share x (1 + consumer goods factor)), at least 10% and 1; the rest are available. Laws, factors and construction speed per country from its 1936 ideas (default laws filled in) and technologies (`common/hoi4_country_economy.json5`). Matches real HOI4 Germany (15 of 63, 20 available)
+- **Queue** - Per country, in order; each item takes up to 15 available civilian factories at 5 IC a day x (1 + construction speed + the building's speed) x (1 + infrastructure / 5). Civilian factory 10800, military factory 7200, infrastructure 6000 (and per-level costs where HOI4 has them). Finished levels go to the state; new military factories reach production the same day
+- **Limits** - Factories need a free shared slot (state category, at most 25, counting the queue); infrastructure up to 5; only states whose buildings work for the country; items in a state the country loses are dropped
+- **Commands** - Queue levels, remove, move in the queue
+- **Construction AI** - Weekly per country but the player's: keeps enough items queued for all available civilian factories (15 each, plus one): civilian factories until 1938, military factories from then or at war, in the state with a free slot and the best infrastructure; infrastructure when no slot is left
+- **Recording** - Weekly `construction` notes (civilian, military, consumer goods, free, queue, built), `done`, `dropped` and `ai_queue` notes, a Construction section in `report.py`, `construction` and `ai_construction` columns in `perf.tsv`
 
 ---
 
@@ -195,6 +211,7 @@ Tricky map algorithms are prototyped in Python under `Tools/prototypes/<topic>/`
 - Combat ignores forts, generals, supply, night, stacking and per-unit terrain modifiers (only the terrain's base penalty applies); max entrenchment ignores the division's own entrenchment stat (engineers)
 - Offensives are broad-front only; no spearhead or encirclement logic
 - AI does not use offensives or armies, only odds-based border attacks
+- Construction has no screen yet, no trade, repairs, conversion, province buildings (forts, naval bases, railways), slot bonuses from technology or law changes
 - Production has no strategic resources or trade, no factory construction, no factory output modifiers (real Germany makes about 17% more per factory), no civilian factories; air and naval lines are not converted, so their factories end up free (the AI puts them on land equipment)
 - Equipment designs and variants are not modelled: an archetype is one kind of equipment, stats from the 1936 design
 - No recruiting new divisions; manpower only reinforces

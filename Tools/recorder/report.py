@@ -348,6 +348,29 @@ def main():
         extra = f"  (AI assigned +{ai_assign[c]})" if ai_assign[c] else ""
         print(f"{c:8} {d}  {t.replace('_equipment', '').replace('_chassis', '')}{extra}")
 
+    # --- construction: weekly notes (Hoi4Construction), "civ C mil M cg G free F | queue Q | built B | ..." ------
+    print("\n## Construction (last week's civilian factories and queue; levels built over the recording)")
+    con_last, built_by, ai_queued = {}, defaultdict(Counter), Counter()
+    for r in notes:
+        if r["system"] != "construction":
+            continue
+        if r["kind"] == "week":
+            con_last[r["country"]] = (r["date"], r["text"])
+        elif r["kind"] == "done":
+            built_by[r["country"]][r["text"].split(" ")[0]] += 1
+        elif r["kind"] == "ai_queue":
+            ai_queued[r["country"]] += 1
+    if not con_last:
+        print("no construction notes")
+    shown = [player] if player in con_last else []
+    by_civ = Counter({c: int(re.match(r"civ (\d+)", t).group(1)) for c, (_, t) in con_last.items()})
+    shown += [c for c, _ in by_civ.most_common(a.top) if c != player]
+    for c in shown[: a.top]:
+        d, t = con_last[c]
+        parts = t.split(" | ")
+        built = ", ".join(f"{k.replace('industrial_complex', 'civ').replace('arms_factory', 'mil')} +{n}" for k, n in sorted(built_by[c].items()))
+        print(f"{c:8} {d}  {' | '.join(parts[:3])}  built: {built or '-'}  (AI queued {ai_queued[c]})")
+
     # --- war: capitulations and peace deals (Hoi4War / Hoi4PeaceConference) ---------------------------
     print("\n## War (AI declarations, capitulations, peace deals)")
     war_notes = [r for r in notes if r["system"] in ("war", "ai_war") and r["kind"] != "sent_home"]

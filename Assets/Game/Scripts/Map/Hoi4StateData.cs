@@ -20,6 +20,9 @@ namespace Hoi4.Map
             public bool Shared;      // uses the state's shared building slots
             public int StateMax;     // 0 when not a state building
             public int ProvinceMax;  // 0 when not a province building
+            public double Cost;      // construction: base_cost of a level
+            public double CostPerLevel; // + this x the level being built (naval bases, forts)
+            public bool InfraSpeed;  // the state's infrastructure speeds its construction up
         }
 
         public sealed class StateInfo
@@ -78,6 +81,9 @@ namespace Hoi4.Map
                         Shared = (bool?)p.Value["shared"] ?? false,
                         StateMax = (int?)p.Value["state_max"] ?? 0,
                         ProvinceMax = (int?)p.Value["province_max"] ?? 0,
+                        Cost = (double?)p.Value["cost"] ?? 0.0,
+                        CostPerLevel = (double?)p.Value["cost_per_level"] ?? 0.0,
+                        InfraSpeed = (bool?)p.Value["infra_speed"] ?? false,
                     };
                 foreach (var p in (root["categories"] as JObject).Properties())
                     categories[p.Name] = (int)p.Value;

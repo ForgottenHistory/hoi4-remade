@@ -40,8 +40,10 @@ namespace Hoi4.UI
             }
 
             FillResources(panel.Q("resources"), info);
-            FillStateBuildings(panel.Q("state-buildings"), info);
-            FillSlots(panel.Q("slots"), panel.Q<Label>("slots-count"), info);
+            // buildings as they are now (the 1936 ones plus what construction built)
+            var buildings = Hoi4.Construction.Hoi4Buildings.Of(stateId);
+            FillStateBuildings(panel.Q("state-buildings"), buildings);
+            FillSlots(panel.Q("slots"), panel.Q<Label>("slots-count"), info, buildings);
 
             string terrain = TerrainKey(gameState, province);
             string terrainName = LocalizationManager.Get(terrain);
@@ -73,23 +75,23 @@ namespace Hoi4.UI
             }
         }
 
-        static void FillStateBuildings(VisualElement row, Hoi4StateData.StateInfo info)
+        static void FillStateBuildings(VisualElement row, IReadOnlyDictionary<string, int> buildings)
         {
             row.Clear();
             foreach (string b in StateBuildings)
             {
                 var def = Hoi4StateData.Def(b);
                 if (def == null) continue;
-                info.Buildings.TryGetValue(b, out int level);
+                buildings.TryGetValue(b, out int level);
                 row.Add(Entry(def, level, def.StateMax, "entry"));
             }
         }
 
-        static void FillSlots(VisualElement grid, Label count, Hoi4StateData.StateInfo info)
+        static void FillSlots(VisualElement grid, Label count, Hoi4StateData.StateInfo info, IReadOnlyDictionary<string, int> buildings)
         {
             grid.Clear();
             var shared = new List<Hoi4StateData.BuildingDef>();
-            foreach (var kv in info.Buildings)
+            foreach (var kv in buildings)
             {
                 var def = Hoi4StateData.Def(kv.Key);
                 if (def != null && def.Shared)

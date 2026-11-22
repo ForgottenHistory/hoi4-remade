@@ -44,9 +44,9 @@ namespace Hoi4.Production
 
     /// <summary>
     /// GAME: HOI4 production (wiki "Production", NDefines.NProduction).
-    /// - Military factories: a state's arms_factory buildings count for its owner (the country owning most of its
-    ///   provinces) while the owner controls more than half of them. Recounted when ownership or control changes,
-    ///   so conquest and peace deals move factories.
+    /// - Military factories: a state's arms_factory buildings (Hoi4Buildings: the 1936 ones plus what construction
+    ///   built) count for its owner (the country owning most of its provinces) while the owner controls more than
+    ///   half of them. Recounted when ownership, control or the buildings change.
     /// - Lines: per country, in priority order. Each day the lines take factories top-down (Requested, at most
     ///   MAX_MIL_FACTORIES_PER_LINE 150) until the country's factories run out; a lost factory comes off the bottom
     ///   and its slot loses its efficiency, a newly added one starts at BASE_FACTORY_START_EFFICIENCY_FACTOR 10%.
@@ -90,7 +90,7 @@ namespace Hoi4.Production
         GameState gameState;
         readonly SortedDictionary<ushort, CountryProduction> countries = new SortedDictionary<ushort, CountryProduction>();
         readonly Dictionary<ushort, int> factoryCount = new Dictionary<ushort, int>();
-        int countedOwnership = -1, countedControl = -1;
+        int countedUsers = int.MinValue, countedBuildings = -1;
         int day;
         const int ReportEveryDays = 7;
 
@@ -260,37 +260,18 @@ namespace Hoi4.Production
         /// <summary>Military factories per country from the states, when ownership or control changed.</summary>
         void CountFactories()
         {
-            var provinces = gameState.Provinces;
-            if (countedOwnership == provinces.OwnershipVersion && countedControl == provinces.ControlVersion) return;
-            if (!Hoi4StateData.Available || !Hoi4Regions.Available) return; // not loaded yet: count later, never cache an empty count
-            countedOwnership = provinces.OwnershipVersion;
-            countedControl = provinces.ControlVersion;
+            if (!Construction.Hoi4Buildings.Available) return; // not loaded yet: count later, never cache an empty count
+            int users = Construction.Hoi4Buildings.UsersVersion(gameState);
+            if (countedUsers == users && countedBuildings == Construction.Hoi4Buildings.Version) return;
+            countedUsers = users;
+            countedBuildings = Construction.Hoi4Buildings.Version;
             factoryCount.Clear();
-            Hoi4Occupation.Snapshot(gameState, 0, out var ctrl, out var owner);
-            var tally = new Dictionary<ushort, int>();
-            foreach (int state in Hoi4Regions.States)
+            foreach (var kv in Construction.Hoi4Buildings.Users(gameState))
             {
-                var info = Hoi4StateData.Get(state);
-                if (info == null || !info.Buildings.TryGetValue("arms_factory", out int mil) || mil <= 0) continue;
-                var provs = Hoi4Regions.ProvincesOf(state);
-                if (provs.Count == 0) continue;
-                tally.Clear();
-                foreach (ushort p in provs)
-                {
-                    if (p >= owner.Length || owner[p] == 0) continue;
-                    tally.TryGetValue(owner[p], out int n);
-                    tally[owner[p]] = n + 1;
-                }
-                ushort stateOwner = 0;
-                int best = 0;
-                foreach (var kv in tally)
-                    if (kv.Value > best || (kv.Value == best && kv.Key < stateOwner)) { stateOwner = kv.Key; best = kv.Value; }
-                if (stateOwner == 0) continue;
-                int controlled = 0;
-                foreach (ushort p in provs) if (p < ctrl.Length && ctrl[p] == stateOwner) controlled++;
-                if (controlled * 2 <= provs.Count) continue;
-                factoryCount.TryGetValue(stateOwner, out int have);
-                factoryCount[stateOwner] = have + mil;
+                int mil = Construction.Hoi4Buildings.Level(kv.Key, "arms_factory");
+                if (mil <= 0) continue;
+                factoryCount.TryGetValue(kv.Value, out int have);
+                factoryCount[kv.Value] = have + mil;
             }
         }
 

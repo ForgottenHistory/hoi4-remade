@@ -83,6 +83,8 @@ namespace Hoi4.UI
             {
                 if (province != 0 && Hoi4Regions.State(e.ProvinceId) == Hoi4Regions.State(province)) dirty = true;
             });
+            while (Hoi4.Construction.Hoi4Construction.Instance == null) yield return null;
+            Hoi4.Construction.Hoi4Construction.Instance.QueueChanged += OnQueueChanged; // a building finished: show it
             while (Hoi4UnitSelection.Instance == null) yield return null;
             Hoi4UnitSelection.Instance.Changed += OnUnitsChanged;
         }
@@ -96,7 +98,13 @@ namespace Hoi4.UI
             }
             ownershipSub?.Dispose();
             if (Hoi4UnitSelection.Instance != null) Hoi4UnitSelection.Instance.Changed -= OnUnitsChanged;
+            if (Hoi4.Construction.Hoi4Construction.Instance != null) Hoi4.Construction.Hoi4Construction.Instance.QueueChanged -= OnQueueChanged;
             Hoi4UiHover.Remove(this);
+        }
+
+        void OnQueueChanged(ushort country)
+        {
+            if (province != 0) dirty = true;
         }
 
         void OnUnitsChanged()
