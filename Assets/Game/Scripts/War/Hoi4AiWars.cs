@@ -103,16 +103,21 @@ namespace Hoi4.War
             }
 
             // Land neighbours by owner
+            // (one read of every owner, not two lookups per province and neighbour; each pair added once)
             var borders = new SortedDictionary<ushort, SortedSet<ushort>>();
-            var provinces = gameState.Provinces;
+            int size = 1;
+            foreach (var kv in landNeighbours) size = System.Math.Max(size, kv.Key + 1);
+            var owner = new ushort[size];
+            Hoi4Occupation.ReadAll(gameState, new ushort[size], owner);
+            var pairs = new HashSet<uint>();
             foreach (ushort p in landProvinces)
             {
-                ushort a = provinces.GetProvinceOwner(p);
+                ushort a = owner[p];
                 if (a == 0) continue;
                 foreach (ushort q in landNeighbours[p])
                 {
-                    ushort b = provinces.GetProvinceOwner(q);
-                    if (b == 0 || b == a) continue;
+                    ushort b = q < owner.Length ? owner[q] : (ushort)0;
+                    if (b == 0 || b == a || !pairs.Add((uint)a << 16 | b)) continue;
                     if (!borders.TryGetValue(a, out var set)) borders[a] = set = new SortedSet<ushort>();
                     set.Add(b);
                 }

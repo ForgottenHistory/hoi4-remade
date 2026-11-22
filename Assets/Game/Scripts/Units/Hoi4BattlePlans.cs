@@ -131,6 +131,19 @@ namespace Hoi4.Units
         ushort[][] landNeighbours;                                         // per province id: land neighbours, sorted
         ushort[] ctrl;                                                     // controller per province id, snapshot during a refresh
         readonly Dictionary<ushort, HashSet<ushort>> enemyLand = new Dictionary<ushort, HashSet<ushort>>(); // per country, this hour
+        // Owner and controller of every land province, read once per hour (on first use) and shared by every
+        // country's EnemyLand and WalkLabels: each used to read the whole map itself (two hash lookups per
+        // province per country per hour)
+        ushort[] hourOwner, hourCtrl;
+        bool[] impassable; // static map data, by province id
+
+        void SnapshotHour()
+        {
+            if (hourOwner != null) return;
+            hourOwner = new ushort[landNeighbours.Length];
+            hourCtrl = new ushort[landNeighbours.Length];
+            Hoi4Occupation.ReadAll(gameState, hourCtrl, hourOwner);
+        }
         readonly Dictionary<ushort, int[]> walkLabels = new Dictionary<ushort, int[]>();                // per country, this hour
         // Path search results between two walkable pieces (or a lone province, -1 - id), per country, this hour:
         // the same for every province in them, so a failing search (the costliest kind) runs once, not per plan,
@@ -652,6 +665,7 @@ namespace Hoi4.Units
             enemyLand.Clear();
             walkLabels.Clear();
             pieceReach.Clear();
+            hourOwner = hourCtrl = null;
             bool refreshed = borderDirty;
             if (borderDirty)
             {
@@ -715,14 +729,22 @@ namespace Hoi4.Units
             if (walkLabels.TryGetValue(country, out var label)) return label;
             movementRules ??= new Hoi4MovementRules(gameState);
             var enemy = EnemyLand(country);
-            var provinces = gameState.Provinces;
+            SnapshotHour();
+            if (impassable == null)
+            {
+                impassable = new bool[landNeighbours.Length];
+                foreach (ushort p in landProvinces) impassable[p] = Hoi4Regions.IsImpassable(p);
+            }
             label = new int[landNeighbours.Length];
             var walk = new bool[landNeighbours.Length];
+            var access = new Dictionary<ushort, bool>(); // by owner: access depends on the owner, not the province
             foreach (ushort p in landProvinces)
             {
                 label[p] = -1;
-                walk[p] = !Hoi4Regions.IsImpassable(p) && !enemy.Contains(p)
-                          && movementRules.HasAccess(country, provinces.GetProvinceOwner(p));
+                if (impassable[p] || enemy.Contains(p)) continue;
+                ushort owner = hourOwner[p];
+                if (!access.TryGetValue(owner, out bool ok)) access[owner] = ok = movementRules.HasAccess(country, owner);
+                walk[p] = ok;
             }
             int next = 0;
             var queue = new List<ushort>();
@@ -1439,7 +1461,7 @@ namespace Hoi4.Units
             borderDirty = false;
             // One snapshot of every land province's controller, shared by all plans this hour
             ctrl = new ushort[landNeighbours.Length];
-            foreach (ushort p in landProvinces) ctrl[p] = Hoi4Occupation.ControllerOf(gameState, p);
+            Hoi4Occupation.ReadAll(gameState, ctrl);
             BuildRefreshCaches();
             var changedCountries = new HashSet<ushort>(dirtyCountries);
             dirtyCountries.Clear();
@@ -1647,6 +1669,7 @@ namespace Hoi4.Units
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
             int searches = distributeSearches;
+            lastHoldMs = 0; lastHoldPaths = 0;
             try { DistributeInner(plan); }
             finally
             {
@@ -1655,7 +1678,8 @@ namespace Hoi4.Units
                 if (ms > 50) // which plan is slow, for the recording (timing: not part of the simulation)
                     Core.Recording.SessionRecorder.Note("perf", "slow_distribute", plan.Owner, 0, 0, plan.Country,
                         $"plan {plan.Id}: {ms:0} ms, {plan.Units.Count} divisions, {plan.Fronts?.Count ?? 0} fronts, " +
-                        $"{plan.FrontProvinces?.Count ?? 0} front provinces, {distributeSearches - searches} path searches");
+                        $"{plan.FrontProvinces?.Count ?? 0} front provinces, {distributeSearches - searches} path searches; " +
+                        $"march orders {lastHoldMs:0} ms, {lastHoldPaths} path searches");
             }
         }
 
@@ -1768,23 +1792,30 @@ namespace Hoi4.Units
                 if (!slotsAt.TryGetValue(slots[s].province, out var at)) slotsAt[slots[s].province] = at = new List<int>(2);
                 at.Add(s);
             }
-            var slotProvinces = new HashSet<ushort>(slotsAt.Keys);
-            var hopsFrom = new Dictionary<ushort, Dictionary<ushort, int>>();
-            var pairs = new List<(bool pinned, int d, ushort unit, int slot)>(ids.Count * NearestSlots);
             var startOf = new Dictionary<ushort, ushort>();
+            var locations = new SortedSet<ushort>();
             foreach (ushort u in ids)
             {
                 // A division already marching counts from where it is going, so a redistribution keeps it on course
                 ushort heading = HeadingTo(u);
                 ushort at = heading != 0 ? heading : units.GetUnit(u).provinceID;
                 startOf[u] = at;
-                if (!hopsFrom.TryGetValue(at, out var hops)) hopsFrom[at] = hops = Hops(at, slotProvinces, NearestSlots);
+                locations.Add(at);
+            }
+            // Hops between every division location and every slot province (within MaxHops), nearest first.
+            // Searched from whichever side has fewer provinces: 138 divisions on a 9-province front used to mean
+            // 138 searches across a whole country; now it is 9.
+            var near = HopsBetween(locations, new SortedSet<ushort>(slotsAt.Keys));
+            var pairs = new List<(bool pinned, int d, ushort unit, int slot)>(ids.Count * NearestSlots);
+            foreach (ushort u in ids)
+            {
                 bool isPinned = pinned.TryGetValue(u, out int pinFront);
-                foreach (var kv in hops)
-                    foreach (int s in slotsAt[kv.Key])
+                var list = near[startOf[u]];
+                for (int i = 0; i < list.Count && i < NearestSlots; i++)
+                    foreach (int s in slotsAt[list[i].province])
                     {
                         if (!Reaches(u, slots[s].front) || (isPinned && slots[s].front != pinFront)) continue;
-                        pairs.Add((isPinned, kv.Value, u, s));
+                        pairs.Add((isPinned, list[i].hops, u, s));
                     }
             }
             // Pinned divisions take their front's slots first, so a spread division can't leave them without one
@@ -1805,20 +1836,17 @@ namespace Hoi4.Units
             {
                 if (plan.Slot.ContainsKey(u)) continue;
                 bool isPinned = pinned.TryGetValue(u, out int pinFront);
-                var free = new HashSet<ushort>();
-                foreach (var kv in slotsAt)
-                    foreach (int s in kv.Value)
-                        if (!taken[s] && Reaches(u, slots[s].front) && (!isPinned || slots[s].front == pinFront)) { free.Add(kv.Key); break; }
-                if (free.Count == 0) continue;
-                var near = Hops(startOf[u], free, 1);
-                foreach (var kv in near)
-                    foreach (int s in slotsAt[kv.Key])
+                foreach (var (_, sp) in near[startOf[u]]) // nearest first, already searched
+                {
+                    foreach (int s in slotsAt[sp])
                         if (!taken[s] && Reaches(u, slots[s].front) && (!isPinned || slots[s].front == pinFront))
                         {
                             taken[s] = true;
                             plan.Slot[u] = slots[s].province;
                             break;
                         }
+                    if (plan.Slot.ContainsKey(u)) break;
+                }
             }
             // Left over (the fronts they can reach are full): double up on the nearest slot they can reach
             foreach (var (_, d, u, s) in pairs)
@@ -1840,7 +1868,34 @@ namespace Hoi4.Units
                     ArchonLogger.LogWarning($"Hoi4BattlePlans: plan {plan.Id}: unit {u} in province {unit.provinceID} can reach none of the {fronts.Count} fronts", "game_units");
                     Core.Recording.SessionRecorder.Note("plans", "unreachable", plan.Owner, u, unit.provinceID, 0, $"plan {plan.Id}: can reach none of the {fronts.Count} fronts");
                 }
+            var holdSw = System.Diagnostics.Stopwatch.StartNew(); // timing only (slow_distribute note)
             Hold(plan, force: true);
+            lastHoldMs = holdSw.Elapsed.TotalMilliseconds;
+        }
+
+        double lastHoldMs; int lastHoldPaths; // the last spread's march orders: time and path searches (diagnostics)
+
+        /// <summary>
+        /// Land hops between every province of `from` and every province of `to` (within Hops' MaxHops): for each
+        /// `from` province the `to` provinces it reaches, nearest first (ties: lower id). Searches from the smaller
+        /// set (hops are symmetric: land adjacency goes both ways), one breadth-first search per source.
+        /// </summary>
+        Dictionary<ushort, List<(int hops, ushort province)>> HopsBetween(SortedSet<ushort> from, SortedSet<ushort> to)
+        {
+            var result = new Dictionary<ushort, List<(int, ushort)>>();
+            foreach (ushort a in from) result[a] = new List<(int, ushort)>();
+            bool forward = from.Count <= to.Count;
+            var sources = forward ? from : to;
+            var targets = new HashSet<ushort>(forward ? (IEnumerable<ushort>)to : from);
+            foreach (ushort s in sources)
+                foreach (var kv in Hops(s, targets))
+                {
+                    if (forward) result[s].Add((kv.Value, kv.Key));
+                    else result[kv.Key].Add((kv.Value, s));
+                }
+            foreach (var list in result.Values)
+                list.Sort((x, y) => x.Item1 != y.Item1 ? x.Item1.CompareTo(y.Item1) : x.Item2.CompareTo(y.Item2));
+            return result;
         }
 
         /// <summary>Land hops from a province to each of the targets (breadth-first, stops when all are found
@@ -1886,6 +1941,7 @@ namespace Hoi4.Units
             var units = gameState.Units;
             var queue = units.MovementQueue;
             int ordered = 0, holding = 0, marching = 0, noPath = 0;
+            lastHoldPaths = 0;
             foreach (var kv in plan.Slot)
             {
                 if (!units.HasUnit(kv.Key)) continue;
@@ -1901,24 +1957,18 @@ namespace Hoi4.Units
                 }
                 // Re-ordering restarts the current hop, so leave a march to the right place alone
                 if (moving && (!force || HeadingTo(kv.Key) == kv.Value)) { marching++; continue; }
+                lastHoldPaths++;
                 if (OrderMove(kv.Key, unit, kv.Value, log: !plan.IsAI)) ordered++;
                 else noPath++;
             }
             if (ordered > 0) Hoi4UnitCounters.Instance?.MarkDirty();
-            if (!plan.IsAI && (force || ordered > 0))
+            if (!plan.IsAI && (force || ordered > 0) && (GameSettings.Instance?.ShouldLog(LogLevel.Debug) ?? false))
                 ArchonLogger.Log($"Hoi4BattlePlans: plan {plan.Id} ({plan.Units.Count} divisions, {plan.FrontProvinces?.Count ?? 0} front provinces in {plan.Fronts?.Count ?? 0} fronts): " +
                                  $"{holding} holding, {marching} marching, {ordered} ordered, {noPath} without a path", "game_units");
         }
 
         /// <summary>Final province of the division's current march, 0 when it isn't moving.</summary>
-        ushort HeadingTo(ushort unitId)
-        {
-            var queue = gameState.Units.MovementQueue;
-            if (!queue.IsUnitMoving(unitId)) return 0;
-            var path = queue.GetFullPath(unitId);
-            if (path != null && path.Count > 0) return path[path.Count - 1];
-            return queue.TryGetMovementState(unitId, out var s) ? s.destinationProvinceID : (ushort)0;
-        }
+        ushort HeadingTo(ushort unitId) => gameState.Units.MovementQueue.GetFinalDestination(unitId);
 
         readonly HashSet<(uint, ushort)> noPathWarned = new HashSet<(uint, ushort)>();
 
@@ -1972,9 +2022,10 @@ namespace Hoi4.Units
             set = new HashSet<ushort>();
             var diplomacy = gameState.Diplomacy;
             var war = new Dictionary<ushort, bool>();
+            SnapshotHour();
             foreach (ushort p in landProvinces)
             {
-                ushort c = Hoi4Occupation.ControllerOf(gameState, p);
+                ushort c = hourCtrl[p];
                 if (c == 0 || c == country) continue;
                 if (!war.TryGetValue(c, out bool w)) war[c] = w = diplomacy != null && diplomacy.IsAtWar(country, c);
                 if (w) set.Add(p);

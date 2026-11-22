@@ -163,14 +163,7 @@ namespace Hoi4.Units
                 Record(r); // the starting state
             }
 
-            static ushort Destination(GameState gs, ushort id)
-            {
-                var queue = gs.Units.MovementQueue;
-                if (!queue.IsUnitMoving(id)) return 0;
-                var path = queue.GetFullPath(id);
-                if (path != null && path.Count > 0) return path[path.Count - 1];
-                return queue.TryGetMovementState(id, out var s) ? s.destinationProvinceID : (ushort)0;
-            }
+            static ushort Destination(GameState gs, ushort id) => gs.Units.MovementQueue.GetFinalDestination(id);
 
             public void Record(SessionRecorder r)
             {

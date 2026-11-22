@@ -95,7 +95,36 @@ namespace Hoi4.Units
         float lastRebuild = -1f;
         const float MinRebuildInterval = 0.1f; // hourly ticks at high speed would otherwise rebuild every frame
         // Composed counters by content: a counter that did not change is copied, not re-composed
-        readonly Dictionary<string, Color32[]> composed = new Dictionary<string, Color32[]>();
+        readonly Dictionary<CounterKey, Color32[]> composed = new Dictionary<CounterKey, Color32[]>();
+        int atlasH; // atlas.height, kept here: Over() runs per pixel and the Texture getter is a native call
+
+        /// <summary>What a composed counter image depends on (a struct key: building a string per counter per
+        /// rebuild cost more than the lookup it served).</summary>
+        readonly struct CounterKey : IEquatable<CounterKey>
+        {
+            readonly bool battle, selected, noOrders;
+            readonly string tag, type;
+            readonly int rgb, action, army, count, org, str;
+
+            public CounterKey(bool battle, string tag, int rgb, string type, int action, int army, int count,
+                              int org, int str, bool selected, bool noOrders)
+            {
+                this.battle = battle; this.tag = tag; this.rgb = rgb; this.type = type; this.action = action;
+                this.army = army; this.count = count; this.org = org; this.str = str;
+                this.selected = selected; this.noOrders = noOrders;
+            }
+
+            public bool Equals(CounterKey o) =>
+                battle == o.battle && selected == o.selected && noOrders == o.noOrders && rgb == o.rgb &&
+                action == o.action && army == o.army && count == o.count && org == o.org && str == o.str &&
+                string.Equals(tag, o.tag) && string.Equals(type, o.type);
+
+            public override bool Equals(object obj) => obj is CounterKey k && Equals(k);
+
+            public override int GetHashCode() =>
+                HashCode.Combine(HashCode.Combine(battle, selected, noOrders, rgb, action, army, count),
+                                 org, str, tag, type);
+        }
 
         Sprite actionMove, actionDefend, actionAttack; // optional: the arrow, shield and double chevron on a counter's right edge
         Sprite noOrders; // optional: GFX_mapicon_unit_no_orders
@@ -447,10 +476,11 @@ namespace Hoi4.Units
                     : defended.Contains(u.provinceID) ? 2
                     : queue != null && queue.IsUnitMoving(id) ? 1 : 0;
                 if (action > s.Action) s.Action = action;
-                if (s.ArmyId == 0) s.ArmyId = Hoi4Armies.Instance?.ArmyOf(id)?.Id ?? 0;
+                var armyOf = Hoi4Armies.Instance?.ArmyOf(id);
+                if (s.ArmyId == 0) s.ArmyId = armyOf?.Id ?? 0;
                 // Like HOI4: in an army but on no battle plan, and not following a manual order
                 var plans = Hoi4BattlePlans.Instance;
-                if (plans != null && Hoi4Armies.Instance?.ArmyOf(id) != null && plans.PlanOf(id) == null && !plans.HasManualOrder(id))
+                if (plans != null && armyOf != null && plans.PlanOf(id) == null && !plans.HasManualOrder(id))
                     s.NoOrders = true;
                 s.Units.Add(id);
                 if (Selection != null && Selection.Contains(id)) s.Selected = true;
@@ -531,6 +561,7 @@ namespace Hoi4.Units
             {
                 Array.Clear(atlasPixels, 0, atlasPixels.Length);
             }
+            atlasH = atlasHeight;
 
             var verts = new Vector3[stacks.Count * 4];
             var uvs = new Vector2[stacks.Count * 4];
@@ -574,25 +605,27 @@ namespace Hoi4.Units
             // Vertices sit at the anchors; the shader moves them in screen space, so never cull
             mesh.bounds = new Bounds(Vector3.zero, Vector3.one * 1e6f);
 
-            ArchonLogger.Log($"Hoi4UnitCounters: {stacks.Count} counters, atlas {AtlasWidth}x{atlasHeight}", "game_units");
+            if (GameSettings.Instance?.ShouldLog(LogLevel.Debug) ?? false) // every rebuild: several a second in a war
+                ArchonLogger.Log($"Hoi4UnitCounters: {stacks.Count} counters, atlas {AtlasWidth}x{atlasHeight}", "game_units");
         }
 
-        string Signature(Stack s)
+        CounterKey Signature(Stack s)
         {
-            if (s.IsBattle) return "b" + s.Count + "|" + s.Battle;
+            if (s.IsBattle) return new CounterKey(true, null, 0, null, s.Battle, 0, s.Count, 0, 0, false, false);
             string type = "infantry";
             int best = -1;
             foreach (var kv in s.Types)
                 if (kv.Value > best) { best = kv.Value; type = kv.Key; }
             int org = Mathf.RoundToInt(barOrg.Width * Mathf.Clamp01(s.MaxOrg > 0 ? s.Org / s.MaxOrg : 1f));
             int str = Mathf.RoundToInt(barStr.Width * Mathf.Clamp01(s.MaxStr > 0 ? s.Str / s.MaxStr : 1f));
-            return string.Concat(s.Tag, "|", s.Color.r.ToString(), ",", s.Color.g.ToString(), ",", s.Color.b.ToString(), "|", type, "|a", s.Action.ToString(), "|m", s.ArmyId.ToString(), "|", s.Count.ToString(), "|", org.ToString(), "|", str.ToString(), s.Selected ? "|s" : "", s.NoOrders ? "|n" : "");
+            return new CounterKey(false, s.Tag, s.Color.r << 16 | s.Color.g << 8 | s.Color.b, type, s.Action, s.ArmyId,
+                                  s.Count, org, str, s.Selected, s.NoOrders);
         }
 
         void ComposeCached(Stack s, int ox, int oy)
         {
-            string key = Signature(s);
-            int h = atlas.height;
+            var key = Signature(s);
+            int h = atlasH;
             if (composed.TryGetValue(key, out var block))
             {
                 for (int y = 0; y < SlotH; y++)
@@ -785,7 +818,7 @@ namespace Hoi4.Units
         // Straight-alpha "over" at atlas pixel (x, y), y = 0 at the top
         void Over(int x, int y, Color32 c)
         {
-            int h = atlas.height;
+            int h = atlasH;
             if (x < 0 || x >= AtlasWidth || y < 0 || y >= h) return;
             int i = (h - 1 - y) * AtlasWidth + x;
             var d = atlasPixels[i];

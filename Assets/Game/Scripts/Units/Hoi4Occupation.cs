@@ -38,6 +38,48 @@ namespace Hoi4.Units
             go.AddComponent<Hoi4Occupation>();
         }
 
+        // Every province's index in the engine's province state array (looked up once per game state)
+        static GameState indexedState;
+        static ushort[] indexedIds;
+        static int[] stateIndex;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetIndex() { indexedState = null; indexedIds = null; stateIndex = null; }
+
+        /// <summary>
+        /// Controller (as ControllerOf) and optionally owner of every province, by province id, into arrays at
+        /// least max id + 1 long. Reads the engine's province state array by cached index: calling ControllerOf
+        /// for the whole map is two hash lookups per province, a whole-map read several times an hour.
+        /// </summary>
+        public static void ReadAll(GameState gameState, ushort[] controller, ushort[] owner = null)
+        {
+            var data = gameState.Provinces.GetNativeData();
+            if (indexedState != gameState || indexedIds == null || indexedIds.Length != data.activeProvinceIds.Length)
+            {
+                var ids = new System.Collections.Generic.List<ushort>(data.activeProvinceIds.Length);
+                var idx = new System.Collections.Generic.List<int>(data.activeProvinceIds.Length);
+                for (int i = 0; i < data.activeProvinceIds.Length; i++)
+                {
+                    ushort id = data.activeProvinceIds[i];
+                    if (!data.idToIndex.TryGetValue(id, out int k)) continue;
+                    ids.Add(id);
+                    idx.Add(k);
+                }
+                indexedIds = ids.ToArray();
+                stateIndex = idx.ToArray();
+                indexedState = gameState;
+            }
+            var states = data.provinceStates;
+            for (int i = 0; i < indexedIds.Length; i++)
+            {
+                ushort id = indexedIds[i];
+                if (id >= controller.Length) continue;
+                var s = states[stateIndex[i]];
+                controller[id] = s.controllerID != 0 ? s.controllerID : s.ownerID;
+                if (owner != null && id < owner.Length) owner[id] = s.ownerID;
+            }
+        }
+
         /// <summary>Who controls the province: its controller, or its owner when none is recorded.</summary>
         public static ushort ControllerOf(GameState gameState, ushort province)
         {
