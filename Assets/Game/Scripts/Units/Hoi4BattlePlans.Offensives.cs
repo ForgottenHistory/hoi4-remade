@@ -630,7 +630,7 @@ namespace Hoi4.Units
         {
             var type = StarterKit.Initializer.Instance?.UnitSystem?.GetUnitType(unit.unitTypeID);
             var queue = gameState.Units.MovementQueue;
-            if (queue.IsUnitMoving(unitId)) return false;
+            if (queue.IsUnitMoving(unitId) || !gameState.Units.HasUnit(unitId)) return false; // destroyed this hour
             queue.StartMovement(unitId, to, type?.Speed ?? 3, new List<ushort> { unit.provinceID, to });
             return true;
         }

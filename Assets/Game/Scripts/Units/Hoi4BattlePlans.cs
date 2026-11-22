@@ -2024,21 +2024,31 @@ namespace Hoi4.Units
             // moves as commands too would apply them twice on the other clients and in a replay.
             var type = StarterKit.Initializer.Instance?.UnitSystem?.GetUnitType(unit.unitTypeID);
             var queue = gameState.Units.MovementQueue;
+            if (!gameState.Units.HasUnit(unitId)) return false; // destroyed this hour, before the plans pruned it
             if (queue.IsUnitMoving(unitId)) queue.CancelMovement(unitId); // a new march replaces the old one
             queue.StartMovement(unitId, path[1], type?.Speed ?? 3, new List<ushort>(path));
             return true;
         }
 
         /// <summary>
-        /// A path that never enters land held by a country at war with this one. Holding the line is not
-        /// attacking: a march through an enemy province is an attack there (Hoi4Combat), so a plan that
-        /// routed a division to its spot that way had it attack every hour, at any organisation.
+        /// A path that never enters land held by a country at war with this one, nor a province an enemy division
+        /// stands in (still ours, but marching in is an attack there). Holding the line is not attacking: a march
+        /// through an enemy province is an attack there (Hoi4Combat), so a plan that routed a division to its spot
+        /// that way had it attack every hour, at any organisation (a broken division drops the order, the plan gave
+        /// it again the next hour). The division's own start and target stay open.
         /// </summary>
         Core.Systems.PathResult FriendlyPath(ushort from, ushort to, ushort country)
         {
             var options = Core.Systems.PathOptions.Default;
             options.Context = Core.Systems.PathContext.Create(country, 0);
-            options.ForbiddenProvinces = EnemyLand(country);
+            var forbidden = EnemyLand(country);
+            if (forbidden.Contains(from) || forbidden.Contains(to))
+            {
+                forbidden = new HashSet<ushort>(forbidden);
+                forbidden.Remove(from);
+                forbidden.Remove(to);
+            }
+            options.ForbiddenProvinces = forbidden;
             return gameState.Pathfinding.FindPathWithOptions(from, to, options);
         }
 
@@ -2056,16 +2066,27 @@ namespace Hoi4.Units
             return landByController;
         }
 
-        /// <summary>Land controlled by countries at war with this one, once per hour per country.</summary>
+        /// <summary>Land controlled by countries at war with this one, and provinces where their divisions stand,
+        /// once per hour per country.</summary>
         HashSet<ushort> EnemyLand(ushort country)
         {
             if (enemyLand.TryGetValue(country, out var set)) return set;
             set = new HashSet<ushort>();
             var diplomacy = gameState.Diplomacy;
             if (diplomacy != null)
+            {
                 foreach (var kv in LandByController())
                     if (kv.Key != 0 && kv.Key != country && diplomacy.IsAtWar(country, kv.Key))
                         set.UnionWith(kv.Value);
+                var divisions = Hoi4Divisions.Instance;
+                if (divisions != null && diplomacy.IsAtWar(country))
+                    foreach (ushort id in divisions.All.Keys)
+                    {
+                        if (!gameState.Units.HasUnit(id)) continue;
+                        var u = gameState.Units.GetUnit(id);
+                        if (u.countryID != country && diplomacy.IsAtWar(country, u.countryID)) set.Add(u.provinceID);
+                    }
+            }
             enemyLand[country] = set;
             return set;
         }
