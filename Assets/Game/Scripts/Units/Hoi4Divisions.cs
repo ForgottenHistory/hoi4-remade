@@ -131,6 +131,10 @@ namespace Hoi4.Units
         public bool HasTemplate(string tag, string template) =>
             tag != null && template != null && templatesByTag.TryGetValue(tag, out var t) && t[template] is JObject;
 
+        /// <summary>The template's main regiment type (HOI4 shows a division by it; its icon), null when unknown.</summary>
+        public string TemplateMain(string tag, string template) =>
+            HasTemplate(tag, template) ? (string)templatesByTag[tag][template]["main"] : null;
+
         /// <summary>Days a division of the template trains: its slowest sub-unit's training_time (HOI4).</summary>
         public int TrainingDays(string tag, string template)
         {

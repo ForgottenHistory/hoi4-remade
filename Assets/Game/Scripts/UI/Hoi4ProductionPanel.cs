@@ -145,6 +145,7 @@ namespace Hoi4.UI
         {
             if (panel == null || Player == 0) return;
             if (Hoi4ConstructionPanel.IsOpen) Hoi4ConstructionPanel.Instance.Close(); // they share the left side
+            if (Hoi4DeploymentPanel.IsOpen) Hoi4DeploymentPanel.Instance.Close();
             open = true;
             panel.style.display = DisplayStyle.Flex;
             structureDirty = true;

@@ -120,4 +120,37 @@ namespace Hoi4.Deployment
         public override void Serialize(BinaryWriter w) { w.Write(CountryId); w.Write(OrderId); w.Write(LineId); }
         public override void Deserialize(BinaryReader r) { CountryId = r.ReadUInt16(); OrderId = r.ReadInt32(); LineId = r.ReadInt32(); }
     }
+
+    /// <summary>Move an order up (Delta &lt; 0) or down the list (first served among equal priorities).</summary>
+    public sealed class MoveDeploymentOrderCommand : BaseCommand
+    {
+        public ushort CountryId;
+        public int OrderId;
+        public int Delta;
+
+        public override bool Validate(GameState gameState) => Delta != 0 && Hoi4Deployment.Instance?.GetOrder(CountryId, OrderId) != null;
+        public override void Execute(GameState gameState) => Hoi4Deployment.Instance.MoveOrder(CountryId, OrderId, Delta);
+        public override void Undo(GameState gameState) { }
+        public override void Serialize(BinaryWriter w) { w.Write(CountryId); w.Write(OrderId); w.Write(Delta); }
+        public override void Deserialize(BinaryReader r) { CountryId = r.ReadUInt16(); OrderId = r.ReadInt32(); Delta = r.ReadInt32(); }
+    }
+
+    /// <summary>Cancel one training line (its men and equipment go back).</summary>
+    public sealed class RemoveDeploymentLineCommand : BaseCommand
+    {
+        public ushort CountryId;
+        public int OrderId;
+        public int LineId;
+
+        public override bool Validate(GameState gameState)
+        {
+            var o = Hoi4Deployment.Instance?.GetOrder(CountryId, OrderId);
+            return o != null && o.Lines.Exists(l => l.Id == LineId);
+        }
+
+        public override void Execute(GameState gameState) => Hoi4Deployment.Instance.RemoveLine(CountryId, OrderId, LineId);
+        public override void Undo(GameState gameState) { }
+        public override void Serialize(BinaryWriter w) { w.Write(CountryId); w.Write(OrderId); w.Write(LineId); }
+        public override void Deserialize(BinaryReader r) { CountryId = r.ReadUInt16(); OrderId = r.ReadInt32(); LineId = r.ReadInt32(); }
+    }
 }

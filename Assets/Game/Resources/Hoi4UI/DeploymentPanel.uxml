@@ -1,0 +1,36 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <!-- HOI4 recruit & deploy screen (interface/countrydeploymentview.gui), positions in HOI4 pixels: the deployment
+         window (countrydeploymentview, 550 wide) and the division templates window beside it (templatedeploymentwindow,
+         375 wide at x 538). Prototype: Tools/prototypes/deployment/render_deployment.py -->
+    <ui:VisualElement name="deployment-panel" class="dp-root" picking-mode="Ignore">
+        <ui:VisualElement name="dp-window" class="dp-window" picking-mode="Position">
+            <ui:VisualElement class="spr dp-window-bg" picking-mode="Ignore" />
+            <ui:VisualElement class="spr dp-binding" picking-mode="Ignore" />
+            <ui:VisualElement class="spr dp-list-overlay" picking-mode="Ignore" />
+            <ui:VisualElement class="spr dp-list-frame" picking-mode="Ignore" />
+            <!-- deployments_list_gridbox: equipment priority rows, then the orders -->
+            <ui:ScrollView name="dp-list" class="dp-list" mode="Vertical" horizontal-scroller-visibility="Hidden">
+                <ui:VisualElement name="dp-priorities" class="dp-priorities" picking-mode="Ignore" />
+                <ui:VisualElement name="dp-orders" class="dp-orders" picking-mode="Ignore" />
+            </ui:ScrollView>
+            <ui:VisualElement class="spr dp-header-bg" picking-mode="Ignore" />
+            <ui:Label class="hoi4-label dp-title" text="RECRUIT &amp; DEPLOY" picking-mode="Ignore" />
+            <ui:VisualElement name="dp-close" class="spr hoi4-button dp-close" picking-mode="Position" />
+        </ui:VisualElement>
+
+        <ui:VisualElement name="dp-templates" class="dp-templates" picking-mode="Position">
+            <ui:VisualElement class="spr dt-bg" picking-mode="Ignore" />
+            <ui:VisualElement class="spr dt-header-bg" picking-mode="Ignore" />
+            <ui:Label class="hoi4-label center dt-title" text="DIVISION TEMPLATES" picking-mode="Ignore" />
+            <ui:VisualElement class="spr dt-special-icon" picking-mode="Position" tooltip="Special forces battalions in use, of the most allowed (5% of the other battalions, at least 24)" />
+            <ui:Label name="dt-special" class="hoi4-label dt-special" text="0/24" picking-mode="Ignore" />
+            <ui:VisualElement class="spr dt-designer disabled" picking-mode="Position" tooltip="Division designer: not available yet">
+                <ui:Label class="hoi4-label center dt-designer-text" text="Division Designer" picking-mode="Ignore" />
+            </ui:VisualElement>
+            <ui:VisualElement class="spr dt-decom-bg" picking-mode="Ignore" />
+            <ui:VisualElement class="spr dt-checkbox disabled" picking-mode="Position" tooltip="No templates are decommissioned yet" />
+            <ui:Label class="hoi4-label dt-decom" text="Show &lt;color=#E6C850&gt;decommissioned templates&lt;/color&gt;" enable-rich-text="true" picking-mode="Ignore" />
+            <ui:ScrollView name="dt-list" class="dt-list" mode="Vertical" horizontal-scroller-visibility="Hidden" />
+        </ui:VisualElement>
+    </ui:VisualElement>
+</ui:UXML>

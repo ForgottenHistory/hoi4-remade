@@ -1,0 +1,150 @@
+/* HOI4 recruit & deploy screen (interface/countrydeploymentview.gui). Positions and sizes are HOI4's, in HOI4 pixels.
+   Sprites from gfx/interface/deployment/ (converter: convert_deployment_gfx), template icons from
+   gfx/interface/unitpanel/icons/; tiled ones are 9-sliced with their borderSize.
+   Prototype: Tools/prototypes/deployment/render_deployment.py */
+
+.dp-root { position: absolute; left: 0; top: 0; right: 0; bottom: 0; display: none; }
+
+/* ---- countrydeploymentview: 550 wide, under the top bar ---------------------------------------------------- */
+.dp-window { position: absolute; left: 0; top: 78px; bottom: 0; width: 550px; }
+.dp-window-bg {
+    --sprite: "gfx/interface/deployment/window_bg.png"; left: 0; top: 0; right: 0; bottom: 0;
+    -unity-slice-left: 64; -unity-slice-right: 64; -unity-slice-top: 64; -unity-slice-bottom: 64;
+}
+.dp-header-bg { --sprite: "gfx/interface/deployment/header_bg.png"; left: 5px; top: 7px; width: 543px; height: 41px; }
+.dp-title { left: 45px; top: 8px; height: 36px; font-size: 22px; letter-spacing: 3px; -unity-text-align: middle-left; }
+.dp-close { --sprite: "gfx/interface/deployment/close.png"; left: 507px; top: 9px; width: 32px; height: 33px; }
+.dp-binding { --sprite: "gfx/interface/deployment/binding.png"; left: 9px; top: 43px; width: 533px; height: 35px; }
+
+/* military_tab/divisions (0, 42), margin 13; the gridbox at (25, 5) */
+.dp-list-overlay {
+    --sprite: "gfx/interface/deployment/lines_overlay.png"; left: 0; top: 42px; right: 0; bottom: 0;
+    -unity-slice-left: 144; -unity-slice-right: 144; -unity-slice-top: 144; -unity-slice-bottom: 144;
+}
+.dp-list-frame {
+    --sprite: "gfx/interface/deployment/column_border.png"; left: 0; top: 42px; right: 0; bottom: 0;
+    -unity-slice-left: 64; -unity-slice-right: 64; -unity-slice-top: 64; -unity-slice-bottom: 64;
+}
+.dp-list { position: absolute; left: 0; top: 55px; right: 2px; bottom: 13px; }
+.dp-list .unity-scroll-view__content-container { padding-top: 5px; padding-bottom: 20px; }
+.dp-list .unity-scroller--vertical { width: 8px; background-color: rgba(10, 13, 13, 0.85); }
+.dp-list .unity-scroller__low-button, .dp-list .unity-scroller__high-button { display: none; }
+.dp-list .unity-scroller__slider { margin: 0; border-width: 0; background-color: rgba(0, 0, 0, 0); }
+.dp-priorities, .dp-orders { position: relative; }
+
+/* ---- deploy_entry: equipment priority rows, 493 x 47 (shown, not changeable yet) ---------------------------- */
+.dpp { position: relative; width: 493px; height: 48px; margin-left: 25px; }
+.dpp-bg { left: 0; top: -5px; width: 493px; height: 57px; }
+.dpp-bg.tall { width: 491px; height: 70px; }
+.dpp-icon-bg {
+    --sprite: "gfx/interface/deployment/icon_bg.png"; left: 10px; top: 4px; width: 77px; height: 40px;
+    -unity-slice-left: 16; -unity-slice-right: 16; -unity-slice-top: 16; -unity-slice-bottom: 16;
+}
+.dpp-icon { position: absolute; }
+.dpp-title-bg { --sprite: "gfx/interface/deployment/title_bg.png"; left: 110px; top: 12px; width: 159px; height: 26px; }
+.dpp-name { left: 110px; top: 12px; width: 159px; height: 26px; font-size: 15px; -unity-font-style: bold; }
+.dpp-meter-bg { --sprite: "gfx/interface/deployment/meter_bg.png"; left: 280px; top: 10px; width: 108px; height: 33px; }
+.dpp-eq-icon { --sprite: "gfx/interface/deployment/equipment_icon.png"; left: 285px; top: 15px; width: 22px; height: 18px; }
+/* GFX_deployment_progressbar draws at its size { 72 12 }, not its texture's 93 */
+.dpp-bar-bg { --sprite: "gfx/interface/deployment/priority_bar_bg.png"; left: 310px; top: 19px; width: 72px; height: 12px; }
+.dpp-bar-clip { position: absolute; left: 310px; top: 19px; width: 0; height: 12px; overflow: hidden; }
+.dpp-bar-fill { --sprite: "gfx/interface/deployment/priority_bar.png"; left: 0; top: 0; width: 72px; height: 12px; }
+.dpp-dot { top: 15px; width: 20px; height: 21px; --sprite: "gfx/interface/deployment/priority_0.png"; }
+.dpp-dot.on { --sprite: "gfx/interface/deployment/priority_2.png"; }
+
+/* ---- military_deployment_conveyor_view: one order, 488 x 84 (DeploymentOrder.uxml) --------------------------- */
+.dpo { position: relative; width: 520px; margin-left: 25px; margin-top: 2px; }
+.dpo-order { position: relative; width: 490px; height: 84px; }
+.dpo-bg { --sprite: "gfx/interface/deployment/order_bg.png"; left: 0; top: 0; width: 490px; height: 84px; }
+.dpo-icon { left: 12px; top: 22px; width: 76px; height: 42px; }
+.dpo-strip { left: 62px; top: 22px; width: 16px; height: 52px; --sprite: "gfx/interface/deployment/priority_strip_1.png"; }
+.dpo-strip.p0 { --sprite: "gfx/interface/deployment/priority_strip_0.png"; }
+.dpo-strip.p2 { --sprite: "gfx/interface/deployment/priority_strip_2.png"; }
+.dpo-name { left: 104px; top: 18px; width: 200px; height: 25px; font-size: 17px; -unity-font-style: bold; -unity-text-align: middle-left; overflow: hidden; }
+.dpo-location { --sprite: "gfx/interface/deployment/location_0.png"; left: 91px; top: 46px; width: 223px; height: 31px; }
+.dpo-location.picking { --sprite: "gfx/interface/deployment/location_1.png"; }
+.dpo-location-text { left: 0; top: 0; width: 223px; height: 31px; font-size: 15px; -unity-font-style: bold; }
+.dpo-location-text.none { color: rgb(220, 60, 50); }
+.dpo-sub { --sprite: "gfx/interface/deployment/decrease.png"; left: 312px; top: 10px; width: 33px; height: 33px; }
+.dpo-amount { left: 345px; top: 16px; width: 39px; height: 22px; font-size: 18px; -unity-font-style: bold; }
+.dpo-add { --sprite: "gfx/interface/deployment/increase.png"; left: 383px; top: 10px; width: 33px; height: 33px; }
+.dpo-prio { top: 17px; width: 20px; height: 21px; --sprite: "gfx/interface/deployment/priority_0.png"; }
+.dpo-prio.on { --sprite: "gfx/interface/deployment/priority_2.png"; }
+.dpo-prio-0 { left: 420px; }
+.dpo-prio-1 { left: 440px; }
+.dpo-prio-2 { left: 460px; }
+.dpo-add-line { --sprite: "gfx/interface/deployment/add_line_0.png"; left: 315px; top: 50px; width: 105px; height: 23px; }
+.dpo-add-line-text { left: 0; top: 0; width: 105px; height: 23px; font-size: 15px; -unity-font-style: bold; }
+.dpo-deploy { --sprite: "gfx/interface/deployment/deploy_order.png"; left: 421px; top: 47px; width: 29px; height: 29px; }
+.dpo-cancel { --sprite: "gfx/interface/deployment/cancel_order.png"; left: 450px; top: 47px; width: 29px; height: 29px; }
+
+/* military_deployment_conveyor_summary_view: 510 x 40 at x -15. GFX_deployment_entry_progressbar draws at { 68 12 } */
+.dpo-summary { position: relative; width: 518px; height: 40px; margin-left: -15px; }
+.dpo-summary-bg { --sprite: "gfx/interface/deployment/summary_bg.png"; left: 0; top: 0; width: 518px; height: 40px; }
+.dpo-up { --sprite: "gfx/interface/deployment/order_arrows_0.png"; left: 11px; top: 4px; width: 27px; height: 28px; }
+.dpo-down { --sprite: "gfx/interface/deployment/order_arrows_1.png"; left: 36px; top: 4px; width: 27px; height: 28px; }
+.dpo-eq-icon { --sprite: "gfx/interface/deployment/equipment_state_icon_1.png"; left: 215px; top: 7px; width: 22px; height: 18px; }
+.dpo-eq-icon.full, .dpl-eq-icon.full { --sprite: "gfx/interface/deployment/equipment_state_icon_0.png"; }
+.dpo-eq-bg { --sprite: "gfx/interface/deployment/entry_bar_bg.png"; left: 237px; top: 9px; width: 68px; height: 12px; }
+.dpo-eq-clip { position: absolute; left: 237px; top: 9px; width: 0; height: 12px; overflow: hidden; }
+.dpo-eq-fill { --sprite: "gfx/interface/deployment/entry_bar.png"; left: 0; top: 0; width: 68px; height: 12px; }
+.dpo-count { left: 320px; top: 6px; width: 120px; height: 24px; font-size: 15px; -unity-font-style: bold; }
+.dpo-collapse { --sprite: "gfx/interface/deployment/collapse_0.png"; left: 481px; top: 4px; width: 24px; height: 25px; }
+.dpo-collapse.collapsed { --sprite: "gfx/interface/deployment/collapse_1.png"; }
+.dpo-lines { position: relative; }
+.dpo-end { --sprite: "gfx/interface/deployment/end_line.png"; position: relative; width: 516px; height: 11px; margin-left: -14px; margin-top: -3px; }
+
+/* ---- military_deployment_line_view: one division in training, 514 x 40 at x -13 (DeploymentLine.uxml) ------- */
+.dpl { position: relative; width: 514px; height: 40px; margin-left: -13px; }
+.dpl-bg { --sprite: "gfx/interface/deployment/line_bg.png"; left: 0; top: 0; width: 514px; height: 40px; }
+.dpl-name { left: 10px; top: 0; width: 168px; height: 40px; font-size: 15px; -unity-font-style: bold; -unity-text-align: middle-left; overflow: hidden; }
+.dpl-dropdown { --sprite: "gfx/interface/deployment/name_dropdown_1.png"; left: 180px; top: 9px; width: 22px; height: 22px; }
+.dpl-eq-icon { --sprite: "gfx/interface/deployment/equipment_state_icon_1.png"; left: 214px; top: 12px; width: 22px; height: 18px; }
+.dpl-eq-area { position: absolute; left: 235px; top: 13px; width: 68px; height: 12px; }
+.dpl-eq-bg, .dpl-tr-bg { --sprite: "gfx/interface/deployment/entry_bar_bg.png"; left: 0; top: 0; width: 68px; height: 12px; }
+.dpl-eq-clip, .dpl-tr-clip { position: absolute; left: 0; top: 0; width: 0; height: 12px; overflow: hidden; }
+.dpl-eq-fill, .dpl-tr-fill { --sprite: "gfx/interface/deployment/entry_bar.png"; left: 0; top: 0; width: 68px; height: 12px; }
+.dpl-eq-fill.stalled { --sprite: "gfx/interface/deployment/entry_bar_stalled.png"; }
+.dpl-level { --sprite: "gfx/interface/deployment/unit_level_0.png"; left: 306px; top: 6px; width: 27px; height: 27px; }
+.dpl-tr-area { position: absolute; left: 329px; top: 13px; width: 68px; height: 12px; }
+.dpl-number { left: 395px; top: 0; width: 50px; height: 40px; font-size: 15px; -unity-font-style: bold; }
+.dpl-deploy { --sprite: "gfx/interface/deployment/deploy_line.png"; left: 458px; top: 7px; width: 26px; height: 26px; }
+.dpl-cancel { --sprite: "gfx/interface/deployment/cancel_line.png"; left: 484px; top: 7px; width: 26px; height: 26px; }
+
+/* ---- templatedeploymentwindow: 375 wide at x 538 --------------------------------------------------------------- */
+.dp-templates { position: absolute; left: 538px; top: 78px; bottom: 0; width: 375px; }
+.dt-bg {
+    --sprite: "gfx/interface/deployment/templates_bg.png"; left: 0; top: 0; right: 0; bottom: 0;
+    -unity-slice-left: 32; -unity-slice-right: 32; -unity-slice-top: 32; -unity-slice-bottom: 32;
+}
+.dt-header-bg { --sprite: "gfx/interface/deployment/templates_header_bg.png"; left: 1px; top: 0; width: 375px; height: 101px; }
+.dt-title { left: 0; top: 8px; width: 375px; height: 36px; font-size: 22px; letter-spacing: 3px; }
+.dt-special-icon { --sprite: "gfx/interface/deployment/special_forces_icon_2.png"; left: 74px; top: 63px; width: 26px; height: 23px; }
+.dt-special { left: 104px; top: 62px; width: 70px; height: 24px; font-size: 16px; -unity-font-style: bold; -unity-text-align: middle-left; }
+.dt-designer { --sprite: "gfx/interface/deployment/designer_button.png"; left: 188px; top: 56px; width: 166px; height: 33px; }
+.dt-designer-text { left: 0; top: 0; width: 166px; height: 33px; font-size: 15px; -unity-font-style: bold; }
+.dt-decom-bg {
+    --sprite: "gfx/interface/deployment/plain_bg.png"; left: 1px; top: 96px; width: 373px; height: 44px;
+    -unity-slice-left: 16; -unity-slice-right: 16; -unity-slice-top: 16; -unity-slice-bottom: 16;
+}
+.dt-checkbox { --sprite: "gfx/interface/deployment/checkbox_0.png"; left: 19px; top: 103px; width: 34px; height: 30px; }
+.dt-decom { left: 60px; top: 106px; width: 300px; height: 24px; font-size: 17px; -unity-font-style: bold; -unity-text-align: middle-left; }
+.dt-list { position: absolute; left: 12px; top: 138px; width: 360px; bottom: 10px; }
+.dt-list .unity-scroller--vertical { width: 8px; background-color: rgba(10, 13, 13, 0.85); }
+.dt-list .unity-scroller__low-button, .dt-list .unity-scroller__high-button { display: none; }
+.dt-list .unity-scroller__slider { margin: 0; border-width: 0; background-color: rgba(0, 0, 0, 0); }
+
+/* named_division_template_entry: 341 x 72, 74 apart */
+.dte { position: relative; width: 341px; height: 74px; }
+.dte-bg { --sprite: "gfx/interface/deployment/template_bg.png"; left: -5px; top: 0; width: 346px; height: 78px; }
+.dte-icon { left: 5px; top: 16px; width: 76px; height: 42px; }
+.dte-obsolete { --sprite: "gfx/interface/deployment/obsolete_toggle_0.png"; left: 302px; top: 22px; width: 20px; height: 21px; }
+.dte-name { left: 98px; top: 18px; width: 202px; height: 26px; font-size: 17px; -unity-font-style: bold; overflow: hidden; }
+.dte-train { --sprite: "gfx/interface/deployment/small_button.png"; left: 158px; top: 48px; width: 71px; height: 26px; }
+.dte-edit { --sprite: "gfx/interface/deployment/small_button.png"; left: 228px; top: 48px; width: 71px; height: 26px; }
+.dte-button-text { left: 0; top: 0; width: 71px; height: 26px; font-size: 15px; -unity-font-style: bold; }
+.dte-delete { --sprite: "gfx/interface/deployment/delete_template.png"; left: 298px; top: 48px; width: 31px; height: 26px; }
+
+/* not usable (yet): greyed out */
+.dp-root .disabled, .dp-root .disabled:hover, .dp-root .disabled:active { -unity-background-image-tint-color: rgb(95, 95, 95); }
+.dp-root .disabled .hoi4-label { color: rgb(140, 140, 140); }

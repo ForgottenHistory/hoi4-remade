@@ -1,0 +1,43 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <!-- One deployment order: military_deployment_conveyor_view (488 x 84), its summary row
+         (military_deployment_conveyor_summary_view, 510 x 40 at x -15), its training lines (DeploymentLine.uxml) and the
+         end line (military_deployment_conveyor_end_view, at x -14, y -3). -->
+    <ui:VisualElement class="dpo" picking-mode="Ignore">
+        <ui:VisualElement class="dpo-order" picking-mode="Position">
+            <ui:VisualElement class="spr dpo-bg" picking-mode="Ignore" />
+            <ui:VisualElement name="dpo-icon" class="spr dpo-icon" picking-mode="Ignore" />
+            <ui:VisualElement name="dpo-strip" class="spr dpo-strip" picking-mode="Ignore" />
+            <ui:Label name="dpo-name" class="hoi4-label dpo-name" picking-mode="Ignore" />
+            <ui:VisualElement name="dpo-location" class="spr hoi4-button dpo-location" picking-mode="Position" tooltip="Where the divisions deploy: click, then click a province you hold">
+                <ui:Label name="dpo-location-text" class="hoi4-label center dpo-location-text" picking-mode="Ignore" />
+            </ui:VisualElement>
+            <ui:VisualElement name="dpo-sub" class="spr hoi4-button dpo-sub" picking-mode="Position" tooltip="One division fewer (Shift: 5)" />
+            <ui:Label name="dpo-amount" class="hoi4-label center dpo-amount" picking-mode="Ignore" />
+            <ui:VisualElement name="dpo-add" class="spr hoi4-button dpo-add" picking-mode="Position" tooltip="One division more (Shift: 5)" />
+            <ui:VisualElement name="dpo-prio-0" class="spr hoi4-button dpo-prio dpo-prio-0" picking-mode="Position" tooltip="Low priority" />
+            <ui:VisualElement name="dpo-prio-1" class="spr hoi4-button dpo-prio dpo-prio-1" picking-mode="Position" tooltip="Normal priority" />
+            <ui:VisualElement name="dpo-prio-2" class="spr hoi4-button dpo-prio dpo-prio-2" picking-mode="Position" tooltip="High priority: gets manpower and equipment first" />
+            <ui:VisualElement name="dpo-add-line" class="spr hoi4-button dpo-add-line" picking-mode="Position" tooltip="Train one more division">
+                <ui:Label class="hoi4-label center dpo-add-line-text" text="Add Unit" picking-mode="Ignore" />
+            </ui:VisualElement>
+            <ui:VisualElement name="dpo-deploy" class="spr hoi4-button dpo-deploy" picking-mode="Position" tooltip="Deploy every division of this order that has at least 20% training" />
+            <ui:VisualElement name="dpo-cancel" class="spr hoi4-button dpo-cancel" picking-mode="Position" tooltip="Cancel the order: its manpower and equipment go back" />
+        </ui:VisualElement>
+
+        <ui:VisualElement class="dpo-summary" picking-mode="Position">
+            <ui:VisualElement class="spr dpo-summary-bg" picking-mode="Ignore" />
+            <ui:VisualElement name="dpo-up" class="spr hoi4-button dpo-up" picking-mode="Position" tooltip="Move the order up: first served among orders of the same priority" />
+            <ui:VisualElement name="dpo-down" class="spr hoi4-button dpo-down" picking-mode="Position" tooltip="Move the order down" />
+            <ui:VisualElement name="dpo-eq-icon" class="spr dpo-eq-icon" picking-mode="Ignore" />
+            <ui:VisualElement class="spr dpo-eq-bg" picking-mode="Ignore" />
+            <ui:VisualElement name="dpo-eq" class="dpo-eq-clip" picking-mode="Ignore">
+                <ui:VisualElement name="dpo-eq-fill" class="spr dpo-eq-fill" picking-mode="Ignore" />
+            </ui:VisualElement>
+            <ui:Label name="dpo-count" class="hoi4-label center dpo-count" picking-mode="Ignore" />
+            <ui:VisualElement name="dpo-collapse" class="spr hoi4-button dpo-collapse" picking-mode="Position" tooltip="Show or hide the divisions in training" />
+        </ui:VisualElement>
+
+        <ui:VisualElement name="dpo-lines" class="dpo-lines" picking-mode="Ignore" />
+        <ui:VisualElement class="spr dpo-end" picking-mode="Ignore" />
+    </ui:VisualElement>
+</ui:UXML>

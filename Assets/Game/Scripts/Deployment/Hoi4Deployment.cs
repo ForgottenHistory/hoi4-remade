@@ -10,8 +10,8 @@ namespace Hoi4.Deployment
     /// <summary>
     /// GAME: HOI4 training and deployment (recruit & deploy). Each country has deployment orders: a division template,
     /// a province to deploy to (the capital by default) and a priority (low, normal, high). An order holds one
-    /// training line per division asked for. Daily, per country in id order, lines by priority (high first), then order,
-    /// then line:
+    /// training line per division asked for. Daily, per country in id order, lines by priority (high first), then the order's place
+    /// in the list, then line:
     /// - Manpower: a line takes the template's whole manpower from the pool when it starts (HOI4 does too: a German
     ///   1936 line holds its 9,600 men from day one). It waits while the pool is short, or while the men in training
     ///   would go over max(100,000, 75% of the men in the field) (MIN_POSSIBLE_TRAINING_MANPOWER,
@@ -193,6 +193,18 @@ namespace Hoi4.Deployment
             Changed?.Invoke(country);
         }
 
+        /// <summary>Cancel one line: its men and equipment go back; the order goes with its last line.</summary>
+        public void RemoveLine(ushort country, int orderId, int lineId)
+        {
+            var order = GetOrder(country, orderId);
+            var line = FindLine(order, lineId);
+            if (line == null) return;
+            Refund(country, line);
+            order.Lines.Remove(line);
+            if (order.Lines.Count == 0) countries[country].Orders.Remove(order);
+            Changed?.Invoke(country);
+        }
+
         public void RemoveOrder(ushort country, int orderId)
         {
             var order = GetOrder(country, orderId);
@@ -217,6 +229,21 @@ namespace Hoi4.Deployment
             var order = GetOrder(country, orderId);
             if (order == null) return;
             order.Province = province;
+            Changed?.Invoke(country);
+        }
+
+        /// <summary>An order up (delta &lt; 0) or down the list: among orders of the same priority the earlier one gets
+        /// manpower and equipment first.</summary>
+        public void MoveOrder(ushort country, int orderId, int delta)
+        {
+            if (!countries.TryGetValue(country, out var c)) return;
+            int at = c.Orders.FindIndex(o => o.Id == orderId);
+            if (at < 0) return;
+            int to = Mathf.Clamp(at + delta, 0, c.Orders.Count - 1);
+            if (to == at) return;
+            var order = c.Orders[at];
+            c.Orders.RemoveAt(at);
+            c.Orders.Insert(to, order);
             Changed?.Invoke(country);
         }
 
@@ -340,11 +367,12 @@ namespace Hoi4.Deployment
             resources.EndBatch();
         }
 
-        /// <summary>High priority first, then order of creation (stable).</summary>
+        /// <summary>High priority first, then the order of the list (the player can move orders up and down).</summary>
         static List<Order> ByPriority(List<Order> orders)
         {
-            var list = new List<Order>(orders);
-            list.Sort((a, b) => a.Priority != b.Priority ? b.Priority.CompareTo(a.Priority) : a.Id.CompareTo(b.Id));
+            var list = new List<Order>(orders.Count);
+            for (int p = High; p >= Low; p--)
+                foreach (var o in orders) if (o.Priority == p) list.Add(o);
             return list;
         }
 

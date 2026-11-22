@@ -1,0 +1,25 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <!-- military_deployment_line_view (countrydeploymentview.gui): one division in training, 514 x 40 at x -13 -->
+    <ui:VisualElement class="dpl" picking-mode="Position">
+        <ui:VisualElement class="spr dpl-bg" picking-mode="Ignore" />
+        <ui:Label name="dpl-name" class="hoi4-label dpl-name" picking-mode="Position" />
+        <ui:VisualElement class="spr dpl-dropdown" picking-mode="Ignore" />
+        <ui:VisualElement name="dpl-eq-icon" class="spr dpl-eq-icon" picking-mode="Ignore" />
+        <ui:VisualElement name="dpl-eq-area" class="dpl-eq-area" picking-mode="Position">
+            <ui:VisualElement class="spr dpl-eq-bg" picking-mode="Ignore" />
+            <ui:VisualElement name="dpl-eq" class="dpl-eq-clip" picking-mode="Ignore">
+                <ui:VisualElement name="dpl-eq-fill" class="spr dpl-eq-fill" picking-mode="Ignore" />
+            </ui:VisualElement>
+        </ui:VisualElement>
+        <ui:VisualElement class="spr dpl-level" picking-mode="Ignore" />
+        <ui:VisualElement name="dpl-tr-area" class="dpl-tr-area" picking-mode="Position">
+            <ui:VisualElement class="spr dpl-tr-bg" picking-mode="Ignore" />
+            <ui:VisualElement name="dpl-tr" class="dpl-tr-clip" picking-mode="Ignore">
+                <ui:VisualElement class="spr dpl-tr-fill" picking-mode="Ignore" />
+            </ui:VisualElement>
+        </ui:VisualElement>
+        <ui:Label name="dpl-number" class="hoi4-label center dpl-number" picking-mode="Ignore" />
+        <ui:VisualElement name="dpl-deploy" class="spr hoi4-button dpl-deploy" picking-mode="Position" />
+        <ui:VisualElement name="dpl-cancel" class="spr hoi4-button dpl-cancel" picking-mode="Position" tooltip="Cancel this division: its manpower and equipment go back" />
+    </ui:VisualElement>
+</ui:UXML>

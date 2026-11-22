@@ -36,6 +36,7 @@
 
         <ui:VisualElement name="construction-button" class="spr hoi4-button tb-construction" picking-mode="Position" />
         <ui:VisualElement name="production-button" class="spr hoi4-button tb-production" picking-mode="Position" />
+        <ui:VisualElement name="deployment-button" class="spr hoi4-button tb-deployment" picking-mode="Position" />
 
         <ui:VisualElement class="spr hoi4-button tb-menu" picking-mode="Position" />
         <ui:VisualElement class="spr hoi4-button tb-help" picking-mode="Position" />

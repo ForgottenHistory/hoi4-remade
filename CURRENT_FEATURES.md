@@ -16,7 +16,7 @@
 
 **Construction:** Civilian factories and consumer goods from economy laws, a construction queue (civilian and military factories, infrastructure) with infrastructure speed-up and shared slots, construction AI and the construction screen
 
-**Recruit & deploy:** Training lines per deployment order take manpower up front, get equipment after the field, train up to their equipment level and deploy at the capital or a chosen province; recruitment AI (no screen yet)
+**Recruit & deploy:** Training lines per deployment order take manpower up front, get equipment after the field, train up to their equipment level and deploy at the capital or a chosen province; recruitment AI and the recruit & deploy screen
 
 **AI:** Enemy war AI with odds-based attacks off its own front lines; production, construction and recruitment AI
 
@@ -127,6 +127,7 @@ The goal is to stress-test Archon-Engine, not to ship a game. Big visual wins ar
 - **Training** - One day a day of the template's training time (its slowest sub-unit: infantry 90 days, support 120, armour 180), never above the line's equipment level (HOI4's max_training follows equipment), so lines wait for the factories
 - **Deploying** - Fully trained lines deploy on their own; early from 20% training (MIN_DIVISION_DEPLOYMENT_TRAINING) with the equipment they have. New divisions are named from the template's names group, numbered on from the 1936 divisions (Germany's next is 26, as in HOI4), at the order's province, or the capital when the country lost it
 - **Recruitment AI** - Weekly per country but the player's: one line per 4 military factories (at least one) of its most common template at the capital, at most 5 new a week, keeping two divisions' men in the pool
+- **Recruit & deploy screen** - Top bar button right of production, or U (shares the left side with production and construction). Equipment priority rows as in HOI4 (shown, not changeable; reinforcements shows the field's equipment), then one block per order: template icon, name, -/+ divisions (Shift: 5), low/normal/high priority, deploy location (click, then a province you hold), Add Unit, deploy all, cancel; a summary row (move the order up or down, mean equipment, divisions, collapse) and a row per division in training (name, equipment, stalled while waiting for manpower, training, n/N, deploy early from 20%, cancel). Division templates window beside it: special forces cap (max(24, 5% of battalions)), templates with icons and Train (an order of one at the capital); Edit, delete, designer and decommissioning greyed out (prototype `Tools/prototypes/deployment/render_deployment.py`)
 - **Recording** - Weekly `deployment` notes (lines, started, mean training and equipment, waiting for manpower, pool and cap), `order`, `deployed`, `cancel` and `ai_train` notes, a Deployment section in `report.py`, `deployment` and `ai_deployment` columns in `perf.tsv`
 
 ## Armies and Battle Plans
@@ -227,7 +228,7 @@ Tricky map algorithms are prototyped in Python under `Tools/prototypes/<topic>/`
 - Combat ignores forts, generals, supply, night, stacking and per-unit terrain modifiers (only the terrain's base penalty applies); max entrenchment ignores the division's own entrenchment stat (engineers)
 - Offensives are broad-front only; no spearhead or encirclement logic
 - AI does not use offensives or armies, only odds-based border attacks
-- Recruit and deploy has no screen yet, no template designer (only the 1936 templates), no training experience or exercises, no special forces cap, and deployment orders aren't saved
+- Recruit and deploy has no template designer, no equipment priorities, no division name choice (only the 1936 templates), no training experience or exercises, no special forces cap, and deployment orders aren't saved
 - Construction has no trade, repairs, conversion, province buildings (forts, naval bases, railways), slot bonuses from technology or law changes
 - Production has no strategic resources or trade, no factory construction, no factory output modifiers (real Germany makes about 17% more per factory), no civilian factories; air and naval lines are not converted, so their factories end up free (the AI puts them on land equipment)
 - Equipment designs and variants are not modelled: an archetype is one kind of equipment, stats from the 1936 design

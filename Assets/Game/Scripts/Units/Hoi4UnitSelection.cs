@@ -202,6 +202,8 @@ namespace Hoi4.Units
             if (peace != null && peace.OnClick(button, screen)) return true;
             var construction = Hoi4.UI.Hoi4ConstructionPanel.Instance; // the construction screen owns map clicks it uses
             if (construction != null && construction.OnClick(button, screen)) return true;
+            var deployment = Hoi4.UI.Hoi4DeploymentPanel.Instance; // picking a deploy location
+            if (deployment != null && deployment.OnClick(button, screen)) return true;
             if (Hoi4BattlePlans.Instance != null && Hoi4BattlePlans.Instance.OnClick(button, screen)) return true;
             var counters = Hoi4UnitCounters.Instance;
             if (button == 0)

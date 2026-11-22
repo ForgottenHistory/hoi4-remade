@@ -66,3 +66,5 @@
 .tb-construction.open { --sprite: "gfx/interface/topbar/construction_button_1.png"; }
 .tb-production { --sprite: "gfx/interface/topbar/production_button_0.png"; left: 456px; top: 35px; width: 55px; height: 41px; }
 .tb-production.open { --sprite: "gfx/interface/topbar/production_button_1.png"; }
+.tb-deployment { --sprite: "gfx/interface/topbar/deployment_button_0.png"; left: 511px; top: 35px; width: 55px; height: 41px; }
+.tb-deployment.open { --sprite: "gfx/interface/topbar/deployment_button_1.png"; }

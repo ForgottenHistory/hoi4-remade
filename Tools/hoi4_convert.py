@@ -523,6 +523,7 @@ def convert(hoi4: Path, out: Path):
     convert_peace_gfx(hoi4, out)
     convert_production_gfx(hoi4, out, oob_countries)
     convert_construction_gfx(hoi4, out)
+    convert_deployment_gfx(hoi4, out)
     convert_front_line(hoi4, out)
     convert_state_view(hoi4, out, state_centers)
     convert_move_arrow(hoi4, out)
@@ -1464,7 +1465,7 @@ TOPBAR_KEEP = [
     "pause_button_date", "button_speeddown", "button_speedup",
     "button_speedstep1", "button_speedstep2", "button_speedstep3", "button_speedstep4", "button_speedstep5",
     "DateText", "menu_button", "help_button", "threat_button", "threat_value",
-    "production_button", "production_button_glow", "construction_button",
+    "production_button", "production_button_glow", "construction_button", "deployment_button",
 ]
 # Sprite overrides: the extended background has room for DLC menu buttons we don't show
 TOPBAR_SPRITE = {"background": "GFX_topbar_background"}
@@ -1785,6 +1786,72 @@ def convert_construction_gfx(hoi4: Path, out: Path):
             continue
         img.save(dst / f"{name}.png")
     print("Construction sprites written")
+
+
+# Recruit & deploy screen (interface/countrydeploymentview.gui): file name -> HOI4 sprite
+DEPLOYMENT_SPRITES = {
+    # main window
+    "window_bg": "GFX_tiled_window", "header_bg": "GFX_header_bg", "binding": "GFX_deployment_binding",
+    "column_border": "GFX_tiled_window2_1b_border", "lines_overlay": "GFX_tiled_generic_overlay_bg1",
+    "close": "GFX_closebutton",
+    # equipment priority rows (deploy_entry)
+    "entry_reinforcements": "GFX_deploy_reinforcements_entry", "entry_upgrades": "GFX_deploy_upgrades_entry",
+    "entry_supply": "GFX_deploy_supply_entry", "entry_operations": "GFX_deploy_operations_entry",
+    "entry_garrisons": "GFX_deploy_garrisons_entry", "icon_bg": "GFX_deploy_icon_tiled_bg",
+    "icon_reinforcements": "GFX_reinforcements_icon", "icon_upgrades": "GFX_upgrades_icon",
+    "icon_supply": "GFX_deploy_supply_icon", "icon_operations": "GFX_operations_deploy_icon",
+    "icon_garrisons": "GFX_garrison_deploy_icon", "icon_raids": "GFX_deploy_raids_icon",
+    "title_bg": "GFX_deploy_priority_title_bg", "meter_bg": "GFX_deploy_priority_equipment_meter_bg",
+    "equipment_icon": "GFX_equipment_icon", "priority": "GFX_deploy_priority",
+    # orders (military_deployment_conveyor_view) and their summary and lines
+    "order_bg": "GFX_military_deployment_conveyor_view_bg", "template_icon_bg": "GFX_technology_medium",
+    "priority_strip": "GFX_div_deploy_priority_icon_strip", "location": "GFX_conveyor_location_btn",
+    "decrease": "GFX_naval_decrease_amount", "increase": "GFX_naval_increase_amount",
+    "add_line": "GFX_military_deployment_add_line_btn", "deploy_order": "GFX_deploy_conveyor_button",
+    "cancel_order": "GFX_cancel_conveyor_button",
+    "summary_bg": "GFX_military_deployment_end_line_view_bg", "collapse": "GFX_conveyor_collapse_btn",
+    "order_arrows": "GFX_change_conveyor_order_btn", "equipment_state_icon": "GFX_equipment_state_icon",
+    "end_line": "GFX_military_deployment_end_line", "line_bg": "GFX_military_deployment_line_view_bg",
+    "name_dropdown": "GFX_collapse_or_close", "unit_level": "GFX_unit_level", "deploy_line": "GFX_deploy_line_button",
+    "cancel_line": "GFX_closebutton_small",
+    # templates window
+    "templates_bg": "GFX_tiled_window_1b_thin_border", "templates_header_bg": "GFX_subview_header_bg_375x101",
+    "special_forces_icon": "GFX_special_forces_icon", "plain_bg": "GFX_tiled_plain_bg_small",
+    "checkbox": "GFX_generic_checkbox", "designer_button": "GFX_division_designer_button",
+    "foreign_templates": "GFX_foreign_templates_dropdown_button", "template_bg": "GFX_deployment_named_division_bg",
+    "small_button": "GFX_small_button_71x26", "delete_template": "GFX_delete_template_button",
+    "obsolete_toggle": "GFX_toggle_obsolete_button",
+}
+# Progress bars (progressbartype): file name -> texture
+DEPLOYMENT_BARS = {
+    "entry_bar": "gfx/interface/deployment_entry_progressbar.dds",
+    "entry_bar_stalled": "gfx/interface/deployment_entry_stalled_progressbar.dds",
+    "entry_bar_bg": "gfx/interface/deployment_entry_progressbar_bg.dds",
+    "priority_bar": "gfx/interface/deployment_progressbar.dds",
+    "priority_bar_bg": "gfx/interface/deployment_progressbar_bg.dds",
+}
+
+
+def convert_deployment_gfx(hoi4: Path, out: Path):
+    """Sprites of the recruit & deploy screen under gfx/interface/deployment/ for Hoi4DeploymentPanel."""
+    import hoi4_gui as gui
+    dst = out / "gfx" / "interface" / "deployment"
+    dst.mkdir(parents=True, exist_ok=True)
+    sprites = gui.load_sprites(hoi4)
+    for name, spr in DEPLOYMENT_SPRITES.items():
+        frames = gui.sprite_frames(hoi4, sprites, spr)
+        if not frames:
+            print(f"  deployment: no sprite {spr}")
+            continue
+        for i, fr in enumerate(frames):
+            fr.save(dst / (f"{name}.png" if len(frames) == 1 else f"{name}_{i}.png"))
+    for name, rel in DEPLOYMENT_BARS.items():
+        img = gui.load_image(hoi4, rel)
+        if img is None:
+            print(f"  deployment: no texture {rel}")
+            continue
+        img.save(dst / f"{name}.png")
+    print("Deployment sprites written")
 
 
 def convert_production_gfx(hoi4: Path, out: Path, oob_countries):
