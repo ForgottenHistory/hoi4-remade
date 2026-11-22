@@ -66,6 +66,7 @@ namespace Hoi4.War
         void OnDestroy()
         {
             if (subscriptions != null) foreach (var s in subscriptions) s?.Dispose();
+            if (ownedBuffer.IsCreated) ownedBuffer.Dispose();
             if (Instance == this) Instance = null;
         }
 
@@ -151,22 +152,27 @@ namespace Hoi4.War
 
         /// <summary>Surrender progress, 0..1 (capitulation at 1): the share of the country's victory points its
         /// enemies hold, over the surrender limit.</summary>
+        Unity.Collections.NativeList<ushort> ownedBuffer;
+
         public FP SurrenderProgress(ushort country)
         {
+            if (!ownedBuffer.IsCreated) ownedBuffer = new Unity.Collections.NativeList<ushort>(1024, Unity.Collections.Allocator.Persistent);
             if (gameState == null || country == 0) return FP.Zero;
             int total = 0, held = 0, provinces = 0, heldProvinces = 0;
-            var provinceSystem = gameState.Provinces;
             var diplomacy = gameState.Diplomacy;
-            foreach (int s in Hoi4Regions.States)
-                foreach (ushort p in Hoi4Regions.ProvincesOf(s))
-                {
-                    if (provinceSystem.GetProvinceOwner(p) != country || Hoi4Regions.IsWater(p)) continue;
-                    ushort c = Hoi4Occupation.ControllerOf(gameState, p);
-                    bool enemy = c != country && diplomacy.IsAtWar(country, c);
-                    int vp = VictoryPoints(p);
-                    total += vp; provinces++;
-                    if (enemy) { held += vp; heldProvinces++; }
-                }
+            // the engine's owner->provinces reverse index: only this country's provinces, not the whole map
+            ownedBuffer.Clear();
+            gameState.Provinces.GetCountryProvinces(country, ownedBuffer);
+            for (int i = 0; i < ownedBuffer.Length; i++)
+            {
+                ushort p = ownedBuffer[i];
+                if (Hoi4Regions.IsWater(p)) continue;
+                ushort c = Hoi4Occupation.ControllerOf(gameState, p);
+                bool enemy = c != country && diplomacy.IsAtWar(country, c);
+                int vp = VictoryPoints(p);
+                total += vp; provinces++;
+                if (enemy) { held += vp; heldProvinces++; }
+            }
             if (total == 0) { total = provinces; held = heldProvinces; }
             if (total == 0) return FP.Zero;
             return FP.Min(FP.One, FP.FromInt(held) / total / SurrenderLimit);

@@ -38,6 +38,10 @@ def main():
     _, control = rec.load(path, "control")
     _, cmds = rec.load(path, "commands")
     _, log = rec.load(path, "log")
+    # a session stopped mid-write can leave a cut-off last row: keep only complete ones
+    divs, plans, notes, battles, control, cmds, log = (
+        [r for r in f if r.get("tick", "").isdigit() and all(v != "" for k, v in list(r.items())[:3])]
+        for f in (divs, plans, notes, battles, control, cmds, log))
     last_tick = max([int(r["tick"]) for f in (divs, plans, notes, battles, control, cmds, log) for r in f[-1:]] or [0])
     first_tick = int(m.get("start_tick", 0))
     end_date = next((f[-1]["date"] for f in (divs, notes, battles, plans) if f), "?")
@@ -323,12 +327,48 @@ def main():
         print(f"{c:8} {cells}")
 
     # --- war: capitulations and peace deals (Hoi4War / Hoi4PeaceConference) ---------------------------
-    print("\n## War (capitulations and peace deals)")
-    war_notes = [r for r in notes if r["system"] == "war"]
+    print("\n## War (AI declarations, capitulations, peace deals)")
+    war_notes = [r for r in notes if r["system"] in ("war", "ai_war") and r["kind"] != "sent_home"]
     if not war_notes:
         print("none")
-    for r in war_notes:
+    for r in war_notes[:80]:
         print(f"{r['date']}  {r['country']:6} {r['kind']:12} {r['text']}")
+    if len(war_notes) > 80:
+        print(f"... {len(war_notes) - 80} more")
+    kinds = Counter(r["kind"] for r in war_notes)
+    sent = sum(1 for r in notes if r["system"] == "war" and r["kind"] == "sent_home")
+    if war_notes:
+        print(f"totals: {dict(kinds)}, divisions sent home after peace: {sent}")
+
+    # --- timing (Hoi4Simulation perf.tsv, one row per day) -----------------------------------------
+    _, perf = rec.load(path, "perf")
+    print("\n## Timing (per game day, ms)")
+    if not perf:
+        print("no perf.tsv")
+    else:
+        def f(r, k):
+            try:
+                return float(r[k])
+            except ValueError:
+                return 0.0
+        systems = [k for k in perf[0] if k not in ("tick", "date", "sim_ms", "frames", "frame_ms_avg", "frame_ms_max", "wars", "divisions")
+                   and not k.endswith("_max") and k not in ("plans_refresh", "plans_distribute")]
+        step = max(1, len(perf) // 12)
+        print(f"{'date':14} {'wars':>4} {'divs':>5} {'sim_ms':>8} {'frame avg':>9} {'frame max':>9}  top systems")
+        for i in range(0, len(perf), step):
+            chunk = perf[i:i + step]
+            top = sorted(systems, key=lambda k: -sum(f(r, k) for r in chunk))[:3]
+            tops = ", ".join(f"{k} {sum(f(r, k) for r in chunk) / len(chunk):.1f}" for k in top)
+            print(f"{chunk[0]['date'][:10]:14} {chunk[-1]['wars']:>4} {chunk[-1]['divisions']:>5} "
+                  f"{sum(f(r, 'sim_ms') for r in chunk) / len(chunk):8.1f} "
+                  f"{sum(f(r, 'frame_ms_avg') for r in chunk) / len(chunk):9.1f} "
+                  f"{max(f(r, 'frame_ms_max') for r in chunk):9.1f}  {tops}")
+        worst = max(perf, key=lambda r: f(r, "sim_ms"))
+        print(f"slowest day {worst['date'][:10]}: {f(worst, 'sim_ms'):.1f} ms, {worst['wars']} wars, {worst['divisions']} divisions")
+        for k in ("combat_h_max", "plans_h_max", "ai_h_max", "plans_refresh", "plans_distribute"):
+            if k in perf[0]:
+                w = max(perf, key=lambda r: f(r, k))
+                print(f"worst {k}: {f(w, k):.1f} ms on {w['date'][:10]}")
 
     print("\n## Commands")
     for k, n in Counter(r["command"] for r in cmds).most_common():

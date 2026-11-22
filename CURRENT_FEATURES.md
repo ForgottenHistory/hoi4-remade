@@ -105,8 +105,10 @@ The goal is to stress-test Archon-Engine, not to ship a game. Big visual wins ar
 
 ## AI
 
+- **War declarations (stress test)** - Off by default, F8 toggles it. Every 3 days each AI country with at least 2 divisions and fewer than 1 war declares war on its weakest land neighbour, if that neighbour has at most 70% of its division strength (not allies, not the player unless set in the inspector). At most 3 new wars per check. Settings on the Hoi4AiWars object
+
 - **Front lines** - Each AI country at war gets an (undrawn) front line per enemy it borders, holding all its idle divisions
-- **Attacks** - Daily, each AI country picks its strongest bordering enemy and spreads idle, rested divisions over that enemy's border provinces. A division only attacks with good estimated odds (`Hoi4Combat.Odds`, counting only what fits the combat width), now and then an uneven fight, never a hopeless one; no more divisions go at a province than its width holds
+- **Attacks** - Once a day at its own hour (country id mod 24, so the work is spread over the day), each AI country picks its strongest bordering enemy and spreads idle, rested divisions over that enemy's border provinces. A division only attacks with good estimated odds (`Hoi4Combat.Odds`, counting only what fits the combat width), now and then an uneven fight, never a hopeless one; no more divisions go at a province than its width holds. A division next to its target goes straight in; at most 12 path searches per country per day for those further back
 - **Calling off** - Hourly, attacks that go badly are called off before the attackers are ground down; attackers rejoin their line afterwards
 - **Deterministic dice** - Per country, province and day, so the same game makes the same choices
 - **Same commands as the player** - AI orders go through the same commands, so combat, retreat and occupation apply unchanged

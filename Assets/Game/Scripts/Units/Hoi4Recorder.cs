@@ -149,6 +149,8 @@ namespace Hoi4.Units
         {
             readonly int snapshotDays;
             readonly Dictionary<ushort, string> last = new Dictionary<ushort, string>();
+            readonly Dictionary<ushort, (ushort, ushort, ushort, int, ushort, int, string)> lastValues =
+                new Dictionary<ushort, (ushort, ushort, ushort, int, ushort, int, string)>(); // compared hourly, no text
             RecordingTable table;
             ulong nextSnapshot;
 
@@ -206,9 +208,11 @@ namespace Hoi4.Units
                         plans != null && plans.IsBorrowed(id) ? "ai_attack" :
                         plans != null && plans.HasManualOrder(id) ? (dest != 0 ? "manual_march" : "manual") :
                         dest != 0 ? "march" : "idle";
-                    string key = $"{r.Tag(u.countryID)}\t{u.provinceID}\t{dest}\t{plan?.Id ?? 0}\t{slot}\t{army}\t{state}";
-                    bool changed = !last.TryGetValue(id, out string before) || before != key;
+                    var values = (u.countryID, u.provinceID, dest, plan?.Id ?? 0, slot, army, state);
+                    bool changed = !lastValues.TryGetValue(id, out var before) || !before.Equals(values);
                     if (!changed && !snapshot) continue;
+                    lastValues[id] = values;
+                    string key = $"{r.Tag(u.countryID)}\t{u.provinceID}\t{dest}\t{plan?.Id ?? 0}\t{slot}\t{army}\t{state}";
                     last[id] = key;
                     var d = divisions?.Get(id);
                     string org = d != null && d.MaxOrganisation.ToFloat() > 0 ? ((int)(100 * d.Organisation.ToFloat() / d.MaxOrganisation.ToFloat())).ToString() : "";
@@ -222,6 +226,7 @@ namespace Hoi4.Units
                 {
                     table.Row($"gone\t{id}\t{last[id]}\t\t");
                     last.Remove(id);
+                    lastValues.Remove(id);
                 }
             }
         }
@@ -229,7 +234,7 @@ namespace Hoi4.Units
         sealed class PlansSource : IRecordingSource
         {
             readonly Dictionary<int, string> last = new Dictionary<int, string>();
-            readonly Dictionary<int, string> lastFronts = new Dictionary<int, string>();
+            readonly Dictionary<int, object> lastFronts = new Dictionary<int, object>(); // the fronts list: replaced when the line moves
             RecordingTable plansTable, frontsTable;
 
             public void Begin(SessionRecorder r)
@@ -274,11 +279,8 @@ namespace Hoi4.Units
                     }
 
                     if (plan.Fronts == null) continue;
-                    var sb = new StringBuilder();
-                    foreach (var f in plan.Fronts) { sb.Append(string.Join(",", f)); sb.Append('|'); }
-                    string frontKey = sb.ToString();
-                    if (lastFronts.TryGetValue(plan.Id, out string beforeF) && beforeF == frontKey) continue;
-                    lastFronts[plan.Id] = frontKey;
+                    if (lastFronts.TryGetValue(plan.Id, out object beforeF) && ReferenceEquals(beforeF, plan.Fronts)) continue;
+                    lastFronts[plan.Id] = plan.Fronts;
                     for (int i = 0; i < plan.Fronts.Count; i++)
                         frontsTable.Row($"{plan.Id}\t{i}\t{plan.Fronts[i].Count}\t{string.Join(",", plan.Fronts[i])}");
                 }

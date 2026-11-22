@@ -333,7 +333,7 @@ namespace Hoi4.War
         }
 
         /// <summary>
-        /// HOI4 after a peace: a division on land its country may not be on (not its own, an ally's, an enemy's,
+        /// HOI4 after a peace: a division left on the loser's remaining land that its country may not be on (not its own, an ally's, an enemy's,
         /// nor with military access; Hoi4MovementRules) can't get out, so it goes to its capital (or, without the
         /// capital, its lowest-id province). Units in id order.
         /// </summary>
@@ -351,6 +351,9 @@ namespace Hoi4.War
                 if (!units.HasUnit(u)) continue;
                 var unit = units.GetUnit(u);
                 ushort owner = gameState.Provinces.GetProvinceOwner(unit.provinceID);
+                // only the loser's remaining land changed: elsewhere divisions stay (e.g. garrisons stationed
+                // abroad at the start, whose access, colonies or puppets, isn't modelled)
+                if (owner != Loser || unit.countryID == Loser) continue;
                 if (rules.HasAccess(unit.countryID, owner)) continue;
                 if (!home.TryGetValue(unit.countryID, out ushort to)) home[unit.countryID] = to = HomeOf(unit.countryID);
                 if (to == 0) continue;

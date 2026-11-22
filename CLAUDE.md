@@ -71,7 +71,8 @@ The engine provides the mechanism (`Core.Recording.SessionRecorder`, see `Assets
 - control changes;
 - every executed command;
 - `notes.tsv`, the decisions and why they were made (AI odds, targets and break-offs, plan distribution, retreats);
-- warnings and errors.
+- warnings and errors;
+- `perf.tsv`, one row per game day: milliseconds per simulation system, frame times, wars and divisions.
 
 When the user reports odd behaviour, read the newest recording before guessing:
 
@@ -86,7 +87,7 @@ python Tools/recorder/rows.py [REC] FILE col=val --cols a,b   # filter by column
 
 ## Build and test
 
-Work happens in the Unity editor: open `Hoi4Test.unity` and press Play. To catch C# errors without the editor, `python Tools/check_build.py` compiles the game layer with `dotnet build` against the engine DLLs Unity last built (so engine changes need a Unity compile first).
+Work happens in the Unity editor: open `Hoi4Test.unity` and press Play. To catch C# errors without the editor, `python Tools/check_build.py` compiles the game layer with `dotnet build` against the engine DLLs Unity last built (so engine changes need a Unity compile first). `python Tools/check_build.py MapAssembly` (or `Core`, `StarterKit`...) compiles one engine project the same way, for engine changes.
 
 ### Checking against real HOI4
 

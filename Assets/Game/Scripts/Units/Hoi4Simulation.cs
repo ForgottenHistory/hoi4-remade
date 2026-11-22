@@ -8,13 +8,75 @@ namespace Hoi4.Units
     /// subscribe to the hourly tick on its own, so the order depended on which finished loading first.
     /// Every hour: combat (battles, retreats, organisation), then battle plans (lines follow the border,
     /// divisions take their spots), then the AI calling off bad attacks. Every day, after that day's last
-    /// hour: plans re-check which AI lines exist, then the AI picks new attacks.
+    /// hour: plans re-check which AI lines exist. The AI picks new attacks hourly, each country at its own hour.
     /// Occupation is not here: it follows unit arrivals, which the engine's movement queue raises.
     /// A system that hasn't finished loading skips the tick.
+    /// Timing (perf.tsv in the recording, one row per day): milliseconds each system spent that day (hourly
+    /// ones summed over the day's hours), the frame times since the last row, and how many wars and divisions
+    /// there are, plus the worst single hour of the hourly systems. Measuring only: it changes nothing in the simulation.
     /// </summary>
     public sealed class Hoi4Simulation : MonoBehaviour
     {
         Core.Systems.TimeManager time;
+
+        // Timing, per day: [0] combat hourly, [1] plans hourly, [2] AI hourly (break-offs and that hour's
+        // countries' attacks), [3] recorder, [4] combat daily, [5] equipment, [6] manpower, [7] plans daily,
+        // [8] war, [9] AI wars; then the worst single hour of [0], [1], [2], and the plans' daily line refresh
+        static readonly string[] PerfNames =
+            { "combat_h", "plans_h", "ai_h", "recorder", "combat_d", "equipment", "manpower", "plans_d", "war", "ai_wars" };
+        static readonly string[] MaxNames = { "combat_h_max", "plans_h_max", "ai_h_max", "plans_refresh", "plans_distribute" };
+        readonly double[] perf = new double[PerfNames.Length];
+        readonly double[] perfMax = new double[3];
+        readonly System.Diagnostics.Stopwatch watch = new System.Diagnostics.Stopwatch();
+        double frameSum, frameMax;
+        int frames;
+
+        void Measure(int slot, System.Action step)
+        {
+            watch.Restart();
+            step();
+            double ms = watch.Elapsed.TotalMilliseconds;
+            perf[slot] += ms;
+            if (slot < perfMax.Length && ms > perfMax[slot]) perfMax[slot] = ms;
+        }
+
+        void Update()
+        {
+            double ms = Time.unscaledDeltaTime * 1000.0;
+            frameSum += ms;
+            if (ms > frameMax) frameMax = ms;
+            frames++;
+        }
+
+        void WritePerf()
+        {
+            var recorder = Core.Recording.SessionRecorder.Current;
+            if (recorder != null && !recorder.Stopped)
+            {
+                var gs = Engine.ArchonEngine.Instance.GameState;
+                int wars = gs.Diplomacy?.GetAllWars().Count ?? 0;
+                int divisions = Hoi4Divisions.Instance != null ? Hoi4Divisions.Instance.All.Count : 0;
+                double total = 0;
+                var sb = new System.Text.StringBuilder();
+                var inv = System.Globalization.CultureInfo.InvariantCulture;
+                foreach (double v in perf) { total += v; sb.Append(v.ToString("0.00", inv)).Append('\t'); }
+                foreach (double v in perfMax) sb.Append(v.ToString("0.00", inv)).Append('\t');
+                double refresh = Hoi4BattlePlans.Instance != null ? Hoi4BattlePlans.Instance.TakeRefreshMs() : 0;
+                sb.Append(refresh.ToString("0.00", inv)).Append('\t');
+                double distribute = Hoi4BattlePlans.Instance != null ? Hoi4BattlePlans.Instance.TakeDistributeMs() : 0;
+                sb.Append(distribute.ToString("0.00", inv)).Append('\t');
+                sb.Append(total.ToString("0.00", inv)).Append('\t');
+                sb.Append(frames).Append('\t');
+                sb.Append((frames > 0 ? frameSum / frames : 0).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)).Append('\t');
+                sb.Append(frameMax.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)).Append('\t');
+                sb.Append(wars).Append('\t').Append(divisions);
+                recorder.Table("perf", string.Join("\t", PerfNames) + "\t" + string.Join("\t", MaxNames) + "\tsim_ms\tframes\tframe_ms_avg\tframe_ms_max\twars\tdivisions").Row(sb.ToString());
+            }
+            System.Array.Clear(perf, 0, perf.Length);
+            System.Array.Clear(perfMax, 0, perfMax.Length);
+            frameSum = frameMax = 0;
+            frames = 0;
+        }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Spawn()
@@ -44,20 +106,27 @@ namespace Hoi4.Units
 
         void OnHour(int hour)
         {
-            Hoi4Combat.Instance?.SimulateHour();
-            Hoi4BattlePlans.Instance?.SimulateHour();
-            if (RunsAI) Hoi4EnemyAI.Instance?.SimulateHour();
-            Hoi4Recorder.Instance?.AfterHour(); // reads only, after everything this hour did
+            Measure(0, () => Hoi4Combat.Instance?.SimulateHour());
+            Measure(1, () => Hoi4BattlePlans.Instance?.SimulateHour());
+            if (RunsAI) Measure(2, () =>
+            {
+                Hoi4EnemyAI.Instance?.SimulateHour();
+                // new attacks: each AI country at its own hour of the day (spreads the work over the day)
+                var gs = Engine.ArchonEngine.Instance.GameState;
+                Hoi4EnemyAI.Instance?.DecideAttacks((int)(gs.Time.CurrentTick % 24));
+            });
+            Measure(3, () => Hoi4Recorder.Instance?.AfterHour()); // reads only, after everything this hour did
         }
 
         void OnDay(int day)
         {
-            Hoi4Combat.Instance?.SimulateDay(); // entrenchment
-            Hoi4Equipment.Instance?.SimulateDay(); // production and equipment deliveries
-            Hoi4Manpower.Instance?.SimulateDay(); // manpower growth, men delivered, strength follows
-            Hoi4BattlePlans.Instance?.SimulateDay();
-            Hoi4.War.Hoi4War.Instance?.SimulateDay(); // surrender progress and capitulation (may open the peace conference)
-            if (RunsAI) Hoi4EnemyAI.Instance?.SimulateDay();
+            Measure(4, () => Hoi4Combat.Instance?.SimulateDay()); // entrenchment
+            Measure(5, () => Hoi4Equipment.Instance?.SimulateDay()); // production and equipment deliveries
+            Measure(6, () => Hoi4Manpower.Instance?.SimulateDay()); // manpower growth, men delivered, strength follows
+            Measure(7, () => Hoi4BattlePlans.Instance?.SimulateDay());
+            Measure(8, () => Hoi4.War.Hoi4War.Instance?.SimulateDay()); // surrender progress and capitulation (may open the peace conference)
+            if (RunsAI) Measure(9, () => Hoi4.War.Hoi4AiWars.Instance?.SimulateDay()); // AI war declarations (stress test, F8)
+            WritePerf();
         }
 
         /// <summary>Archon's lockstep model: the AI decides on the host only and its decisions reach the other

@@ -131,6 +131,16 @@ namespace Hoi4.Units
         ushort[][] landNeighbours;                                         // per province id: land neighbours, sorted
         ushort[] ctrl;                                                     // controller per province id, snapshot during a refresh
         readonly Dictionary<ushort, HashSet<ushort>> enemyLand = new Dictionary<ushort, HashSet<ushort>>(); // per country, this hour
+        readonly Dictionary<ushort, int[]> walkLabels = new Dictionary<ushort, int[]>();                // per country, this hour
+        // Path search results between two walkable pieces (or a lone province, -1 - id), per country, this hour:
+        // the same for every province in them, so a failing search (the costliest kind) runs once, not per plan,
+        // division and front every time a line moves
+        readonly Dictionary<(ushort country, int from, int to), bool> pieceReach = new Dictionary<(ushort, int, int), bool>();
+        int distributeSearches;
+        Hoi4MovementRules movementRules;
+        int[] hopDist, hopStamp;
+        int hopRun;
+        double distributeMs;
 
         // Hover preview
         ushort hoverProvince, hoverCountry;
@@ -295,6 +305,67 @@ namespace Hoi4.Units
         }
 
         ushort Ctrl(ushort province) => ctrl != null ? ctrl[province] : Hoi4Occupation.ControllerOf(gameState, province);
+
+        // Shared by every plan during one refresh (null outside it), from the controller snapshot:
+        // the border provinces of each (owner, enemy) pair, and the connected pieces of same-controller land,
+        // with (pieceAll) and without (pieceWalk, impassable = -1) impassable provinces. Each plan used to scan the
+        // whole map and flood both countries' land itself: hundreds of ms an hour in a world at war.
+        Dictionary<(ushort, ushort), List<ushort>> borderOf;
+        int[] pieceAll, pieceWalk;
+        List<int> pieceAllSize;
+
+        void BuildRefreshCaches()
+        {
+            borderOf = new Dictionary<(ushort, ushort), List<ushort>>();
+            var seen = new List<ushort>(8);
+            foreach (ushort p in landProvinces)          // sorted: each list comes out sorted
+            {
+                if (Hoi4Regions.IsImpassable(p)) continue;
+                ushort a = ctrl[p];
+                if (a == 0) continue;
+                seen.Clear();
+                foreach (ushort q in Neighbours(p))
+                {
+                    ushort b = ctrl[q];
+                    if (b == 0 || b == a || seen.Contains(b)) continue;
+                    seen.Add(b);
+                    if (!borderOf.TryGetValue((a, b), out var list)) borderOf[(a, b)] = list = new List<ushort>();
+                    list.Add(p);
+                }
+            }
+            pieceAll = Label(walkOnly: false, out pieceAllSize);
+            pieceWalk = Label(walkOnly: true, out _);
+        }
+
+        /// <summary>Connected same-controller land, one label per piece (flood in province order).</summary>
+        int[] Label(bool walkOnly, out List<int> sizes)
+        {
+            var label = new int[landNeighbours.Length];
+            for (int i = 0; i < label.Length; i++) label[i] = -1;
+            sizes = new List<int>();
+            var queue = new List<ushort>();
+            foreach (ushort s in landProvinces)
+            {
+                if (label[s] >= 0 || (walkOnly && Hoi4Regions.IsImpassable(s))) continue;
+                ushort c = ctrl[s];
+                int id = sizes.Count;
+                queue.Clear();
+                queue.Add(s);
+                label[s] = id;
+                for (int k = 0; k < queue.Count; k++)
+                    foreach (ushort r in Neighbours(queue[k]))
+                        if (label[r] < 0 && ctrl[r] == c && !(walkOnly && Hoi4Regions.IsImpassable(r))) { label[r] = id; queue.Add(r); }
+                sizes.Add(queue.Count);
+            }
+            return label;
+        }
+
+        void ClearRefreshCaches()
+        {
+            borderOf = null;
+            pieceAll = pieceWalk = null;
+            pieceAllSize = null;
+        }
 
         ushort[] Neighbours(ushort province) =>
             province < landNeighbours.Length && landNeighbours[province] != null ? landNeighbours[province] : Array.Empty<ushort>();
@@ -579,8 +650,15 @@ namespace Hoi4.Units
         {
             if (!simReady) return;
             enemyLand.Clear();
+            walkLabels.Clear();
+            pieceReach.Clear();
             bool refreshed = borderDirty;
-            if (borderDirty) RefreshPlans();
+            if (borderDirty)
+            {
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                RefreshPlans();
+                refreshMs += sw.Elapsed.TotalMilliseconds; // timing only (perf.tsv)
+            }
             PruneOffensives(refreshed);
             PruneExecuting();
             if (plans.Count == 0) return;
@@ -617,6 +695,50 @@ namespace Hoi4.Units
             AssignOffensives();
             Advance();
             if (playerTouched) Changed?.Invoke();
+        }
+
+        double refreshMs;
+        /// <summary>Milliseconds spent refreshing the lines since the last call (Hoi4Simulation's perf.tsv).</summary>
+        public double TakeRefreshMs() { double v = refreshMs; refreshMs = 0; return v; }
+
+        /// <summary>Milliseconds spent spreading divisions over lines since the last call (perf.tsv).</summary>
+        public double TakeDistributeMs() { double v = distributeMs; distributeMs = 0; return v; }
+
+        /// <summary>
+        /// The land a country's divisions may walk on without attacking, in connected pieces: passable land it
+        /// has access to (Hoi4MovementRules) that no enemy holds. Once per country per hour. Two provinces with
+        /// the same label are connected by such a walk; -1 = not walkable. Plans use it to see which fronts a
+        /// division can reach without a path search per division and front.
+        /// </summary>
+        int[] WalkLabels(ushort country)
+        {
+            if (walkLabels.TryGetValue(country, out var label)) return label;
+            movementRules ??= new Hoi4MovementRules(gameState);
+            var enemy = EnemyLand(country);
+            var provinces = gameState.Provinces;
+            label = new int[landNeighbours.Length];
+            var walk = new bool[landNeighbours.Length];
+            foreach (ushort p in landProvinces)
+            {
+                label[p] = -1;
+                walk[p] = !Hoi4Regions.IsImpassable(p) && !enemy.Contains(p)
+                          && movementRules.HasAccess(country, provinces.GetProvinceOwner(p));
+            }
+            int next = 0;
+            var queue = new List<ushort>();
+            foreach (ushort s in landProvinces)
+            {
+                if (!walk[s] || label[s] >= 0) continue;
+                int id = next++;
+                queue.Clear();
+                queue.Add(s);
+                label[s] = id;
+                for (int k = 0; k < queue.Count; k++)
+                    foreach (ushort r in Neighbours(queue[k]))
+                        if (walk[r] && label[r] < 0) { label[r] = id; queue.Add(r); }
+            }
+            walkLabels[country] = label;
+            return label;
         }
 
         /// <summary>Daily, from Hoi4Simulation: wars declared or ended change which AI lines exist, so all
@@ -892,12 +1014,18 @@ namespace Hoi4.Units
         {
             var result = new List<List<ushort>>();
             if (owner == 0 || country == 0 || owner == country) return result;
-            var front = new List<ushort>();
-            foreach (ushort p in landProvinces)
+            List<ushort> front;
+            if (borderOf != null)
+                front = borderOf.TryGetValue((owner, country), out var cached) ? new List<ushort>(cached) : new List<ushort>();
+            else
             {
-                if (Ctrl(p) != owner || Hoi4Regions.IsImpassable(p)) continue;
-                foreach (ushort q in Neighbours(p))
-                    if (Ctrl(q) == country) { front.Add(p); break; }
+                front = new List<ushort>();
+                foreach (ushort p in landProvinces)
+                {
+                    if (Ctrl(p) != owner || Hoi4Regions.IsImpassable(p)) continue;
+                    foreach (ushort q in Neighbours(p))
+                        if (Ctrl(q) == country) { front.Add(p); break; }
+                }
             }
             if (front.Count == 0) return result;
 
@@ -913,6 +1041,8 @@ namespace Hoi4.Units
             // bridges a gap within one piece (a lake on our side); an encircled pocket of ours is its own front.
             var own = new Dictionary<ushort, int>();
             int ownPieces = 0;
+            if (pieceWalk != null)
+                foreach (ushort p in front) own[p] = pieceWalk[p]; // only compared for equality between front provinces
             foreach (ushort p in front)
             {
                 if (own.ContainsKey(p)) continue;
@@ -1151,6 +1281,25 @@ namespace Hoi4.Units
         Dictionary<ushort, int> EnemyPieces(IEnumerable<ushort> along, ushort country, List<int> sizes)
         {
             var piece = new Dictionary<ushort, int>();
+            if (pieceAll != null)
+            {
+                // From the shared labels: the same ids (order found along `along`) and sizes as the flood below;
+                // only the enemy provinces next to `along` are filled, the only ones the callers look up
+                var local = new Dictionary<int, int>();
+                foreach (ushort p in along)
+                    foreach (ushort q in Neighbours(p))
+                    {
+                        if (Ctrl(q) != country || piece.ContainsKey(q)) continue;
+                        int label = pieceAll[q];
+                        if (!local.TryGetValue(label, out int id))
+                        {
+                            local[label] = id = sizes.Count;
+                            sizes.Add(pieceAllSize[label]);
+                        }
+                        piece[q] = id;
+                    }
+                return piece;
+            }
             foreach (ushort p in along)
                 foreach (ushort q in Neighbours(p))
                 {
@@ -1291,6 +1440,7 @@ namespace Hoi4.Units
             // One snapshot of every land province's controller, shared by all plans this hour
             ctrl = new ushort[landNeighbours.Length];
             foreach (ushort p in landProvinces) ctrl[p] = Hoi4Occupation.ControllerOf(gameState, p);
+            BuildRefreshCaches();
             var changedCountries = new HashSet<ushort>(dirtyCountries);
             dirtyCountries.Clear();
             bool any = false;
@@ -1309,6 +1459,7 @@ namespace Hoi4.Units
             }
             EnsureAIPlans();
             ctrl = null; // outside a refresh, read live controllers
+            ClearRefreshCaches();
             if (Active) SetPreview(hoverProvince);
             if (any)
             {
@@ -1494,6 +1645,22 @@ namespace Hoi4.Units
         /// </summary>
         void Distribute(Hoi4BattlePlan plan)
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            int searches = distributeSearches;
+            try { DistributeInner(plan); }
+            finally
+            {
+                double ms = sw.Elapsed.TotalMilliseconds;
+                distributeMs += ms; // timing only (perf.tsv)
+                if (ms > 50) // which plan is slow, for the recording (timing: not part of the simulation)
+                    Core.Recording.SessionRecorder.Note("perf", "slow_distribute", plan.Owner, 0, 0, plan.Country,
+                        $"plan {plan.Id}: {ms:0} ms, {plan.Units.Count} divisions, {plan.Fronts?.Count ?? 0} fronts, " +
+                        $"{plan.FrontProvinces?.Count ?? 0} front provinces, {distributeSearches - searches} path searches");
+            }
+        }
+
+        void DistributeInner(Hoi4BattlePlan plan)
+        {
             if (!plan.IsAI) dirtyMesh = true; // a front may have gained or lost all its divisions (unassigned look)
             plan.Slot.Clear();
             var fronts = plan.Fronts;
@@ -1512,11 +1679,27 @@ namespace Hoi4.Units
                 var key = (unit.provinceID, f);
                 if (reachCache.TryGetValue(key, out bool ok)) return ok;
                 ok = fronts[f].Contains(unit.provinceID);
-                var pathfinding = gameState.Pathfinding;
-                if (!ok && pathfinding != null && pathfinding.IsInitialized)
+                if (!ok)
                 {
-                    var path = FriendlyPath(unit.provinceID, fronts[f][0], unit.countryID).Path;
-                    ok = path != null && path.Count >= 2;
+                    // Same walkable piece as the front: reachable. Otherwise a path search decides (a route the
+                    // labels don't see, e.g. across a strait).
+                    var walk = WalkLabels(unit.countryID);
+                    ushort to = fronts[f][0];
+                    int a = unit.provinceID < walk.Length ? walk[unit.provinceID] : -1;
+                    int b = to < walk.Length ? walk[to] : -1;
+                    ok = a >= 0 && a == b;
+                    var pathfinding = gameState.Pathfinding;
+                    if (!ok && pathfinding != null && pathfinding.IsInitialized)
+                    {
+                        var pieceKey = (unit.countryID, a >= 0 ? a : -1 - unit.provinceID, b >= 0 ? b : -1 - to);
+                        if (!pieceReach.TryGetValue(pieceKey, out ok))
+                        {
+                            distributeSearches++;
+                            var path = FriendlyPath(unit.provinceID, to, unit.countryID).Path;
+                            ok = path != null && path.Count >= 2;
+                            pieceReach[pieceKey] = ok;
+                        }
+                    }
                 }
                 reachCache[key] = ok;
                 return ok;
@@ -1575,40 +1758,70 @@ namespace Hoi4.Units
                     slots.Add((front[Math.Min((2 * k + 1) * p / (2 * extra), p - 1)], f)); // (k + 0.5) * p / extra
             }
 
-            // Each slot to the nearest free division that can reach it (greedy on land hops)
-            var slotProvinces = new HashSet<ushort>();
-            foreach (var s in slots) slotProvinces.Add(s.province);
+            // Each slot to the nearest free division that can reach it (greedy on land hops). A division only
+            // weighs its NearestSlots nearest slot provinces (the hop search stops there): scoring every division
+            // against every slot was ids x slots pairs, sorted, each time a line moved (22,500 for a big front).
+            const int NearestSlots = 8;
+            var slotsAt = new Dictionary<ushort, List<int>>();
+            for (int s = 0; s < slots.Count; s++)
+            {
+                if (!slotsAt.TryGetValue(slots[s].province, out var at)) slotsAt[slots[s].province] = at = new List<int>(2);
+                at.Add(s);
+            }
+            var slotProvinces = new HashSet<ushort>(slotsAt.Keys);
             var hopsFrom = new Dictionary<ushort, Dictionary<ushort, int>>();
-            var pairs = new List<(int d, ushort unit, int slot)>(ids.Count * slots.Count);
+            var pairs = new List<(bool pinned, int d, ushort unit, int slot)>(ids.Count * NearestSlots);
+            var startOf = new Dictionary<ushort, ushort>();
             foreach (ushort u in ids)
             {
                 // A division already marching counts from where it is going, so a redistribution keeps it on course
                 ushort heading = HeadingTo(u);
                 ushort at = heading != 0 ? heading : units.GetUnit(u).provinceID;
-                if (!hopsFrom.TryGetValue(at, out var hops)) hopsFrom[at] = hops = Hops(at, slotProvinces);
+                startOf[u] = at;
+                if (!hopsFrom.TryGetValue(at, out var hops)) hopsFrom[at] = hops = Hops(at, slotProvinces, NearestSlots);
                 bool isPinned = pinned.TryGetValue(u, out int pinFront);
-                for (int s = 0; s < slots.Count; s++)
-                {
-                    if (!Reaches(u, slots[s].front) || (isPinned && slots[s].front != pinFront)) continue;
-                    pairs.Add((hops.TryGetValue(slots[s].province, out int d) ? d : int.MaxValue, u, s));
-                }
+                foreach (var kv in hops)
+                    foreach (int s in slotsAt[kv.Key])
+                    {
+                        if (!Reaches(u, slots[s].front) || (isPinned && slots[s].front != pinFront)) continue;
+                        pairs.Add((isPinned, kv.Value, u, s));
+                    }
             }
             // Pinned divisions take their front's slots first, so a spread division can't leave them without one
             pairs.Sort((x, y) =>
             {
-                bool px = pinned.ContainsKey(x.unit), py = pinned.ContainsKey(y.unit);
-                if (px != py) return px ? -1 : 1;
+                if (x.pinned != y.pinned) return x.pinned ? -1 : 1;
                 return x.d != y.d ? x.d.CompareTo(y.d) : x.unit != y.unit ? x.unit.CompareTo(y.unit) : x.slot.CompareTo(y.slot);
             });
             var taken = new bool[slots.Count];
-            foreach (var (d, u, s) in pairs)
+            foreach (var (_, d, u, s) in pairs)
             {
                 if (taken[s] || plan.Slot.ContainsKey(u)) continue;
                 taken[s] = true;
                 plan.Slot[u] = slots[s].province;
             }
+            // Still free: the nearest free slot it can reach, searching farther (its near slots were taken)
+            foreach (ushort u in ids)
+            {
+                if (plan.Slot.ContainsKey(u)) continue;
+                bool isPinned = pinned.TryGetValue(u, out int pinFront);
+                var free = new HashSet<ushort>();
+                foreach (var kv in slotsAt)
+                    foreach (int s in kv.Value)
+                        if (!taken[s] && Reaches(u, slots[s].front) && (!isPinned || slots[s].front == pinFront)) { free.Add(kv.Key); break; }
+                if (free.Count == 0) continue;
+                var near = Hops(startOf[u], free, 1);
+                foreach (var kv in near)
+                    foreach (int s in slotsAt[kv.Key])
+                        if (!taken[s] && Reaches(u, slots[s].front) && (!isPinned || slots[s].front == pinFront))
+                        {
+                            taken[s] = true;
+                            plan.Slot[u] = slots[s].province;
+                            break;
+                        }
+            }
             // Left over (the fronts they can reach are full): double up on the nearest slot they can reach
-            foreach (var (d, u, s) in pairs)
+            foreach (var (_, d, u, s) in pairs)
                 if (!plan.Slot.ContainsKey(u)) plan.Slot[u] = slots[s].province;
             if (Core.Recording.SessionRecorder.IsRecording)
             {
@@ -1632,23 +1845,34 @@ namespace Hoi4.Units
 
         /// <summary>Land hops from a province to each of the targets (breadth-first, stops when all are found
         /// or after MaxHops). Missing = farther than that.</summary>
-        Dictionary<ushort, int> Hops(ushort from, HashSet<ushort> targets)
+        Dictionary<ushort, int> Hops(ushort from, HashSet<ushort> targets, int limit = int.MaxValue)
         {
             const int MaxHops = 64;
             var found = new Dictionary<ushort, int>();
-            var dist = new Dictionary<ushort, int> { [from] = 0 };
+            // Distances in arrays reused across calls (a stamp per run marks what this run has visited)
+            if (hopDist == null || hopDist.Length < landNeighbours.Length)
+            {
+                hopDist = new int[Math.Max(landNeighbours.Length, from + 1)];
+                hopStamp = new int[hopDist.Length];
+            }
+            if (from >= hopDist.Length) return found;
+            int run = ++hopRun;
             var queue = new Queue<ushort>();
             queue.Enqueue(from);
+            hopStamp[from] = run;
+            hopDist[from] = 0;
             if (targets.Contains(from)) found[from] = 0;
-            while (queue.Count > 0 && found.Count < targets.Count)
+            int want = Math.Min(targets.Count, limit);
+            while (queue.Count > 0 && found.Count < want)
             {
                 ushort c = queue.Dequeue();
-                int d = dist[c];
+                int d = hopDist[c];
                 if (d >= MaxHops) break;
                 foreach (ushort n in Neighbours(c))
                 {
-                    if (dist.ContainsKey(n)) continue;
-                    dist[n] = d + 1;
+                    if (hopStamp[n] == run) continue;
+                    hopStamp[n] = run;
+                    hopDist[n] = d + 1;
                     if (targets.Contains(n)) found[n] = d + 1;
                     queue.Enqueue(n);
                 }

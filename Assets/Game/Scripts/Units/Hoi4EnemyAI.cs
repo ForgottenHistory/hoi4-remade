@@ -22,6 +22,9 @@ namespace Hoi4.Units
     /// Orders go through the same QueueUnitMovementCommand as the player's, so combat, retreat and
     /// occupation apply unchanged. Holding the line is the front lines' job (Hoi4BattlePlans makes one per
     /// enemy border): an attacker is borrowed off its line and rejoins it when the attack is over.
+    /// Cost: each country decides at its own hour of the day (id mod 24), so the work is spread over the day
+    /// rather than all on the day tick; a division next to its target goes straight in (no path search), and
+    /// at most PathBudget path searches per country per day for divisions further back.
     /// </summary>
     public sealed class Hoi4EnemyAI : MonoBehaviour
     {
@@ -33,6 +36,7 @@ namespace Hoi4.Units
         static readonly FP BreakOffOrganisation = FP.FromFraction(3, 10); // of max: an attacker this worn down breaks off
         static readonly FP BreakOffStrength = FP.FromFraction(35, 100);
         const int BreakOffPercent = 25;       // or when its side holds less than this share of the battle's organisation
+        const int PathBudget = 12;            // path searches per country per day (divisions not next to a target)
 
         public static Hoi4EnemyAI Instance { get; private set; }
 
@@ -40,6 +44,8 @@ namespace Hoi4.Units
         ushort[] provinceIds;
         readonly List<ushort> idle = new List<ushort>();
         readonly Dictionary<ushort, int> load = new Dictionary<ushort, int>();
+        ushort[] landProvinces;                                                    // sorted, passable land
+        readonly Dictionary<ushort, ushort[]> landNeighbours = new Dictionary<ushort, ushort[]>(); // sorted
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Spawn()
@@ -68,6 +74,17 @@ namespace Hoi4.Units
             provinceIds = ids.ToArray();
             ids.Dispose();
             System.Array.Sort(provinceIds);
+            var land = new List<ushort>();
+            foreach (ushort p in provinceIds)
+            {
+                if (p == 0 || Hoi4Regions.IsWater(p)) continue;
+                var n = new List<ushort>();
+                foreach (ushort q in gameState.Adjacencies.GetNeighborsWhere(p, q => !Hoi4Regions.IsWater(q))) n.Add(q);
+                n.Sort();
+                landNeighbours[p] = n.ToArray();
+                if (!Hoi4Regions.IsImpassable(p)) land.Add(p);
+            }
+            landProvinces = land.ToArray();
         }
 
         void OnDestroy()
@@ -136,8 +153,9 @@ namespace Hoi4.Units
             }
         }
 
-        /// <summary>New attacks; called every day by Hoi4Simulation. Countries in id order.</summary>
-        public void SimulateDay()
+        /// <summary>New attacks, once a day per country at its own hour (country id mod 24); called every hour by
+        /// Hoi4Simulation with the hour of the day. Countries in id order.</summary>
+        public void DecideAttacks(int hourOfDay)
         {
             if (gameState == null) return;
             ushort player = PlayerCountry;
@@ -146,9 +164,12 @@ namespace Hoi4.Units
             foreach (ushort id in gameState.Units.GetAllUnits())
                 countries.Add(gameState.Units.GetUnit(id).countryID);
             foreach (ushort country in countries)
-                if (country != player && country != 0 && diplomacy.IsAtWar(country))
+                if (country % 24 == hourOfDay && country != player && country != 0 && diplomacy.IsAtWar(country))
                     Attack(country);
         }
+
+        bool Adjacent(ushort a, ushort b) =>
+            landNeighbours.TryGetValue(a, out var n) && System.Array.BinarySearch(n, b) >= 0;
 
         static string OddsText(FP odds) => odds == FP.MaxValue ? "undefended" : odds.ToFloat().ToString("0.00");
 
@@ -170,12 +191,12 @@ namespace Hoi4.Units
 
             // Border provinces per enemy: land the enemy controls next to land we control
             var fronts = new Dictionary<ushort, List<ushort>>();
-            foreach (ushort p in provinceIds)
+            foreach (ushort p in landProvinces)
             {
                 ushort holder = Hoi4Occupation.ControllerOf(gameState, p);
-                if (!enemies.Contains(holder) || Hoi4Regions.IsWater(p) || Hoi4Regions.IsImpassable(p)) continue;
+                if (!enemies.Contains(holder)) continue;
                 bool border = false;
-                foreach (ushort n in gameState.Adjacencies.GetNeighborsWhere(p, q => !Hoi4Regions.IsWater(q)))
+                foreach (ushort n in landNeighbours[p])
                     if (Hoi4Occupation.ControllerOf(gameState, n) == country) { border = true; break; }
                 if (!border || Hoi4Combat.IsAttackedFrom(gameState, country, p)) continue;
                 if (!fronts.TryGetValue(holder, out var list)) fronts[holder] = list = new List<ushort>();
@@ -198,6 +219,8 @@ namespace Hoi4.Units
             var own = gameState.Units.GetCountryUnits(country);
             own.Sort();
             int tired = 0, moving = 0, defendingCount = 0;
+            var attacked = new HashSet<ushort>();
+            foreach (var b in Hoi4Combat.Battles) attacked.Add(b.To);
             foreach (ushort id in own)
             {
                 var d = Hoi4Divisions.Instance.Get(id);
@@ -205,9 +228,7 @@ namespace Hoi4.Units
                 if (d.Organisation < d.MaxOrganisation * MinOrganisation || d.Strength < d.FullStrength * MinStrength) { tired++; continue; }
                 if (gameState.Units.MovementQueue.IsUnitMoving(id)) { moving++; continue; }
                 ushort at = gameState.Units.GetUnit(id).provinceID;
-                bool defending = false;
-                foreach (var b in Hoi4Combat.Battles) if (b.To == at) { defending = true; break; }
-                if (!defending) idle.Add(id);
+                if (!attacked.Contains(at)) idle.Add(id);
                 else defendingCount++;
             }
             Core.Recording.SessionRecorder.Note("ai", "pool", country, 0, 0, target, $"divisions {own.Count}: free {idle.Count}, tired {tired}, marching {moving}, defending {defendingCount}");
@@ -239,6 +260,9 @@ namespace Hoi4.Units
             int today = (int)(gameState.Time.CurrentTick / 24); // day count since the start (CurrentTick is hours)
 
             var unitTypes = StarterKit.Initializer.Instance?.UnitSystem;
+            int pathBudget = PathBudget;
+            int holds = 0, holdOdds = 0, holdFull = 0, holdNoPath = 0;
+            FP holdBest = FP.Zero;
             foreach (ushort id in idle)
             {
                 // Least-loaded targets first; among the first few reachable ones the nearest wins a tie
@@ -269,7 +293,10 @@ namespace Hoi4.Units
                         continue;
                     }
                     tried++;
-                    var path = gameState.Pathfinding.FindPath(unit.provinceID, t, country);
+                    List<ushort> path;
+                    if (Adjacent(unit.provinceID, t)) path = new List<ushort> { unit.provinceID, t }; // straight in
+                    else if (pathBudget > 0) { pathBudget--; path = gameState.Pathfinding.FindPath(unit.provinceID, t, country); }
+                    else path = null;
                     if (path == null || path.Count < 2) { noPath++; continue; }
                     if (bestPath == null || load[t] < bestLoad || (load[t] == bestLoad && path.Count < bestPath.Count))
                     {
@@ -282,8 +309,11 @@ namespace Hoi4.Units
                 }
                 if (bestPath == null)
                 {
-                    Core.Recording.SessionRecorder.Note("ai", "hold", country, id, unit.provinceID, 0,
-                        $"rejected {badOdds} on odds (best {OddsText(bestRejected)}), {full} at full width, {noPath} without a path, of {order.Count} targets");
+                    holds++;
+                    holdOdds += badOdds > 0 ? 1 : 0;
+                    holdFull += full > 0 ? 1 : 0;
+                    holdNoPath += noPath > 0 ? 1 : 0;
+                    if (bestRejected > holdBest) holdBest = bestRejected;
                     continue;
                 }
                 Core.Recording.SessionRecorder.Note("ai", bold ? "attack_bold" : "attack", country, id, unit.provinceID, bestTarget,
@@ -305,6 +335,10 @@ namespace Hoi4.Units
                     attackersOf[bestTarget].Add(self);
                 }
             }
+            if (holds > 0) // one note per country (one per division made the recording heavy in big wars)
+                Core.Recording.SessionRecorder.Note("ai", "hold", country, 0, 0, target,
+                    $"{holds} of {idle.Count} free divisions hold: {holdOdds} turned down odds (best {OddsText(holdBest)}), " +
+                    $"{holdFull} found targets at full width, {holdNoPath} had no path (path searches left {pathBudget})");
         }
     }
 }
