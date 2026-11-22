@@ -107,8 +107,7 @@ namespace Hoi4.War
             var borders = new SortedDictionary<ushort, SortedSet<ushort>>();
             int size = 1;
             foreach (var kv in landNeighbours) size = System.Math.Max(size, kv.Key + 1);
-            var owner = new ushort[size];
-            Hoi4Occupation.ReadAll(gameState, new ushort[size], owner);
+            Hoi4Occupation.Snapshot(gameState, size, out _, out var owner); // shared: read only
             var pairs = new HashSet<uint>();
             foreach (ushort p in landProvinces)
             {

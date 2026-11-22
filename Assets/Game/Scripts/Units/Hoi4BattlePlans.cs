@@ -131,6 +131,7 @@ namespace Hoi4.Units
         ushort[][] landNeighbours;                                         // per province id: land neighbours, sorted
         ushort[] ctrl;                                                     // controller per province id, snapshot during a refresh
         readonly Dictionary<ushort, HashSet<ushort>> enemyLand = new Dictionary<ushort, HashSet<ushort>>(); // per country, this hour
+        readonly Dictionary<ushort, List<ushort>> landByController = new Dictionary<ushort, List<ushort>>(); // this hour
         // Owner and controller of every land province, read once per hour (on first use) and shared by every
         // country's EnemyLand and WalkLabels: each used to read the whole map itself (two hash lookups per
         // province per country per hour)
@@ -140,9 +141,7 @@ namespace Hoi4.Units
         void SnapshotHour()
         {
             if (hourOwner != null) return;
-            hourOwner = new ushort[landNeighbours.Length];
-            hourCtrl = new ushort[landNeighbours.Length];
-            Hoi4Occupation.ReadAll(gameState, hourCtrl, hourOwner);
+            Hoi4Occupation.Snapshot(gameState, landNeighbours.Length, out hourCtrl, out hourOwner); // shared: read only
         }
         readonly Dictionary<ushort, int[]> walkLabels = new Dictionary<ushort, int[]>();                // per country, this hour
         // Path search results between two walkable pieces (or a lone province, -1 - id), per country, this hour:
@@ -663,6 +662,7 @@ namespace Hoi4.Units
         {
             if (!simReady) return;
             enemyLand.Clear();
+            landByController.Clear();
             walkLabels.Clear();
             pieceReach.Clear();
             hourOwner = hourCtrl = null;
@@ -1456,13 +1456,25 @@ namespace Hoi4.Units
 
         /// <summary>Provinces changed hands: every line follows the new border with its country and its
         /// divisions spread over the new front (those still on a front province stay put).</summary>
+        static readonly Unity.Profiling.ProfilerMarker RefreshCachesMarker = new Unity.Profiling.ProfilerMarker("Hoi4.plans.refresh_caches");
+        static readonly Unity.Profiling.ProfilerMarker RefreshFrontsMarker = new Unity.Profiling.ProfilerMarker("Hoi4.plans.refresh_fronts");
+        static readonly Unity.Profiling.ProfilerMarker RefreshDistributeMarker = new Unity.Profiling.ProfilerMarker("Hoi4.plans.refresh_distribute");
+        static readonly Unity.Profiling.ProfilerMarker RefreshAIPlansMarker = new Unity.Profiling.ProfilerMarker("Hoi4.plans.refresh_ai_plans");
+
         void RefreshPlans()
         {
+            // Timing only (slow_refresh note, profiler markers): not part of the simulation
+            var total = System.Diagnostics.Stopwatch.StartNew();
+            var part = new System.Diagnostics.Stopwatch();
+            double cachesMs, frontsMs = 0, distMs = 0, aiPlansMs;
+            int looked = 0, moved = 0, searches = distributeSearches;
+
             borderDirty = false;
             // One snapshot of every land province's controller, shared by all plans this hour
-            ctrl = new ushort[landNeighbours.Length];
-            Hoi4Occupation.ReadAll(gameState, ctrl);
-            BuildRefreshCaches();
+            Hoi4Occupation.Snapshot(gameState, landNeighbours.Length, out ctrl, out _); // shared: read only
+            part.Restart();
+            using (RefreshCachesMarker.Auto()) BuildRefreshCaches();
+            cachesMs = part.Elapsed.TotalMilliseconds;
             var changedCountries = new HashSet<ushort>(dirtyCountries);
             dirtyCountries.Clear();
             bool any = false;
@@ -1470,16 +1482,31 @@ namespace Hoi4.Units
             {
                 // Only a country that gained or lost land can move this line (all of them on the daily pass)
                 if (changedCountries.Count > 0 && !changedCountries.Contains(plan.Owner) && !changedCountries.Contains(plan.Country)) continue;
-                var fronts = FrontsOf(plan, FrontsAgainst(plan.Owner, plan.Country));
+                looked++;
+                part.Restart();
+                List<List<ushort>> fronts;
+                using (RefreshFrontsMarker.Auto()) fronts = FrontsOf(plan, FrontsAgainst(plan.Owner, plan.Country));
+                frontsMs += part.Elapsed.TotalMilliseconds;
                 if (fronts.Count == 0) { RemovePlan(plan); any |= !plan.IsAI; continue; } // nothing left to hold against
                 if (SameFronts(fronts, plan.Fronts)) continue;                        // a change somewhere else on the map
                 string before = FrontSizes(plan);
                 SetFronts(plan, fronts);
                 Core.Recording.SessionRecorder.Note("plans", "line_moved", plan.Owner, 0, 0, plan.Country, $"plan {plan.Id}: fronts {before} -> {FrontSizes(plan)}");
                 if (!plan.IsAI) { TraceLine(plan); any = true; }
-                Distribute(plan);
+                moved++;
+                part.Restart();
+                using (RefreshDistributeMarker.Auto()) Distribute(plan);
+                distMs += part.Elapsed.TotalMilliseconds;
             }
-            EnsureAIPlans();
+            part.Restart();
+            using (RefreshAIPlansMarker.Auto()) EnsureAIPlans();
+            aiPlansMs = part.Elapsed.TotalMilliseconds;
+            double totalMs = total.Elapsed.TotalMilliseconds;
+            if (totalMs > 50) // where a slow refresh went, for the recording
+                Core.Recording.SessionRecorder.Note("perf", "slow_refresh", 0, 0, 0, 0,
+                    $"{totalMs:0} ms: caches {cachesMs:0}, fronts {frontsMs:0} ({looked} plans looked at), " +
+                    $"distribute {distMs:0} ({moved} lines moved, {distributeSearches - searches} path searches), " +
+                    $"AI plans {aiPlansMs:0}; {plans.Count} plans, {changedCountries.Count} countries changed land");
             ctrl = null; // outside a refresh, read live controllers
             ClearRefreshCaches();
             if (Active) SetPreview(hoverProvince);
@@ -2015,21 +2042,30 @@ namespace Hoi4.Units
             return gameState.Pathfinding.FindPathWithOptions(from, to, options);
         }
 
+        /// <summary>Land provinces grouped by controller, this hour (one pass over the map for every EnemyLand).</summary>
+        Dictionary<ushort, List<ushort>> LandByController()
+        {
+            if (landByController.Count > 0) return landByController;
+            SnapshotHour();
+            foreach (ushort p in landProvinces)
+            {
+                ushort c = hourCtrl[p];
+                if (!landByController.TryGetValue(c, out var list)) landByController[c] = list = new List<ushort>();
+                list.Add(p);
+            }
+            return landByController;
+        }
+
         /// <summary>Land controlled by countries at war with this one, once per hour per country.</summary>
         HashSet<ushort> EnemyLand(ushort country)
         {
             if (enemyLand.TryGetValue(country, out var set)) return set;
             set = new HashSet<ushort>();
             var diplomacy = gameState.Diplomacy;
-            var war = new Dictionary<ushort, bool>();
-            SnapshotHour();
-            foreach (ushort p in landProvinces)
-            {
-                ushort c = hourCtrl[p];
-                if (c == 0 || c == country) continue;
-                if (!war.TryGetValue(c, out bool w)) war[c] = w = diplomacy != null && diplomacy.IsAtWar(country, c);
-                if (w) set.Add(p);
-            }
+            if (diplomacy != null)
+                foreach (var kv in LandByController())
+                    if (kv.Key != 0 && kv.Key != country && diplomacy.IsAtWar(country, kv.Key))
+                        set.UnionWith(kv.Value);
             enemyLand[country] = set;
             return set;
         }

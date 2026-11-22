@@ -32,6 +32,41 @@ namespace Hoi4.Units
 
         public static Hoi4Recorder Instance { get; private set; }
 
+#if UNITY_EDITOR
+        // On/off switch remembered per machine (EditorPrefs): menu HOI4 > Record Sessions. Recording costs
+        // simulation time (about 15 ms per game day in a large war), so turn it off for clean profiles.
+        const string EnabledPref = "Hoi4.Recorder.Enabled";
+        const string MenuPath = "HOI4/Record Sessions";
+
+        static bool Enabled
+        {
+            get => UnityEditor.EditorPrefs.GetBool(EnabledPref, true);
+            set => UnityEditor.EditorPrefs.SetBool(EnabledPref, value);
+        }
+
+        [UnityEditor.MenuItem(MenuPath)]
+        static void ToggleEnabled()
+        {
+            Enabled = !Enabled;
+            // Off during play: stop now (the recording so far stays). On during play: takes effect next Play.
+            if (!Enabled && Instance != null && Instance.session != null)
+            {
+                Instance.session.Stop();
+                Instance.session = null;
+            }
+            ArchonLogger.Log($"Hoi4Recorder: session recording {(Enabled ? "on (from the next Play)" : "off")}", "game_units");
+        }
+
+        [UnityEditor.MenuItem(MenuPath, true)]
+        static bool ToggleEnabledValidate()
+        {
+            UnityEditor.Menu.SetChecked(MenuPath, Enabled);
+            return true;
+        }
+#else
+        static bool Enabled => false;
+#endif
+
         SessionRecorder session;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -39,6 +74,7 @@ namespace Hoi4.Units
         {
             if (!Hoi4.Hoi4Scenes.Active) return; // not in other scenes (the engine's StarterKit scene)
             if (!Application.isEditor) return;
+            if (!Enabled) return; // switched off: HOI4 > Record Sessions
             var go = new GameObject("Hoi4Recorder");
             DontDestroyOnLoad(go);
             go.AddComponent<Hoi4Recorder>();

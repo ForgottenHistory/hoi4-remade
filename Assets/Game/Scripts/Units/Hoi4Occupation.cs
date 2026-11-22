@@ -44,7 +44,45 @@ namespace Hoi4.Units
         static int[] stateIndex;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        static void ResetIndex() { indexedState = null; indexedIds = null; stateIndex = null; }
+        static void ResetIndex()
+        {
+            indexedState = null; indexedIds = null; stateIndex = null;
+            snapState = null; snapCtrl = snapOwner = null;
+        }
+
+        // Shared whole-map read (Snapshot), valid while neither owners nor controllers change
+        static GameState snapState;
+        static int snapOwnership = -1, snapControl = -1;
+        static ushort[] snapCtrl, snapOwner;
+
+        /// <summary>
+        /// Controller and owner of every province by province id, shared by every system that reads the whole
+        /// map (battle plans, enemy AI, AI wars, movement rules): one read per change of control or ownership,
+        /// not one per system per hour. The arrays are at least minSize long. READ ONLY: they are shared. A
+        /// change makes new arrays, so a reference kept across a change still holds the state it was read at.
+        /// </summary>
+        public static void Snapshot(GameState gameState, int minSize, out ushort[] controller, out ushort[] owner)
+        {
+            var provinces = gameState.Provinces;
+            if (snapState != gameState || snapCtrl == null || snapCtrl.Length < minSize
+                || snapOwnership != provinces.OwnershipVersion || snapControl != provinces.ControlVersion)
+            {
+                var data = provinces.GetNativeData();
+                int size = System.Math.Max(1, minSize);
+                for (int i = 0; i < data.activeProvinceIds.Length; i++)
+                    size = System.Math.Max(size, data.activeProvinceIds[i] + 1);
+                if (snapCtrl != null && snapState == gameState) size = System.Math.Max(size, snapCtrl.Length);
+                var c = new ushort[size];
+                var o = new ushort[size];
+                ReadAll(gameState, c, o);
+                snapCtrl = c; snapOwner = o;
+                snapState = gameState;
+                snapOwnership = provinces.OwnershipVersion;
+                snapControl = provinces.ControlVersion;
+            }
+            controller = snapCtrl;
+            owner = snapOwner;
+        }
 
         /// <summary>
         /// Controller (as ControllerOf) and optionally owner of every province, by province id, into arrays at

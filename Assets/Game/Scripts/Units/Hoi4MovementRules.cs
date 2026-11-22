@@ -87,8 +87,7 @@ namespace Hoi4.Units
             var provinces = gameState.Provinces;
             if (owner == null || ownershipVersion != provinces.OwnershipVersion)
             {
-                owner ??= new ushort[blocked.Length];
-                Hoi4Occupation.ReadAll(gameState, new ushort[blocked.Length], owner);
+                Hoi4Occupation.Snapshot(gameState, blocked.Length, out _, out owner); // shared: read only
                 ownershipVersion = provinces.OwnershipVersion;
             }
             return province < owner.Length ? owner[province] : (ushort)0;

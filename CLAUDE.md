@@ -63,7 +63,7 @@ For tricky map algorithms (border tracing and smoothing, river tracing, label pl
 
 ## Session recordings (how to read the game)
 
-The engine provides the mechanism (`Core.Recording.SessionRecorder`, see `Assets/Archon-Engine/Docs/Engine/session-recording.md`). The game decides when to record and which HOI4 tables to add. In the editor, `Hoi4Recorder` (`Assets/Game/Scripts/Units/Hoi4Recorder.cs`) records every play session to `Recordings/<stamp>_<TAG>/` (gitignored; the newest 12 are kept). The files are TSVs that start with `tick` (game hours) and `date`. They cover:
+The engine provides the mechanism (`Core.Recording.SessionRecorder`, see `Assets/Archon-Engine/Docs/Engine/session-recording.md`). The game decides when to record and which HOI4 tables to add. In the editor, `Hoi4Recorder` (`Assets/Game/Scripts/Units/Hoi4Recorder.cs`) records every play session to `Recordings/<stamp>_<TAG>/` (gitignored; the newest 12 are kept). The menu toggle **HOI4 > Record Sessions** (remembered per machine) turns it off, for example for clean profiling: recording costs about 15 ms per game day in a large war. With it off there is no recording to read, `perf.tsv` included. The files are TSVs that start with `tick` (game hours) and `date`. They cover:
 
 - division changes, plus weekly snapshots;
 - plan figures and fronts;

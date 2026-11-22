@@ -176,9 +176,8 @@ namespace Hoi4.Units
         /// don't change control (that happens when a division arrives), so one snapshot serves the whole hour.</summary>
         ushort[] Controllers()
         {
-            var ctrl = new ushort[provinceIds.Length == 0 ? 1 : provinceIds[provinceIds.Length - 1] + 1];
-            Hoi4Occupation.ReadAll(gameState, ctrl);
-            return ctrl;
+            Hoi4Occupation.Snapshot(gameState, provinceIds.Length == 0 ? 1 : provinceIds[provinceIds.Length - 1] + 1, out var ctrl, out _);
+            return ctrl; // shared: read only
         }
 
         bool Adjacent(ushort a, ushort b) =>

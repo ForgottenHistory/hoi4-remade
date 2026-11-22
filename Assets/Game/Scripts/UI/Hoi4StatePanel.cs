@@ -150,7 +150,7 @@ namespace Hoi4.UI
                 panel.style.display = diplomacy ? DisplayStyle.None : DisplayStyle.Flex; // diplomacy mode: outline only, no panel
                 int stateId = Hoi4Regions.State(province);
                 Highlighter?.HighlightProvince(province, ProvinceOutline);
-                Highlighter?.HighlightProvinceSet(p => Hoi4Regions.State(p) == stateId, StateOutline);
+                Highlighter?.HighlightProvinceSet(Hoi4Regions.ProvincesOf(stateId), StateOutline);
             }
             else
                 Hide();

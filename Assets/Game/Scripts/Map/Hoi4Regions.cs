@@ -24,24 +24,31 @@ namespace Hoi4.Map
         private static readonly List<int> stateIds = new List<int>();
         private static bool loaded;
         private static bool available;
+        // The same data by province id, for the per-province queries (path searches and plan
+        // refreshes ask hundreds of thousands of times an hour): -1 where unknown
+        private static int[] stateById = System.Array.Empty<int>();
+        private static int[] regionById = System.Array.Empty<int>();
+        private static bool[] waterById = System.Array.Empty<bool>();
+        private static bool[] impassableById = System.Array.Empty<bool>();
 
         /// <summary>True once the regions file has been read successfully (loads it on first call).</summary>
         public static bool Available => EnsureLoaded();
 
         /// <summary>HOI4 state of a province, or -1.</summary>
         public static int State(ushort province) =>
-            EnsureLoaded() && provinceState.TryGetValue(province, out int s) ? s : -1;
+            EnsureLoaded() && province < stateById.Length ? stateById[province] : -1;
 
         /// <summary>Strategic region of a province, or -1.</summary>
         public static int Region(ushort province) =>
-            EnsureLoaded() && provinceRegion.TryGetValue(province, out int r) ? r : -1;
+            EnsureLoaded() && province < regionById.Length ? regionById[province] : -1;
 
-        public static bool IsWater(ushort province) => EnsureLoaded() && water.Contains(province);
+        public static bool IsWater(ushort province) => EnsureLoaded() && province < waterById.Length && waterById[province];
 
         public static bool IsImpassableState(int state) => EnsureLoaded() && impassableStates.Contains(state);
 
         /// <summary>Province lies in an impassable state (HOI4 mountains, deserts, ice no unit may enter).</summary>
-        public static bool IsImpassable(ushort province) => IsImpassableState(State(province));
+        public static bool IsImpassable(ushort province) =>
+            EnsureLoaded() && province < impassableById.Length && impassableById[province];
 
         /// <summary>The provinces of a state, sorted (empty when unknown).</summary>
         public static IReadOnlyList<ushort> ProvincesOf(int state) =>
@@ -59,6 +66,8 @@ namespace Hoi4.Map
         {
             provinceState.Clear(); provinceRegion.Clear(); water.Clear(); impassableStates.Clear();
             stateProvinces.Clear(); capitals.Clear(); stateIds.Clear();
+            stateById = regionById = System.Array.Empty<int>();
+            waterById = impassableById = System.Array.Empty<bool>();
             loaded = false; available = false;
         }
 
@@ -93,6 +102,7 @@ namespace Hoi4.Map
                 stateIds.Sort();
                 if (root["capitals"] is JObject caps)
                     foreach (var c in caps.Properties()) capitals[c.Name] = (ushort)(int)c.Value;
+                BuildArrays();
 
                 ArchonLogger.Log($"Hoi4Regions: {provinceState.Count} provinces in states, {provinceRegion.Count} in " +
                                  $"strategic regions, {impassableStates.Count} impassable states, {water.Count} water", "map_initialization");
@@ -103,6 +113,27 @@ namespace Hoi4.Map
                 ArchonLogger.LogError($"Hoi4Regions: failed to read {path}: {e.Message}", "map_initialization");
                 return available = false;
             }
+        }
+
+        private static void BuildArrays()
+        {
+            int size = 1;
+            foreach (var p in provinceState.Keys) size = System.Math.Max(size, p + 1);
+            foreach (var p in provinceRegion.Keys) size = System.Math.Max(size, p + 1);
+            foreach (var p in water) size = System.Math.Max(size, p + 1);
+            var states = new int[size];
+            var regions = new int[size];
+            var wet = new bool[size];
+            var blocked = new bool[size];
+            for (int i = 0; i < size; i++) { states[i] = -1; regions[i] = -1; }
+            foreach (var kv in provinceState)
+            {
+                states[kv.Key] = kv.Value;
+                blocked[kv.Key] = impassableStates.Contains(kv.Value);
+            }
+            foreach (var kv in provinceRegion) regions[kv.Key] = kv.Value;
+            foreach (var p in water) wet[p] = true;
+            stateById = states; regionById = regions; waterById = wet; impassableById = blocked;
         }
 
         private static void ReadGroups(JObject groups, Dictionary<ushort, int> target)

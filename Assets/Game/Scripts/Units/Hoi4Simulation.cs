@@ -26,6 +26,8 @@ namespace Hoi4.Units
             { "combat_h", "plans_h", "ai_h", "recorder", "combat_d", "equipment", "manpower", "plans_d", "war", "ai_wars" };
         static readonly string[] MaxNames = { "combat_h_max", "plans_h_max", "ai_h_max", "plans_refresh", "plans_distribute" };
         readonly double[] perf = new double[PerfNames.Length];
+        // One profiler marker per step, named like the perf.tsv columns: they show in a normal (not deep) capture
+        static readonly Unity.Profiling.ProfilerMarker[] Markers = System.Array.ConvertAll(PerfNames, n => new Unity.Profiling.ProfilerMarker("Hoi4." + n));
         readonly double[] perfMax = new double[3];
         readonly System.Diagnostics.Stopwatch watch = new System.Diagnostics.Stopwatch();
         double frameSum, frameMax;
@@ -34,7 +36,7 @@ namespace Hoi4.Units
         void Measure(int slot, System.Action step)
         {
             watch.Restart();
-            step();
+            using (Markers[slot].Auto()) step();
             double ms = watch.Elapsed.TotalMilliseconds;
             perf[slot] += ms;
             if (slot < perfMax.Length && ms > perfMax[slot]) perfMax[slot] = ms;
