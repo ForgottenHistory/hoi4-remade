@@ -394,6 +394,13 @@ namespace Hoi4.Units
             HasTemplate(tag, template) ? (string)templatesByTag[tag][template]["main"] : null;
 
         /// <summary>Days a division of the template trains: its slowest sub-unit's training_time (HOI4).</summary>
+        /// <summary>Men a division of the template has at full strength (0 when it doesn't exist).</summary>
+        public int TemplateManpower(string tag, string template)
+        {
+            var d = Design(tag, template);
+            return d == null ? 0 : Stats(d.RegimentTypes(), d.SupportTypes(), d.RegimentalTypes()).Manpower;
+        }
+
         public int TrainingDays(string tag, string template)
         {
             if (!HasTemplate(tag, template) || subUnitData == null) return 0;
