@@ -119,7 +119,7 @@ namespace Hoi4.Units
         public override bool Validate(GameState gameState) =>
             Hoi4Armies.Instance != null && Hoi4CommandIo.Owned(gameState, CountryId, UnitIds);
 
-        public override void Execute(GameState gameState) => Hoi4Armies.Instance.Create(UnitIds);
+        public override void Execute(GameState gameState) => Hoi4Armies.Instance.Create(CountryId, UnitIds);
         public override void Undo(GameState gameState) { }
         public override void Serialize(BinaryWriter w) { w.Write(CountryId); Hoi4CommandIo.WriteIds(w, UnitIds); }
         public override void Deserialize(BinaryReader r) { CountryId = r.ReadUInt16(); UnitIds = Hoi4CommandIo.ReadIds(r); }
@@ -133,7 +133,7 @@ namespace Hoi4.Units
         public List<ushort> UnitIds;
 
         public override bool Validate(GameState gameState) =>
-            Hoi4Armies.Instance?.Get(ArmyId) != null && Hoi4CommandIo.Owned(gameState, CountryId, UnitIds);
+            Hoi4Armies.Instance?.Get(ArmyId)?.Owner == CountryId && Hoi4CommandIo.Owned(gameState, CountryId, UnitIds);
 
         public override void Execute(GameState gameState) => Hoi4Armies.Instance.Add(Hoi4Armies.Instance.Get(ArmyId), UnitIds);
         public override void Undo(GameState gameState) { }
@@ -190,7 +190,7 @@ namespace Hoi4.Units
         public override bool Validate(GameState gameState)
         {
             var army = Hoi4Armies.Instance?.Get(ArmyId);
-            return army != null && army.Units.Count > 0 && Hoi4CommandIo.Owned(gameState, CountryId, new List<ushort> { army.Units[0] });
+            return army != null && army.Owner == CountryId && army.Units.Count > 0 && Hoi4CommandIo.Owned(gameState, CountryId, new List<ushort> { army.Units[0] });
         }
 
         public override void Execute(GameState gameState) => Hoi4Armies.Instance.Disband(Hoi4Armies.Instance.Get(ArmyId));
@@ -211,7 +211,7 @@ namespace Hoi4.Units
         public List<ushort> UnitIds;
 
         public override bool Validate(GameState gameState) =>
-            Hoi4BattlePlans.Instance != null && Hoi4Armies.Instance?.Get(ArmyId) != null
+            Hoi4BattlePlans.Instance != null && Hoi4Armies.Instance?.Get(ArmyId)?.Owner == CountryId
             && Hoi4CommandIo.Owned(gameState, CountryId, UnitIds)
             && Hoi4BattlePlans.Instance.HasBorder(CountryId, TargetCountry);
 
@@ -318,7 +318,7 @@ namespace Hoi4.Units
         public ushort StartProvince; // a province of the front the arrow starts from (Tab while drawing); 0 = any facing the targets
 
         public override bool Validate(GameState gameState) =>
-            Hoi4BattlePlans.Instance != null && Hoi4Armies.Instance?.Get(ArmyId) != null
+            Hoi4BattlePlans.Instance != null && Hoi4Armies.Instance?.Get(ArmyId)?.Owner == CountryId
             && Hoi4CommandIo.Owned(gameState, CountryId, UnitIds)
             && Hoi4BattlePlans.Instance.AreOffensiveTargets(CountryId, ArmyId, Targets);
 
@@ -374,7 +374,7 @@ namespace Hoi4.Units
         public override bool Validate(GameState gameState)
         {
             var army = Hoi4Armies.Instance?.Get(ArmyId);
-            return army != null && army.Units.Count > 0 && Hoi4CommandIo.Owned(gameState, CountryId, new List<ushort> { army.Units[0] })
+            return army != null && army.Owner == CountryId && army.Units.Count > 0 && Hoi4CommandIo.Owned(gameState, CountryId, new List<ushort> { army.Units[0] })
                 && Hoi4BattlePlans.Instance != null && (!Run || Hoi4BattlePlans.Instance.HasFrontLine(ArmyId));
         }
 

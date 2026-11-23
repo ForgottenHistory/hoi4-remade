@@ -419,6 +419,7 @@ def convert(hoi4: Path, out: Path):
             f"// {province_name(pid)}\n{{\n" + ",\n".join(fields) + "\n}\n", encoding="utf-8")
     (out / "map" / "definition.csv").write_text("\n".join(def_lines) + "\n", encoding="utf-8")
     write_regions(hoi4, out, provinces, province_state, impassable_states, capitals)
+    convert_adjacencies(hmap, out, provinces)
     if unmapped_terrain:
         print(f"WARNING: unmapped terrain types (fell back): {sorted(unmapped_terrain)}")
 
@@ -484,6 +485,8 @@ def convert(hoi4: Path, out: Path):
     write_river_crossings(hoi4, out, np.where(found & ~water_px, prov_ids[idx], 0))
     # State centres (mean pixel of their land, map px, y down): the peace conference's influence distances
     land_ids = np.where(found & ~water_px, prov_ids[idx], 0)
+    write_province_centres(out, land_ids)
+    write_impassable_borders(out, land_ids, {pid for pid, sid in province_state.items() if sid in impassable_states})
     state_lut = np.zeros(int(land_ids.max()) + 1, dtype=np.int64)
     for pid, sid in province_state.items():
         if pid < len(state_lut):
@@ -911,9 +914,35 @@ def load_sub_units(hoi4: Path):
                     "battalion_groups": [v for _, _, v in get(u, "allowed_battalion_groups")]
                                         if isinstance(get(u, "allowed_battalion_groups"), list) else [],
                     "affects_speed": get(u, "affects_speed") != "no",
+                    # terrain modifiers: `forest = { attack movement }`, `urban = { defence }`... and river (attacks
+                    # across one) and amphibious (over a strait or from the sea); only the non-zero ones
+                    "terrain": terrain_modifiers(u),
                     "need": need,  # equipment archetype -> amount (HOI4 `need`)
                 }
     return subs
+
+
+TERRAIN_MODIFIER_STATS = ("attack", "defence", "movement")
+
+
+def terrain_modifiers(unit_items):
+    """{terrain: {attack, defence, movement}} of a sub-unit's terrain blocks (any block holding only those stats:
+    forest, hills, mountain, jungle, marsh, plains, urban, desert, river, amphibious, fort)."""
+    mods = {}
+    for k, _, v in unit_items:
+        if not isinstance(v, list) or not v or any(kk not in TERRAIN_MODIFIER_STATS for kk, _, _ in v):
+            continue
+        stats = {}
+        for kk, _, vv in v:
+            try:
+                f = float(vv)
+            except (TypeError, ValueError):
+                continue
+            if f:
+                stats[kk] = f
+        if stats:
+            mods[k] = stats
+    return mods
 
 
 def load_equipment_info(hoi4: Path):
@@ -2048,6 +2077,75 @@ STATEVIEW_SPRITES = {
     "buildings": "GFX_buildings_strip", "resources": "GFX_resources_strip",
     "flag_frame": "GFX_diplo_countrylist_flag_frame", "flag_frame_thin": "GFX_small_flag_frame_thin",
 }
+
+
+def write_province_centres(out: Path, land_ids):
+    """map/hoi4_province_centres.csv: every land province's centre (mean pixel, map px, y down, rounded), for the
+    GAME's movement times (km between centres x MAP_SCALE_PIXEL_TO_KM)."""
+    flat = land_ids.ravel()
+    n = int(flat.max()) + 1
+    ys, xs = np.divmod(np.arange(flat.size, dtype=np.int64), land_ids.shape[1])
+    cnt = np.bincount(flat, minlength=n)
+    sx = np.bincount(flat, xs, minlength=n)
+    sy = np.bincount(flat, ys, minlength=n)
+    rows = ["id;x;y"]
+    for pid in range(1, n):
+        if cnt[pid]:
+            rows.append(f"{pid};{int(round(sx[pid] / cnt[pid]))};{int(round(sy[pid] / cnt[pid]))}")
+    (out / "map" / "hoi4_province_centres.csv").write_text("\n".join(rows) + "\n", encoding="utf-8")
+    print(f"Province centres: {len(rows) - 1}")
+
+
+def write_impassable_borders(out: Path, land_ids, impassable):
+    """map/hoi4_impassable_borders.csv: for every impassable province (in an impassable state), the length of its
+    border (pixel edges) with each land neighbour, passable or impassable (an impassable neighbour counts for whoever
+    controls it; the GAME skips neighbours in the same state). HOI4 gives impassable land to whoever controls most
+    of its border (the GAME's Hoi4ImpassableControl)."""
+    imp = np.zeros(int(land_ids.max()) + 1, dtype=bool)
+    for pid in impassable:
+        if pid < len(imp):
+            imp[pid] = True
+    lengths = {}
+    for a, b in ((land_ids[:, :-1], land_ids[:, 1:]), (land_ids[:-1, :], land_ids[1:, :])):
+        m = (a != b) & (a > 0) & (b > 0) & (imp[a] | imp[b])
+        x, y = a[m].astype(np.int64), b[m].astype(np.int64)
+        # each impassable side gets the edge (both, when both are impassable)
+        i = np.concatenate([x[imp[x]], y[imp[y]]])
+        n = np.concatenate([y[imp[x]], x[imp[y]]])
+        pairs, counts = np.unique(i << 16 | n, return_counts=True)
+        for pr, c in zip(pairs.tolist(), counts.tolist()):
+            lengths[pr] = lengths.get(pr, 0) + c
+    rows = ["impassable;neighbour;length"]
+    for pr in sorted(lengths):
+        rows.append(f"{pr >> 16};{pr & 0xFFFF};{lengths[pr]}")
+    (out / "map" / "hoi4_impassable_borders.csv").write_text("\n".join(rows) + "\n", encoding="utf-8")
+    print(f"Impassable borders: {len(rows) - 1} edges around {len({pr >> 16 for pr in lengths})} provinces")
+
+
+def convert_adjacencies(hmap: Path, out: Path, provinces):
+    """HOI4 map/adjacencies.csv -> Archon map/adjacencies.csv (the engine's adjacency overrides,
+    From;To;Type;Through;Comment): the land crossings over water ("sea" between two land provinces, through the
+    sea province, e.g. the Danish straits) and the impassable borders. Sea-to-sea rules (canals and straits for
+    ships, which have rules and no type) are left out: there is no navy."""
+    land = {pid for pid, _, _, _, ptype, _ in provinces if ptype == "land"}
+    rows = ["From;To;Type;Through;Comment"]
+    kept = {"sea": 0, "impassable": 0}
+    for line in read_text(hmap / "adjacencies.csv").splitlines()[1:]:
+        f = line.split(";")
+        if len(f) < 4:
+            continue
+        try:
+            a, b, through = int(f[0]), int(f[1]), int(f[3])
+        except ValueError:
+            continue
+        kind = f[2].strip()
+        if kind not in kept or a not in land or b not in land:
+            continue
+        comment = f[9].strip() if len(f) > 9 else ""
+        rows.append(f"{a};{b};{kind};{through if through > 0 else -1};{comment}")
+        kept[kind] += 1
+    (out / "map" / "adjacencies.csv").write_text("\n".join(rows) + "\n", encoding="utf-8")
+    print(f"Adjacencies: {kept['sea']} crossings, {kept['impassable']} impassable borders")
 
 
 def convert_state_view(hoi4: Path, out: Path, state_centers=None):

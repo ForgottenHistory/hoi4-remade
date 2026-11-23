@@ -477,6 +477,7 @@ namespace Hoi4.Units
                     : queue != null && queue.IsUnitMoving(id) ? 1 : 0;
                 if (action > s.Action) s.Action = action;
                 var armyOf = Hoi4Armies.Instance?.ArmyOf(id);
+                if (armyOf != null && armyOf.Owner != Hoi4Armies.Player && !Hoi4BattlePlans.ShowAIPlans) armyOf = null; // the AI's armies: not shown
                 if (s.ArmyId == 0) s.ArmyId = armyOf?.Id ?? 0;
                 // Like HOI4: in an army but on no battle plan, and not following a manual order
                 var plans = Hoi4BattlePlans.Instance;

@@ -34,6 +34,8 @@ namespace Hoi4.Units
         static readonly FP OrgScale = FP.FromInt(10);
         static readonly FP HpScale = FP.FromInt(3);
         static readonly FP RecoveryPerHour = FP.FromFraction(1, 100); // of max organisation, out of battle
+        static readonly FP MovingOrgPerHour = FP.FromFraction(2, 10);  // HOURLY_ORG_MOVEMENT_IMPACT: organisation lost every hour on the move
+        public static readonly FP ConquerOrgLoss = FP.FromFraction(2, 10); // ORG_LOSS_FACTOR_ON_CONQUER: of max organisation, on taking an enemy province
         static readonly FP DigInFactor = FP.FromFraction(2, 100);     // HOI4 DIG_IN_FACTOR: +2% per entrenchment level
         public static readonly FP DigInCap = FP.FromInt(5);           // HOI4 UNIT_DIGIN_CAP
         static readonly FP DigInPerDay = FP.One;                      // HOI4 UNIT_DIGIN_SPEED
@@ -97,6 +99,8 @@ namespace Hoi4.Units
                 yield return null;
             gameState = Engine.ArchonEngine.Instance.GameState;
             gameState.Units.MovementQueue.TicksPerDay = 24; // HOI4 divisions advance every hour
+            var gs = gameState;
+            gameState.Units.MovementQueue.LegTicks = (unit, from, to) => Hoi4Movement.LegHours(gs, unit, from, to); // hours
             gameState.Units.MovementQueue.ArrivalBlocker = EnemyHolds;
             arrivedSub = gameState.EventBus.Subscribe<UnitMovementCompletedEvent>(e => OnArrived(e.UnitID, e.DestinationProvinceID));
         }
@@ -196,14 +200,20 @@ namespace Hoi4.Units
                 Fight(target, attackersOf[target], diplomacy, divisions);
             }
 
-            // Divisions out of contact slowly regain organisation; a division on the move (marching, attacking or
-            // retreating) leaves its entrenchment behind
+            // Divisions out of contact regain organisation, on the move too; a division on the move (marching,
+            // attacking or retreating) loses 0.2 an hour on top (HOURLY_ORG_MOVEMENT_IMPACT), so a march leaves it
+            // just under full (real HOI4 snapshots: a full division that moved a province has a median 97% the next
+            // day), and leaves its entrenchment behind
             foreach (var d in divisions.All.Values)
             {
-                if (!fighting.Contains(d.UnitId) && !retreating.Contains(d.UnitId) && d.Organisation < d.MaxOrganisation)
-                    d.Organisation = FP.Min(d.MaxOrganisation, d.Organisation + d.MaxOrganisation * RecoveryPerHour);
                 if (d.Entrenchment > FP.Zero && units.MovementQueue.IsUnitMoving(d.UnitId))
                     d.Entrenchment = FP.Zero;
+                if (fighting.Contains(d.UnitId)) continue;
+                bool moving = units.MovementQueue.IsUnitMoving(d.UnitId) && !units.MovementQueue.IsBlocked(d.UnitId);
+                if (!retreating.Contains(d.UnitId) && d.Organisation < d.MaxOrganisation)
+                    d.Organisation = FP.Min(d.MaxOrganisation, d.Organisation + d.MaxOrganisation * RecoveryPerHour);
+                if (moving)
+                    d.Organisation = FP.Max(FP.Zero, d.Organisation - MovingOrgPerHour);
             }
 
             foreach (ushort id in destroyed)
@@ -309,7 +319,7 @@ namespace Hoi4.Units
 
             System.Func<Hoi4Division, FP> aFactor = d => AttackerFactor(gameState, d, units.GetUnit(d.UnitId).provinceID, target);
             Sums(aFront, aFactor, out FP aSoft, out FP aHard, out FP aDef, out FP aBrk, out FP aHardness, out FP aArmor, out FP aPierce);
-            Sums(dFront, DefenderFactor, out FP dSoft, out FP dHard, out FP dDef, out FP dBrk, out FP dHardness, out FP dArmor, out FP dPierce);
+            Sums(dFront, d => DefenderFactor(gameState, d, target, river > 0), out FP dSoft, out FP dHard, out FP dDef, out FP dBrk, out FP dHardness, out FP dArmor, out FP dPierce);
             FP aPierceFactor = PierceFactor(aPierce, dArmor), dPierceFactor = PierceFactor(dPierce, aArmor);
             FP aDie = aArmor > dPierce ? ArmouredDie : Die, dDie = dArmor > aPierce ? ArmouredDie : Die;
 
@@ -422,10 +432,14 @@ namespace Hoi4.Units
                 if (attackers.Count == 0) return FP.Zero;
             }
             // The same modifiers as the battle: terrain and rivers from where each attacker stands, entrenchment
+            bool riverAttack = false;
+            if (gs != null)
+                foreach (var d in attackers)
+                    if (gs.Units.HasUnit(d.UnitId) && Hoi4CombatTerrain.River(gs, gs.Units.GetUnit(d.UnitId).provinceID, target) > 0) { riverAttack = true; break; }
             System.Func<Hoi4Division, FP> aFactor = d => gs != null && gs.Units.HasUnit(d.UnitId)
                 ? AttackerFactor(gs, d, gs.Units.GetUnit(d.UnitId).provinceID, target) : FP.One + d.Planning;
             Sums(attackers, aFactor, out FP aSoft, out FP aHard, out _, out FP aBrk, out _, out _, out _);
-            Sums(defenders, DefenderFactor, out FP dSoft, out FP dHard, out FP dDef, out _, out _, out _, out _);
+            Sums(defenders, d => gs != null ? DefenderFactor(gs, d, target, riverAttack) : FP.One + DigInFactor * d.Entrenchment, out FP dSoft, out FP dHard, out FP dDef, out _, out _, out _, out _);
             FP aRate = Hits(aSoft + aHard, dDef) / FP.Max(dOrg, FP.One);  // share of the defenders' org lost per hour
             FP dRate = Hits(dSoft + dHard, aBrk) / FP.Max(aOrg, FP.One);  // share of the attackers' org lost per hour
             return aRate / FP.Max(dRate, MinRate);
@@ -463,15 +477,24 @@ namespace Hoi4.Units
 
         static readonly FP P3 = FP.FromFraction(3, 10), P7 = FP.FromFraction(7, 10);
 
-        /// <summary>An attacking division's combat factor: planning (+1% per 1%), the target's terrain and the river
-        /// between its province and the target, multiplied (wiki: combat factors stack multiplicatively).</summary>
+        /// <summary>An attacking division's combat factor: planning (+1% per 1%), the target's terrain (its penalty
+        /// plus the division's own modifier there, e.g. light tanks -20% in forest), the river between its province
+        /// and the target (penalty plus its river attack) and a strait crossing (amphibious: -50% plus its amphibious
+        /// attack), multiplied (wiki: combat factors stack multiplicatively).</summary>
         static FP AttackerFactor(GameState gs, Hoi4Division d, ushort from, ushort target) =>
             FP.Max(MinFactor, (FP.One + d.Planning)
-                              * (FP.One + Hoi4CombatTerrain.AttackModifier(gs, target))
-                              * (FP.One + Hoi4CombatTerrain.RiverModifier(gs, from, target)));
+                              * (FP.One + Hoi4CombatTerrain.AttackModifier(gs, target)
+                                 + d.TerrainModifier(Hoi4CombatTerrain.TerrainKey(gs, target)).Attack)
+                              * (FP.One + Hoi4CombatTerrain.RiverModifier(gs, from, target, d.TerrainModifier("river").Attack))
+                              * (FP.One + Hoi4CombatTerrain.StraitModifier(gs, from, target, d.TerrainModifier("amphibious").Attack)));
 
-        /// <summary>A defending division's combat factor: entrenchment, +2% per level.</summary>
-        static FP DefenderFactor(Hoi4Division d) => FP.One + DigInFactor * d.Entrenchment;
+        /// <summary>A defending division's combat factor: entrenchment, +2% per level, its own defence modifier
+        /// in the province's terrain (e.g. light tanks -10% in cities) and, when the attack comes over a river, its
+        /// river defence (engineers +25%).</summary>
+        static FP DefenderFactor(GameState gs, Hoi4Division d, ushort province, bool river) =>
+            FP.Max(MinFactor, (FP.One + DigInFactor * d.Entrenchment)
+                              * (FP.One + d.TerrainModifier(Hoi4CombatTerrain.TerrainKey(gs, province)).Defence)
+                              * (FP.One + (river ? d.TerrainModifier("river").Defence : FP.Zero)));
 
         /// <summary>A side's stats, each division's scaled by its strength and its factor (attack, defence and breakthrough alike).</summary>
         static void Sums(List<Hoi4Division> front, System.Func<Hoi4Division, FP> factor, out FP soft, out FP hard, out FP def, out FP brk,

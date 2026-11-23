@@ -13,9 +13,11 @@ namespace Hoi4.War
     /// GAME: AI war declarations, for now a stress test of the war AI (fronts, attacks, capitulation, AI peace
     /// conferences). Off by default; F8 toggles it. While on, every IntervalDays each AI country with an army, in
     /// id order, may declare war on a land neighbour: one it isn't allied with, not at war with, and clearly weaker
-    /// than it (enemy division strength at most MaxStrengthRatio of its own); the weakest relative to it first.
-    /// A country fights at most MaxWars wars, and at most MaxPerDay wars start per check, so the world catches
-    /// fire gradually. The player's country is never attacked unless IncludePlayer is set (inspector).
+    /// than it or not much stronger (enemy division strength at most MaxStrengthRatio, 1.1, of its own); the
+    /// weakest relative to it first.
+    /// A country fights at most MaxWars wars it can reach (an enemy whose land doesn't touch its own, straits
+    /// included, doesn't count: one left on an island would block it for good), and at most MaxPerDay wars start
+    /// per check, so the world catches fire gradually. The player's country is never attacked unless IncludePlayer is set (inspector).
     /// Declarations go through DeclareWarCommand like the player's; the decisions are noted in the recording
     /// (system "ai_war"). Host only (Hoi4Simulation.RunsAI).
     /// </summary>
@@ -26,10 +28,11 @@ namespace Hoi4.War
         [Tooltip("AI countries declare wars on weaker neighbours (F8 toggles)")] public bool stressTest;
         [Tooltip("The player's country can be attacked too")] public bool includePlayer;
         [Min(1)] public int intervalDays = 3;
-        [Min(1)] public int maxWars = 1;
-        [Min(1)] public int maxPerDay = 3;
+        [Min(1)] public int maxWars = 2;
+        [Min(1)] public int maxPerDay = 5;
         [Min(1)] public int minDivisions = 2;
-        [Range(0.05f, 1f)] public float maxStrengthRatio = 0.7f;
+        [Tooltip("Enemy division strength at most this times its own (above 1: stronger neighbours too)")]
+        [Range(0.05f, 2f)] public float maxStrengthRatio = 1.1f;
 
         GameState gameState;
         int day;
@@ -107,14 +110,17 @@ namespace Hoi4.War
             var borders = new SortedDictionary<ushort, SortedSet<ushort>>();
             int size = 1;
             foreach (var kv in landNeighbours) size = System.Math.Max(size, kv.Key + 1);
-            Hoi4Occupation.Snapshot(gameState, size, out _, out var owner); // shared: read only
+            Hoi4Occupation.Snapshot(gameState, size, out var ctrl, out var owner); // shared: read only
             var pairs = new HashSet<uint>();
+            var contact = new HashSet<uint>(); // (a << 16 | b): land a controls touches land b controls (straits too)
             foreach (ushort p in landProvinces)
             {
-                ushort a = owner[p];
-                if (a == 0) continue;
+                ushort a = owner[p], ca = ctrl[p];
                 foreach (ushort q in landNeighbours[p])
                 {
+                    ushort cb = q < ctrl.Length ? ctrl[q] : (ushort)0;
+                    if (ca != 0 && cb != 0 && ca != cb) contact.Add((uint)ca << 16 | cb);
+                    if (a == 0) continue;
                     ushort b = q < owner.Length ? owner[q] : (ushort)0;
                     if (b == 0 || b == a || !pairs.Add((uint)a << 16 | b)) continue;
                     if (!borders.TryGetValue(a, out var set)) borders[a] = set = new SortedSet<ushort>();
@@ -132,7 +138,12 @@ namespace Hoi4.War
                 ushort country = kv.Key;
                 if (country == player) continue;
                 if (!divisions.TryGetValue(country, out int own) || own < minDivisions) continue;
-                if (diplomacy.GetEnemies(country).Count >= maxWars) continue;
+                // Only wars it can fight count: an enemy whose land no longer touches its own (left on an island,
+                // or beyond a third country) would otherwise keep it from ever declaring again
+                int fighting = 0;
+                foreach (ushort e in diplomacy.GetEnemies(country))
+                    if (contact.Contains((uint)country << 16 | e)) fighting++;
+                if (fighting >= maxWars) continue;
                 FP mine = strength[country];
                 if (mine <= FP.Zero) continue;
 

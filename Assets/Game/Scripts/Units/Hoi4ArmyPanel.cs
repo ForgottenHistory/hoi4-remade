@@ -142,6 +142,7 @@ namespace Hoi4.Units
             animFrame = -1;
             foreach (var army in armies.All)
             {
+                if (army.Owner != player) continue; // the AI's armies aren't the player's cards
                 bool selected = army.Units.Count > 0;
                 foreach (ushort u in army.Units)
                     if (!selection.IsSelected(u)) selected = false;

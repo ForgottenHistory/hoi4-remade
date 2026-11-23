@@ -409,6 +409,75 @@ def main():
     if war_notes:
         print(f"totals: {dict(kinds)}, divisions sent home after peace: {sent}")
 
+    # --- activity: how divisions spend their time (state per division-hour) and how often they move --------
+    window = 90 * 24
+    since = max(first_tick, last_tick - window)
+    print(f"\n## Activity (last {hours(last_tick - since)}: share of division-hours by state, province moves per division per day, mean organisation at the weekly snapshots)")
+    spent = defaultdict(Counter)   # tag -> state -> hours
+    moves = Counter()              # tag -> province changes
+    orgs = defaultdict(list)       # tag -> organisation % at weekly snapshots
+    cur = {}                       # unit -> (tick, tag, state, province)
+    def close(u, until):
+        t0, tag, st, _ = cur[u]
+        lo = max(t0, since)
+        if until > lo:
+            spent[tag][st] += until - lo
+    for r in divs:
+        t = int(r["tick"])
+        u = r["id"]
+        if u in cur:
+            close(u, t)
+            if t >= since and r["province"] != cur[u][3] and r.get("why") != "gone":
+                moves[cur[u][1]] += 1
+        if r.get("why") == "gone":
+            cur.pop(u, None)
+            continue
+        if t >= since and r.get("why") == "snap" and r.get("org", "").replace(".", "", 1).isdigit():
+            orgs[r["tag"]].append(float(r["org"]))
+        cur[u] = (t, r["tag"], r.get("state", "") or "?", r["province"])
+    for u in list(cur):
+        close(u, last_tick)
+    groups = {"holding": ("idle", "defend"), "marching": ("march",), "attacking": ("ai_attack", "attack"),
+              "retreating": ("retreat",)}
+    rows = []
+    for tag, c in spent.items():
+        total = sum(c.values())
+        if total < 24 * 10 or (only and tag != only):
+            continue
+        shares = {g: sum(c[s] for s in ss) / total for g, ss in groups.items()}
+        other = 1 - sum(shares.values())
+        org = sum(orgs[tag]) / len(orgs[tag]) if orgs[tag] else float("nan")
+        rows.append((total, tag, shares, other, moves[tag] * 24 / total, org))
+    rows.sort(reverse=True)
+    print(f"{'country':8} {'div-days':>8} {'holding':>8} {'marching':>9} {'attacking':>10} {'retreat':>8} {'other':>6} {'moves/div/day':>14} {'org':>5}")
+    for total, tag, s, other, mpd, org in rows[:a.top + 8]:
+        print(f"{tag:8} {total / 24:8.0f} {s['holding']:8.0%} {s['marching']:9.0%} {s['attacking']:10.0%} "
+              f"{s['retreating']:8.0%} {other:6.0%} {mpd:14.2f} {org:4.0f}%")
+
+    # --- war AI country layer: theatres, main efforts, armies (Hoi4BattlePlans.AICountry, Docs/ai-layers.md) ---
+    print("\n## War AI (main efforts; theatres and armies at each country's last daily run, have/budget)")
+    aic = [r for r in notes if r["system"] == "ai_country" and (not only or r["country"] == only)]
+    mains = [r for r in aic if r["kind"] == "main_effort"]
+    if not aic:
+        print("none")
+    for r in mains[:40]:
+        print(f"{r['date']}  {r['country']:6} {r['text'][:400]}")
+    if len(mains) > 40:
+        print(f"... {len(mains) - 40} more main effort changes")
+    last, joined, reserved, disbanded = {}, Counter(), Counter(), Counter()
+    for r in aic:
+        c = r["country"]
+        if r["kind"] == "theatres":
+            last[c] = r
+        elif r["kind"] == "join":
+            joined[c] += sum(int(x) for x in re.findall(r"\+(\d+)", r["text"]))
+        elif r["kind"] == "reserve":
+            reserved[c] += int(r["text"].split()[0])
+        elif r["kind"] == "disband":
+            disbanded[c] += 1
+    for c, r in sorted(last.items(), key=lambda kv: -(joined[kv[0]] + reserved[kv[0]]))[:a.top + 8]:
+        print(f"{c:6} joined {joined[c]}, to reserve {reserved[c]}, armies disbanded {disbanded[c]}; last {r['date']}: {r['text'][:600]}")
+
     # --- timing (Hoi4Simulation perf.tsv, one row per day) -----------------------------------------
     _, perf = rec.load(path, "perf")
     print("\n## Timing (per game day, ms)")

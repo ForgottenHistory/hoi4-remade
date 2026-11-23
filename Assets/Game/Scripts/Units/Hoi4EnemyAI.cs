@@ -12,21 +12,26 @@ namespace Hoi4.Units
 {
     /// <summary>
     /// GAME: the simplest war AI. Every game day each AI country (any country but the player's) at war
-    /// picks its strongest enemy that borders it (strength = the enemy's total division strength) and
-    /// attacks that enemy's border provinces target by target: each target gathers the free divisions within
-    /// MaxReach hops, nearest first, until the estimated odds (Hoi4Combat.Odds, with the divisions already
+    /// attacks the border provinces of every enemy that borders it (the strongest one, by total division
+    /// strength, is named in the notes) target by target, the main effort's first (Hoi4BattlePlans.MainEffort:
+    /// along the cheapest route on to the enemy's victory points, the only front that takes uneven fights;
+    /// the others take good odds only): each target gathers the free divisions next to it (on the line: a
+    /// battle plan's way, the line attacks across itself), until the estimated odds (Hoi4Combat.Odds, with the divisions already
     /// marching there) are good, and the group attacks together; a group that falls short of good odds takes
     /// the uneven fight now and then, never a hopeless one, and otherwise stays free for the next target.
     /// Divisions that are moving, worn down (organisation or strength), or defending a province under
     /// attack are left alone. No more divisions go at a province than its combat width holds (the rest would
     /// wait in reserve).
+    /// Encircled divisions (in a piece of our land cut off from the one with the capital, surrounded by enemies:
+    /// no coast, no neutral or allied neighbour) don't take part in the
+    /// line's attacks: each pocket breaks out across its border province nearest the main body, at any odds but
+    /// hopeless ones (BoldOdds), and otherwise holds.
     /// Every hour, attacks that go badly are called off before the attackers are ground down.
     /// Orders go through the same QueueUnitMovementCommand as the player's, so combat, retreat and
     /// occupation apply unchanged. Holding the line is the front lines' job (Hoi4BattlePlans makes one per
     /// enemy border): an attacker is borrowed off its line and rejoins it when the attack is over.
     /// Cost: each country decides at its own hour of the day (id mod 24), so the work is spread over the day
-    /// rather than all on the day tick; a division next to its target goes straight in (no path search), and
-    /// at most PathBudget path searches per country per day for divisions further back.
+    /// rather than all on the day tick; attackers are next to their target, so there are no path searches.
     /// </summary>
     public sealed class Hoi4EnemyAI : MonoBehaviour
     {
@@ -38,8 +43,10 @@ namespace Hoi4.Units
         static readonly FP BreakOffOrganisation = FP.FromFraction(3, 10); // of max: an attacker this worn down breaks off
         static readonly FP BreakOffStrength = FP.FromFraction(35, 100);
         const int BreakOffPercent = 25;       // or when its side holds less than this share of the battle's organisation
-        const int PathBudget = 12;            // path searches per country per day (divisions not next to a target)
-        const int MaxReach = 3;               // land hops from a target to gather its attackers
+        // Attackers come only from the line: divisions in a province next to the target (a battle plan's way: the
+        // line attacks across itself and moves forward as a whole). Gathering from 3-5 hops away pulled holders
+        // off the line, left holes and stray groups deep in enemy land, and walked them back afterwards.
+        const int Reach = 1;
         const int ReserveDepth = 3;           // an attack short of good odds gathers up to this many times the width (reserves)
 
         public static Hoi4EnemyAI Instance { get; private set; }
@@ -49,6 +56,7 @@ namespace Hoi4.Units
         readonly List<ushort> idle = new List<ushort>();
         readonly Dictionary<ushort, int> load = new Dictionary<ushort, int>();
         ushort[] landProvinces;                                                    // sorted, passable land
+        readonly HashSet<ushort> coastal = new HashSet<ushort>();                  // land next to water
         readonly Dictionary<ushort, ushort[]> landNeighbours = new Dictionary<ushort, ushort[]>(); // sorted
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -86,6 +94,7 @@ namespace Hoi4.Units
                 foreach (ushort q in gameState.Adjacencies.GetNeighborsWhere(p, q => !Hoi4Regions.IsWater(q))) n.Add(q);
                 n.Sort();
                 landNeighbours[p] = n.ToArray();
+                foreach (ushort q in gameState.Adjacencies.GetNeighborsWhere(p, q => Hoi4Regions.IsWater(q))) { coastal.Add(p); break; }
                 if (!Hoi4Regions.IsImpassable(p)) land.Add(p);
             }
             landProvinces = land.ToArray();
@@ -224,8 +233,11 @@ namespace Hoi4.Units
                 FP s = Strength(kv.Key);
                 if (s > best || (s == best && kv.Key < target)) { best = s; target = kv.Key; } // ties: lowest id
             }
-            var targets = fronts[target];
-            Core.Recording.SessionRecorder.Note("ai", "target", country, 0, 0, target, $"{targets.Count} border provinces; enemies bordered {fronts.Count}");
+            // Every bordered enemy's land is a target (the strongest one is only named in the note): a weaker
+            // second enemy left out would keep its land for as long as the main war lasts
+            var targets = new List<ushort>();
+            foreach (var kv in fronts) targets.AddRange(kv.Value);
+            Core.Recording.SessionRecorder.Note("ai", "target", country, 0, 0, target, $"{targets.Count} border provinces; enemies bordered {fronts.Count} (main {fronts[target].Count})");
 
             // Idle divisions: not marching, rested, and not the defenders of a province under attack
             idle.Clear();
@@ -273,30 +285,64 @@ namespace Hoi4.Units
             int today = (int)(gameState.Time.CurrentTick / 24); // day count since the start (CurrentTick is hours)
             var unitTypes = StarterKit.Initializer.Instance?.UnitSystem;
 
-            // Free divisions by province (idle is in id order), to gather each target's attackers around it
+            // Free divisions by province (idle is in id order), to gather each target's attackers around it; the
+            // encircled ones apart (they break out instead, below)
+            var pocketOf = Pockets(country, ctrl, out var breakouts);
             var freeAt = new Dictionary<ushort, List<ushort>>();
+            var pocketFreeAt = new Dictionary<ushort, List<ushort>>();
             foreach (ushort id in idle)
             {
                 ushort at = gameState.Units.GetUnit(id).provinceID;
-                if (!freeAt.TryGetValue(at, out var list)) freeAt[at] = list = new List<ushort>();
+                var into = pocketOf.ContainsKey(at) ? pocketFreeAt : freeAt;
+                if (!into.TryGetValue(at, out var list)) into[at] = list = new List<ushort>();
                 list.Add(id);
             }
+            foreach (ushort b in breakouts)
+                if (!load.ContainsKey(b)) // not a border province of an enemy (already in targets otherwise)
+                {
+                    load[b] = 0;
+                    attackersOf[b] = new List<Hoi4Division>();
+                    var defenders = new List<Hoi4Division>();
+                    foreach (ushort e in gameState.Units.GetUnitsInProvince(b))
+                    {
+                        var ed = Hoi4Divisions.Instance.Get(e);
+                        if (ed != null && enemies.Contains(gameState.Units.GetUnit(e).countryID)) defenders.Add(ed);
+                    }
+                    defendersOf[b] = defenders;
+                }
             var launched = new HashSet<ushort>();
 
             // Target first: least-loaded, least-defended targets first. Each gathers the free divisions around
             // it, nearest first, until the odds are good (or the width is full); if the whole group falls short
             // the target is turned down once for all of them, and they stay free for the next target. (Deciding
             // per division made every free division test the odds at every border province: 55 x 27 in a day.)
+            // The main effort's targets first, the cheapest route on to the enemy's victory points first
+            // (Hoi4BattlePlans.TryRouteCost: terrain, defenders, rivers): an axis, not whatever gap is least held;
+            // then the other fronts' targets as before
+            var plansAI = Hoi4BattlePlans.Instance;
+            ushort main = plansAI != null ? plansAI.MainEffort(country) : (ushort)0;
+            FP AxisRank(ushort p) => main != 0 && plansAI.TryRouteCost(main, p, out FP c) ? c : FP.MaxValue;
             var order = new List<ushort>(targets);
-            order.Sort((a, b) => load[a] != load[b] ? load[a].CompareTo(load[b])
-                : defendersOf[a].Count != defendersOf[b].Count ? defendersOf[a].Count.CompareTo(defendersOf[b].Count)
-                : a.CompareTo(b));
-            int pathBudget = PathBudget;
+            foreach (ushort b in breakouts) if (!order.Contains(b)) order.Add(b);
+            order.Sort((a, b) =>
+            {
+                bool ba = breakouts.Contains(a), bb = breakouts.Contains(b);
+                if (ba != bb) return ba ? -1 : 1; // breakouts first
+
+                bool ma = ctrl[a] == main, mb = ctrl[b] == main;
+                if (ma != mb) return ma ? -1 : 1;
+                if (ma && AxisRank(a) != AxisRank(b)) return AxisRank(a).CompareTo(AxisRank(b));
+                return load[a] != load[b] ? load[a].CompareTo(load[b])
+                    : defendersOf[a].Count != defendersOf[b].Count ? defendersOf[a].Count.CompareTo(defendersOf[b].Count)
+                    : a.CompareTo(b);
+            });
             int oddsChecks = 0, turnedDown = 0, fullTargets = 0, noPath = 0, attacks = 0;
             FP bestRejected = FP.Zero;
             foreach (ushort t in order)
             {
-                var candidates = Nearby(t, ctrl, enemies, freeAt, launched);
+                bool onMain = main != 0 && ctrl[t] == main;
+                bool breakout = breakouts.Contains(t);
+                var candidates = Nearby(t, ctrl, enemies, breakout ? pocketFreeAt : freeAt, launched, Reach);
                 if (candidates.Count == 0) continue;
                 FP width = Hoi4.Map.Hoi4CombatTerrain.Width(gameState, t);
                 FP committed = FP.Zero;
@@ -313,11 +359,8 @@ namespace Hoi4.Units
                     // the front breaks: a narrow front is ground down rather than never attacked)
                     if (side.Count > 0 && committed + d.CombatWidth > width * ReserveDepth) { full = true; continue; }
                     var unit = gameState.Units.GetUnit(id);
-                    List<ushort> path;
-                    if (hops == 1) path = new List<ushort> { unit.provinceID, t }; // straight in
-                    else if (pathBudget > 0) { pathBudget--; path = gameState.Pathfinding.FindPath(unit.provinceID, t, country); }
-                    else path = null;
-                    if (path == null || path.Count < 2) { noPath++; continue; }
+                    if (hops != 1) { noPath++; continue; }
+                    var path = new List<ushort> { unit.provinceID, t }; // straight across the line
                     side.Add(d);
                     committed += d.CombatWidth;
                     group.Add((id, d, path));
@@ -328,7 +371,10 @@ namespace Hoi4.Units
                 if (group.Count == 0) { if (full) fullTargets++; continue; }
                 // Short of good odds: now and then an uneven fight, never a hopeless one
                 bool bold = odds < GoodOdds;
-                if (bold && (odds < BoldOdds || Roll(country, t, today) >= BoldChance))
+                // Uneven fights only on the main effort: the other fronts hold and take only good chances. A
+                // breakout takes any fight that isn't hopeless: holding a pocket only waits for its end
+                if (bold && (breakout ? odds < BoldOdds
+                                      : !onMain && main != 0 || odds < BoldOdds || Roll(country, t, today) >= BoldChance))
                 {
                     turnedDown++;
                     if (odds > bestRejected) bestRejected = odds;
@@ -338,7 +384,7 @@ namespace Hoi4.Units
                 {
                     var (id, d, path) = group[i];
                     var unit = gameState.Units.GetUnit(id);
-                    Core.Recording.SessionRecorder.Note("ai", bold ? "attack_bold" : "attack", country, id, unit.provinceID, t,
+                    Core.Recording.SessionRecorder.Note("ai", breakout ? "breakout" : bold ? "attack_bold" : "attack", country, id, unit.provinceID, t,
                         $"odds {OddsText(odds)} with {attackersOf[t].Count} already going, {defendersOf[t].Count} defending, " +
                         $"path {path.Count - 1} hops, group of {group.Count}");
                     var type = unitTypes?.GetUnitType(unit.unitTypeID);
@@ -364,22 +410,111 @@ namespace Hoi4.Units
             if (holds > 0) // one note per country (one per division made the recording heavy in big wars)
                 Core.Recording.SessionRecorder.Note("ai", "hold", country, 0, 0, target,
                     $"{holds} of {idle.Count} free divisions hold: {turnedDown} targets turned down on odds (best {OddsText(bestRejected)}), " +
-                    $"{fullTargets} at full width, {noPath} had no path (path searches left {pathBudget}); " +
+                    $"{fullTargets} at full width, {pocketOf.Count} provinces encircled, {breakouts.Count} breakout targets; " +
                     $"{oddsChecks} odds checks for {targets.Count} targets");
         }
 
         /// <summary>
-        /// Free (not yet launched) divisions within MaxReach land hops of a target, nearest first (hops, then
+        /// Encirclement: the country's land (it controls) in connected pieces; the piece with its capital (else
+        /// the largest, ties the lowest province) is the main body, every other piece surrounded by enemies (no
+        /// coast, no neutral or allied neighbour) a pocket. Returns each
+        /// pocket province's piece; breakouts: per pocket, the enemy province next to it nearest the main body
+        /// by land hops through any passable land (ties the lowest id), or none when nothing leads there (an
+        /// island). Pockets without an enemy next to them (a colony) aren't returned.
+        /// </summary>
+        Dictionary<ushort, int> Pockets(ushort country, ushort[] ctrl, out HashSet<ushort> breakouts)
+        {
+            var pocketOf = new Dictionary<ushort, int>();
+            breakouts = new HashSet<ushort>();
+            var diplomacy = gameState.Diplomacy;
+            bool Own(ushort p) => p < ctrl.Length && ctrl[p] == country && !Hoi4Regions.IsImpassable(p);
+            var piece = new Dictionary<ushort, int>();
+            var pieces = new List<List<ushort>>();
+            foreach (ushort s in landProvinces)
+            {
+                if (!Own(s) || piece.ContainsKey(s)) continue;
+                var list = new List<ushort> { s };
+                piece[s] = pieces.Count;
+                for (int i = 0; i < list.Count; i++)
+                    foreach (ushort n in landNeighbours[list[i]])
+                        if (Own(n) && !piece.ContainsKey(n)) { piece[n] = pieces.Count; list.Add(n); }
+                pieces.Add(list);
+            }
+            if (pieces.Count < 2) return pocketOf;
+            ushort capital = Hoi4Regions.Capital(gameState.Countries.GetCountryTag(country));
+            int main = piece.TryGetValue(capital, out int cp) ? cp : -1;
+            if (main < 0)
+                for (int i = 0; i < pieces.Count; i++)
+                    if (main < 0 || pieces[i].Count > pieces[main].Count) main = i;
+
+            // Pockets: pieces surrounded by enemies. A piece on the coast (supplied by sea, like held land across
+            // the sea from the main body) or next to land of a country we aren't at war with isn't encircled, and
+            // its divisions attack with the line as usual
+            var pocketPieces = new List<int>();
+            for (int i = 0; i < pieces.Count; i++)
+            {
+                if (i == main) continue;
+                bool contact = false, open = false;
+                foreach (ushort p in pieces[i])
+                {
+                    if (coastal.Contains(p)) { open = true; break; }
+                    foreach (ushort n in landNeighbours[p])
+                    {
+                        if (Hoi4Regions.IsImpassable(n)) continue;
+                        ushort c = n < ctrl.Length ? ctrl[n] : (ushort)0;
+                        if (c == 0 || c == country) continue;
+                        if (diplomacy.IsAtWar(country, c)) contact = true;
+                        else { open = true; break; }
+                    }
+                    if (open) break;
+                }
+                if (!contact || open) continue;
+                pocketPieces.Add(i);
+                foreach (ushort p in pieces[i]) pocketOf[p] = i;
+            }
+            if (pocketPieces.Count == 0) return pocketOf;
+
+            // Hops to the main body through any passable land
+            var dist = new Dictionary<ushort, int>();
+            var queue = new List<ushort>(pieces[main]);
+            queue.Sort();
+            foreach (ushort p in queue) dist[p] = 0;
+            for (int i = 0; i < queue.Count; i++)
+            {
+                ushort p = queue[i];
+                int d = dist[p];
+                foreach (ushort n in landNeighbours[p])
+                    if (!Hoi4Regions.IsImpassable(n) && !dist.ContainsKey(n)) { dist[n] = d + 1; queue.Add(n); }
+            }
+            foreach (int i in pocketPieces)
+            {
+                ushort best = 0;
+                int bestD = int.MaxValue;
+                foreach (ushort p in pieces[i])
+                    foreach (ushort n in landNeighbours[p])
+                    {
+                        ushort c = n < ctrl.Length ? ctrl[n] : (ushort)0;
+                        if (c == 0 || c == country || !diplomacy.IsAtWar(country, c) || Hoi4Regions.IsImpassable(n)) continue;
+                        if (!dist.TryGetValue(n, out int d)) continue;
+                        if (d < bestD || (d == bestD && n < best)) { best = n; bestD = d; }
+                    }
+                if (best != 0) breakouts.Add(best);
+            }
+            return pocketOf;
+        }
+
+        /// <summary>
+        /// Free (not yet launched) divisions within reach (land hops) of a target, nearest first (hops, then
         /// province id, then division id). The search goes through land no enemy holds (own, allied, neutral
         /// with access is left to the path search), so it gathers the divisions behind our side of the border.
         /// </summary>
         List<(ushort id, int hops)> Nearby(ushort target, ushort[] ctrl, HashSet<ushort> enemies,
-                                            Dictionary<ushort, List<ushort>> freeAt, HashSet<ushort> launched)
+                                            Dictionary<ushort, List<ushort>> freeAt, HashSet<ushort> launched, int reach)
         {
             var result = new List<(ushort, int)>();
             var seen = new HashSet<ushort> { target };
             var ring = new List<ushort> { target };
-            for (int hop = 1; hop <= MaxReach && ring.Count > 0; hop++)
+            for (int hop = 1; hop <= reach && ring.Count > 0; hop++)
             {
                 var next = new List<ushort>();
                 foreach (ushort p in ring)

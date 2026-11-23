@@ -24,12 +24,13 @@ namespace Hoi4.Map
         const string TerrainFile = "map/terrain.json5";
         const string RiversFile = "map/hoi4_river_crossings.json5";
 
+        public static readonly FP AmphibiousPenalty = FP.FromFraction(-5, 10); // AMPHIBIOUS_LANDING_PENALTY
         public static readonly FP SmallRiverPenalty = FP.FromFraction(-3, 10);
         public static readonly FP LargeRiverPenalty = FP.FromFraction(-6, 10);
 
-        sealed class Terrain { public FP Width, SupportWidth, Attack; public string Key; }
+        sealed class Terrain { public FP Width, SupportWidth, Attack, MovementCost; public string Key; }
 
-        static readonly Terrain Fallback = new Terrain { Width = FP.FromInt(70), SupportWidth = FP.FromInt(35), Attack = FP.Zero, Key = "plains" };
+        static readonly Terrain Fallback = new Terrain { Width = FP.FromInt(70), SupportWidth = FP.FromInt(35), Attack = FP.Zero, MovementCost = FP.One, Key = "plains" };
         static readonly Dictionary<ushort, Terrain> byTerrainId = new Dictionary<ushort, Terrain>();
         static readonly Dictionary<uint, byte> rivers = new Dictionary<uint, byte>();
         static bool loaded;
@@ -51,6 +52,9 @@ namespace Hoi4.Map
         /// <summary>The attacker's attack and breakthrough modifier in this province, e.g. -0.5 in mountains.</summary>
         public static FP AttackModifier(GameState gameState, ushort province) => Get(gameState, province).Attack;
 
+        /// <summary>HOI4 terrain movement_cost: how much longer crossing the province takes (forest 1.5, mountain 2).</summary>
+        public static FP MovementCost(GameState gameState, ushort province) => Get(gameState, province).MovementCost;
+
         /// <summary>The province's terrain key (plains, forest...), for notes and the recorder.</summary>
         public static string TerrainKey(GameState gameState, ushort province) => Get(gameState, province).Key;
 
@@ -67,6 +71,23 @@ namespace Hoi4.Map
             int r = River(gameState, from, to);
             return r == 2 ? LargeRiverPenalty : r == 1 ? SmallRiverPenalty : FP.Zero;
         }
+
+        /// <summary>Whether attacking from one province into the other crosses water: a strait crossing (the
+        /// engine's adjacency overrides, type "sea", from HOI4 map/adjacencies.csv). HOI4 fights it as an amphibious
+        /// attack ("Naval Penalty").</summary>
+        public static bool IsStrait(GameState gameState, ushort from, ushort to) =>
+            gameState?.Adjacencies != null && gameState.Adjacencies.TryGetLink(from, to, out var link) && link.Type == "sea";
+
+        /// <summary>An attacking division's modifier over a strait: the amphibious penalty (-50%) plus the
+        /// division's own amphibious attack (marines +0.5, tanks -0.4...), added as HOI4's one "Naval Penalty" line.
+        /// Zero when the attack doesn't cross water.</summary>
+        public static FP StraitModifier(GameState gameState, ushort from, ushort to, FP amphibiousAttack) =>
+            IsStrait(gameState, from, to) ? AmphibiousPenalty + amphibiousAttack : FP.Zero;
+
+        /// <summary>An attacking division's modifier for a river between the provinces: the crossing penalty plus
+        /// its own river attack (engineers soften it). Zero without a river.</summary>
+        public static FP RiverModifier(GameState gameState, ushort from, ushort to, FP riverAttack) =>
+            River(gameState, from, to) > 0 ? RiverModifier(gameState, from, to) + riverAttack : FP.Zero;
 
         static uint PairKey(ushort a, ushort b) => a < b ? ((uint)a << 16) | b : ((uint)b << 16) | a;
 
@@ -97,6 +118,7 @@ namespace Hoi4.Map
                         Width = Num(o?["combat_width"], Fallback.Width),
                         SupportWidth = Num(o?["combat_support_width"], Fallback.SupportWidth),
                         Attack = Num(o?["attack"], FP.Zero),
+                        MovementCost = Num(o?["movement_cost"], FP.One),
                     };
                 }
 

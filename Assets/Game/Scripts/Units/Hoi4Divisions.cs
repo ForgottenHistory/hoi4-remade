@@ -34,6 +34,15 @@ namespace Hoi4.Units
         public FP[] Need, Have;
         public Part[] Parts;           // sub-units: their strength share and the archetypes they need
         public FP Men;                 // manpower it has, of Manpower (casualties take it, Hoi4Manpower refills it)
+        // Terrain modifiers (forest, urban..., river, amphibious): its battalions' averaged, plus its support
+        // companies' (Sum). Shared with the other divisions of its template: read only.
+        public Dictionary<string, Hoi4TerrainModifier> Terrain;
+
+        static readonly Dictionary<string, Hoi4TerrainModifier> NoTerrain = new Dictionary<string, Hoi4TerrainModifier>();
+
+        /// <summary>Its modifiers in a terrain ("forest"), or for "river" and "amphibious"; zero when it has none.</summary>
+        public Hoi4TerrainModifier TerrainModifier(string terrain) =>
+            terrain != null && (Terrain ?? NoTerrain).TryGetValue(terrain, out var m) ? m : default;
 
         public struct Part { public FP Weight; public int[] Archetypes; }
 
@@ -628,6 +637,7 @@ namespace Hoi4.Units
             division.SoftAttack = st.SoftAttack; division.HardAttack = st.HardAttack;
             division.Defense = st.Defense; division.Breakthrough = st.Breakthrough;
             division.Hardness = st.Hardness; division.Armor = st.Armor; division.Piercing = st.Piercing;
+            division.Terrain = st.Terrain;
         }
 
         /// <summary>HOI4 shows a division by its highest-priority battalion (sub-unit `priority`).</summary>
@@ -648,7 +658,11 @@ namespace Hoi4.Units
             Sum(regiments.ToList(), support.ToList(), regimental.ToList(), subUnitData ?? new JObject());
 
         /// <summary>Regimental support companies count like support companies, except for speed (HOI4: they never
-        /// affect it). How HOI4 scales them with their brigade's size isn't in the data; they count in full.</summary>
+        /// affect it). How HOI4 scales them with their brigade's size isn't in the data; they count in full.
+        /// Terrain modifiers (per terrain, river and amphibious): the line battalions' averaged, plus each support
+        /// company's in full (a 1936 Panzer-Division's amphibious attack, 4 light tanks -0.4, 2 motorized -0.2 and
+        /// engineers +0.15, is -0.183: with the -50% amphibious penalty the -68.33% a live HOI4 battle over a strait
+        /// shows).</summary>
         static Hoi4TemplateStats Sum(List<string> regiments, List<string> support, List<string> regimental, JObject subUnits)
         {
             var st = new Hoi4TemplateStats { Need = new FP[Archetypes.Length] };
@@ -690,9 +704,31 @@ namespace Hoi4.Units
                 pierceMax = FP.Max(pierceMax, Val(s, "piercing")); pierceSum += Val(s, "piercing");
                 st.Count++;
             }
+            var terrain = new SortedDictionary<string, Hoi4TerrainModifier>(System.StringComparer.Ordinal);
+            void AddTerrain(JObject s, FP scale)
+            {
+                if (!(s["terrain"] is JObject mods)) return;
+                foreach (var m in mods.Properties())
+                {
+                    if (!(m.Value is JObject v)) continue;
+                    terrain.TryGetValue(m.Name, out var t);
+                    t.Attack += Num(v["attack"]) * scale;
+                    t.Defence += Num(v["defence"]) * scale;
+                    t.Movement += Num(v["movement"]) * scale;
+                    terrain[m.Name] = t;
+                }
+            }
+            int lineCount = 0;
             foreach (string name in regiments)
-                if (subUnits[name] is JObject s)
-                    st.CombatWidth += Val(s, "combat_width");
+                if (subUnits[name] is JObject s) { st.CombatWidth += Val(s, "combat_width"); lineCount++; }
+            if (lineCount > 0)
+            {
+                FP share = FP.One / lineCount;
+                foreach (string name in regiments) if (subUnits[name] is JObject s) AddTerrain(s, share);
+            }
+            foreach (string name in support.Concat(regimental))
+                if (subUnits[name] is JObject s) AddTerrain(s, FP.One);
+            st.Terrain = new Dictionary<string, Hoi4TerrainModifier>(terrain);
             st.Parts = parts.ToArray();
             st.SpeedKmh = speed == FP.MaxValue ? FP.FromInt(4) : speed;
             if (st.Count > 0)

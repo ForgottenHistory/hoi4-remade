@@ -33,6 +33,7 @@ namespace Hoi4.War
         public static readonly FP VictoryPointWorth = FP.FromFraction(2, 10);
         public static readonly FP StateValueWorth = FP.FromFraction(2, 10);
         public static readonly FP SurrenderLimit = FP.FromFraction(8, 10);
+        static readonly FP NoCoresLimitFactor = FP.FromFraction(7, 10); // SURRENDER_LIMIT_MULT_FOR_COUNTRIES_WITH_NO_CORES
         public const int DaysBeforeSurrender = 7;
 
         public static Hoi4War Instance { get; private set; }
@@ -150,19 +151,23 @@ namespace Hoi4.War
 
         // --- Surrender ----------------------------------------------------------------------------------
 
-        /// <summary>Surrender progress, 0..1 (capitulation at 1): the share of the country's victory points its
-        /// enemies hold, over the surrender limit.</summary>
+        /// <summary>Surrender progress, 0..1 (capitulation at 1): the share of the victory points in the country's
+        /// owned core territory its enemies hold, over the surrender limit (colonies and annexed land don't count, so
+        /// France falls with France). A country owning no cores counts all its land, against the limit x 0.7
+        /// (SURRENDER_LIMIT_MULT_FOR_COUNTRIES_WITH_NO_CORES). Without victory points, provinces count.</summary>
         Unity.Collections.NativeList<ushort> ownedBuffer;
 
         public FP SurrenderProgress(ushort country)
         {
             if (!ownedBuffer.IsCreated) ownedBuffer = new Unity.Collections.NativeList<ushort>(1024, Unity.Collections.Allocator.Persistent);
             if (gameState == null || country == 0) return FP.Zero;
-            int total = 0, held = 0, provinces = 0, heldProvinces = 0;
             var diplomacy = gameState.Diplomacy;
+            string tag = gameState.Countries.GetCountryTag(country);
             // the engine's owner->provinces reverse index: only this country's provinces, not the whole map
             ownedBuffer.Clear();
             gameState.Provinces.GetCountryProvinces(country, ownedBuffer);
+            // [0] core territory, [1] all of it: victory points, held VP, provinces, held provinces
+            var sums = new int[2, 4];
             for (int i = 0; i < ownedBuffer.Length; i++)
             {
                 ushort p = ownedBuffer[i];
@@ -170,18 +175,27 @@ namespace Hoi4.War
                 ushort c = Hoi4Occupation.ControllerOf(gameState, p);
                 bool enemy = c != country && diplomacy.IsAtWar(country, c);
                 int vp = VictoryPoints(p);
-                total += vp; provinces++;
-                if (enemy) { held += vp; heldProvinces++; }
+                var info = Hoi4StateData.Get(Hoi4Regions.State(p));
+                bool core = info == null || info.Cores.Contains(tag); // no state data: everything counts
+                for (int k = core ? 0 : 1; k < 2; k++)
+                {
+                    sums[k, 0] += vp; sums[k, 2]++;
+                    if (enemy) { sums[k, 1] += vp; sums[k, 3]++; }
+                }
             }
-            if (total == 0) { total = provinces; held = heldProvinces; }
+            int which = sums[0, 2] > 0 ? 0 : 1;
+            FP limit = which == 0 ? SurrenderLimit : SurrenderLimit * NoCoresLimitFactor;
+            int total = sums[which, 0], held = sums[which, 1];
+            if (total == 0) { total = sums[which, 2]; held = sums[which, 3]; }
             if (total == 0) return FP.Zero;
-            return FP.Min(FP.One, FP.FromInt(held) / total / SurrenderLimit);
+            return FP.Min(FP.One, FP.FromInt(held) / total / limit);
         }
 
         /// <summary>Daily, from Hoi4Simulation: war start dates, then capitulations.</summary>
         public void SimulateDay()
         {
             if (gameState == null || Conference != null) return; // nothing new while the player decides a peace
+            Hoi4ImpassableControl.SimulateDay(gameState); // impassable land follows whoever holds most of its border
             day++;
             var wars = gameState.Diplomacy.GetAllWars();
             var current = new HashSet<(ushort, ushort)>();

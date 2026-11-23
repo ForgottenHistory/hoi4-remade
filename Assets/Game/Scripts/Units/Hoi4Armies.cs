@@ -6,18 +6,22 @@ using UnityEngine;
 
 namespace Hoi4.Units
 {
-    /// <summary>One army: a named group of divisions.</summary>
+    /// <summary>One army: a named group of divisions of one country.</summary>
     public sealed class Hoi4Army
     {
         public int Id;
+        public ushort Owner;                // the country whose divisions these are
         public string Name;
         public readonly List<ushort> Units = new List<ushort>();
     }
 
     /// <summary>
     /// GAME: armies, HOI4's grouping of divisions. There is no size limit; a general's limit (debuffs past it) is not modelled yet. A division belongs to at most one army.
-    /// Armies are created from the player's selection and can take more divisions later; an army that
-    /// loses its last division disappears. The bottom-of-screen cards are Hoi4ArmyPanel.
+    /// The player's armies are created from the selection and can take more divisions later; an AI country's
+    /// are made by its war AI (Hoi4BattlePlans.AICountry, Docs/ai-layers.md) and may be empty while it fills
+    /// them. A player army that loses its last division disappears. The bottom-of-screen cards are
+    /// Hoi4ArmyPanel (the player's armies only). Changed fires for the player's armies only: AI armies change
+    /// daily and the UI shouldn't rebuild for them.
     /// </summary>
     public sealed class Hoi4Armies : MonoBehaviour
     {
@@ -32,6 +36,29 @@ namespace Hoi4.Units
         public event Action Changed;
 
         public IReadOnlyList<Hoi4Army> All => armies;
+
+        /// <summary>The player's country (0: none, e.g. observing).</summary>
+        public static ushort Player
+        {
+            get
+            {
+                var p = StarterKit.Initializer.Instance?.PlayerState;
+                return p != null && p.HasPlayerCountry ? p.PlayerCountryId : (ushort)0;
+            }
+        }
+
+        /// <summary>The country's armies (in id order).</summary>
+        public List<Hoi4Army> Of(ushort owner)
+        {
+            var list = new List<Hoi4Army>();
+            foreach (var a in armies) if (a.Owner == owner) list.Add(a);
+            return list;
+        }
+
+        void Notify(Hoi4Army army)
+        {
+            if (army == null || army.Owner == Player) Changed?.Invoke();
+        }
 
         /// <summary>The army's colour: a fixed hue per army number (golden-ratio spacing keeps neighbours apart).</summary>
         public static Color ColorOf(int armyId, float value = 0.5f) => Color.HSVToRGB((armyId * 0.382f) % 1f, 0.75f, value);
@@ -74,11 +101,17 @@ namespace Hoi4.Units
             destroyedSub?.Dispose();
         }
 
-        /// <summary>A new army from these divisions (taken out of any army they were in). Null when none.</summary>
-        public Hoi4Army Create(IEnumerable<ushort> units)
+        /// <summary>A new army of the country from these divisions (taken out of any army they were in). Null when
+        /// none, unless allowEmpty (the AI makes its armies first and fills them over the days).</summary>
+        public Hoi4Army Create(ushort owner, IEnumerable<ushort> units, bool allowEmpty = false)
         {
-            var army = new Hoi4Army { Id = nextId++ };
-            army.Name = Ordinal(army.Id) + " Army";
+            var army = new Hoi4Army { Id = nextId++, Owner = owner };
+            // numbered per country, like HOI4: the lowest number none of its armies has
+            var used = new HashSet<string>();
+            foreach (var a in armies) if (a.Owner == owner) used.Add(a.Name);
+            int n = 1;
+            while (used.Contains(Ordinal(n) + " Army")) n++;
+            army.Name = Ordinal(n) + " Army";
             int added = 0;
             foreach (ushort u in units)
             {
@@ -87,11 +120,24 @@ namespace Hoi4.Units
                 armyOf[u] = army;
                 added++;
             }
-            if (added == 0) return null;
+            if (added == 0 && !allowEmpty) return null;
             armies.Add(army);
             Prune();
-            Changed?.Invoke();
+            Notify(army);
             return army;
+        }
+
+        /// <summary>Take divisions out of their armies (the AI's reserve: no army).</summary>
+        public void Release(IEnumerable<ushort> units)
+        {
+            bool player = false;
+            foreach (ushort u in units)
+            {
+                if (armyOf.TryGetValue(u, out var a) && a.Owner == Player) player = true;
+                Detach(u);
+            }
+            Prune();
+            if (player) Changed?.Invoke();
         }
 
         /// <summary>Move divisions into an army. Returns how many were added.</summary>
@@ -109,7 +155,7 @@ namespace Hoi4.Units
             if (added > 0)
             {
                 Prune();
-                Changed?.Invoke();
+                Notify(army);
             }
             return added;
         }
@@ -119,15 +165,15 @@ namespace Hoi4.Units
             if (!armies.Remove(army)) return;
             foreach (ushort u in army.Units) armyOf.Remove(u);
             army.Units.Clear();
-            Changed?.Invoke();
+            Notify(army);
         }
 
         void Remove(ushort unitId)
         {
-            if (!armyOf.ContainsKey(unitId)) return;
+            if (!armyOf.TryGetValue(unitId, out var army)) return;
             Detach(unitId);
             Prune();
-            Changed?.Invoke();
+            Notify(army);
         }
 
         void Detach(ushort unitId)
@@ -137,7 +183,10 @@ namespace Hoi4.Units
             armyOf.Remove(unitId);
         }
 
-        void Prune() => armies.RemoveAll(a => a.Units.Count == 0);
+        // An empty player army disappears; the AI keeps its armies while their theatre needs them (it disbands them)
+        void Prune() => armies.RemoveAll(a => a.Units.Count == 0 && !IsAI(a));
+
+        static bool IsAI(Hoi4Army a) => a.Owner != Player;
 
         static string Ordinal(int n)
         {

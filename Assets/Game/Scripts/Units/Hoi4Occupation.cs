@@ -6,6 +6,7 @@ using Core.Systems;
 using Core.Units;
 using Hoi4.Map;
 using UnityEngine;
+using FP = Core.Data.FixedPoint64;
 
 namespace Hoi4.Units
 {
@@ -212,6 +213,10 @@ namespace Hoi4.Units
             // occupied) goes back to its owner rather than being kept (HOI4 liberation)
             bool liberates = owner != country && !diplomacy.IsAtWar(owner, country);
             gameState.Provinces.SetProvinceController(province, liberates ? owner : country);
+            // Taking an enemy province costs the division a fifth of its organisation (ORG_LOSS_FACTOR_ON_CONQUER)
+            var taker = Hoi4Divisions.Instance?.Get(unitId);
+            if (taker != null)
+                taker.Organisation = FP.Max(FP.Zero, taker.Organisation - taker.MaxOrganisation * Hoi4Combat.ConquerOrgLoss);
         }
     }
 }

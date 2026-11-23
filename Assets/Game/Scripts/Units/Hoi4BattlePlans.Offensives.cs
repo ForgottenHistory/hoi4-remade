@@ -223,7 +223,7 @@ namespace Hoi4.Units
             ushort holder = Hoi4Occupation.ControllerOf(gameState, province);
             if (holder == 0 || holder == owner) return false;
             foreach (var p in plans)
-                if (!p.IsAI && p.Owner == owner && p.ArmyId == armyId && p.Country == holder) return true;
+                if (p.Owner == owner && p.ArmyId == armyId && p.Country == holder) return true;
             return false;
         }
 
@@ -410,7 +410,7 @@ namespace Hoi4.Units
                 var d = divisions.Get(u);
                 if (d == null || !units.HasUnit(u)) continue;
                 bool planning = !queue.IsUnitMoving(u) && !Hoi4Combat.IsFighting(u)
-                    && planOf.TryGetValue(u, out var plan) && !plan.IsAI && plan.FrontProvinces != null
+                    && planOf.TryGetValue(u, out var plan) && plan.FrontProvinces != null
                     && ArmyHasOffensive(plan.ArmyId)
                     && plan.FrontProvinces.Contains(units.GetUnit(u).provinceID);
                 d.Planning = planning
@@ -435,7 +435,7 @@ namespace Hoi4.Units
         /// <summary>The army has a front line: its play / stop buttons show.</summary>
         public bool HasFrontLine(int armyId)
         {
-            foreach (var p in plans) if (!p.IsAI && p.ArmyId == armyId) return true;
+            foreach (var p in plans) if (p.ArmyId == armyId) return true;
             return false;
         }
 
@@ -467,7 +467,7 @@ namespace Hoi4.Units
         /// <summary>The army's front line plans spread their divisions again on the next hour.</summary>
         void DirtyArmy(int armyId)
         {
-            foreach (var p in plans) if (!p.IsAI && p.ArmyId == armyId) dirtyPlans.Add(p);
+            foreach (var p in plans) if (p.ArmyId == armyId) dirtyPlans.Add(p);
         }
 
         // --- Advancing (the plan runs) ----------------------------------------------------------------
@@ -483,7 +483,7 @@ namespace Hoi4.Units
         /// It keeps its slot on the front line and attacks from there (Advance).</summary>
         public bool IsAdvancing(ushort unitId) =>
             offensiveOf.TryGetValue(unitId, out var o) && executing.Contains(o.ArmyId)
-            && planOf.TryGetValue(unitId, out var plan) && !plan.IsAI && !manualOrders.ContainsKey(unitId);
+            && planOf.TryGetValue(unitId, out var plan) && !manualOrders.ContainsKey(unitId);
 
         /// <summary>An advancing division marching into enemy land: an attack the line must not call back (Hold).</summary>
         bool IsPlanAttack(ushort unitId, Core.Units.UnitState unit)
@@ -672,7 +672,7 @@ namespace Hoi4.Units
         /// <summary>The plan is the offensive's line: the army's front line against the country it attacks. Only its
         /// divisions are the offensive's (two lines against two countries can share a corner province).</summary>
         bool OnLineOf(Hoi4Offensive o, Hoi4BattlePlan plan) =>
-            !plan.IsAI && plan.ArmyId == o.ArmyId && plan.Country == (o.Country != 0 ? o.Country : Ctrl(o.Target));
+            plan.ArmyId == o.ArmyId && plan.Country == (o.Country != 0 ? o.Country : Ctrl(o.Target));
 
         /// <summary>A front line was deleted: the army's offensives no line of it faces any more go with it.</summary>
         void RemoveOrphanedOffensives(int armyId)
@@ -750,7 +750,7 @@ namespace Hoi4.Units
             if (holder == 0 || holder == owner) return result;
             foreach (var plan in plans)
             {
-                if (plan.IsAI || plan.Owner != owner || plan.ArmyId != armyId || plan.Country != holder || plan.Fronts == null) continue;
+                if (plan.Owner != owner || plan.ArmyId != armyId || plan.Country != holder || plan.Fronts == null) continue;
                 var sizes = new List<int>();
                 var piece = EnemyPieces(plan.FrontProvinces, holder, sizes);
                 if (!piece.TryGetValue(target, out int tp)) continue; // the target's piece borders none of this line
@@ -811,7 +811,6 @@ namespace Hoi4.Units
             {
                 foreach (var plan in plans)
                 {
-                    if (plan.IsAI) continue;
                     foreach (var kv in plan.Slot)
                     {
                         ushort u = kv.Key, slot = kv.Value;
@@ -1182,7 +1181,7 @@ namespace Hoi4.Units
             float bestD = float.MaxValue;
             foreach (var p in plans)
             {
-                if (p.IsAI || p.ArmyId != o.ArmyId || p.Country != holder || p.Chains == null) continue;
+                if (!IsDrawn(p) || p.ArmyId != o.ArmyId || p.Country != holder || p.Chains == null) continue;
                 foreach (var chain in p.Chains)
                     for (int i = 0; i < chain.Count; i++)
                     {

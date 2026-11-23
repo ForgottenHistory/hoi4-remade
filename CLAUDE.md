@@ -61,6 +61,10 @@ Rerun the converter after changing it. The engine caches decoded images next to 
 
 For tricky map algorithms (border tracing and smoothing, river tracing, label placement), first prototype in Python under `Tools/prototypes/<topic>/` and render preview PNGs to check the result visually. Port to C# or HLSL only after that. Existing prototypes include `borders/trace_borders.py` with `render_borders.py`, `rivers/trace_rivers.py`, `labels/place_labels.py` `peace/peace_conference.py` (peace conference costs and score, checked against a live HOI4 conference) and `peace/peace_stripes.py` (the conference's map stripes).
 
+## Work in progress
+
+- The war AI is being rebuilt in three layers (country: theatres and armies; strategic: army front lines and offensives; tactical: per-division attacks). The plan, decisions and progress are in `Docs/ai-layers.md`. Read it before touching `Hoi4BattlePlans*`, `Hoi4EnemyAI` or `Hoi4Armies`, and update its checkboxes as work lands.
+
 ## Session recordings (how to read the game)
 
 The engine provides the mechanism (`Core.Recording.SessionRecorder`, see `Assets/Archon-Engine/Docs/Engine/session-recording.md`). The game decides when to record and which HOI4 tables to add. In the editor, `Hoi4Recorder` (`Assets/Game/Scripts/Units/Hoi4Recorder.cs`) records every play session to `Recordings/<stamp>_<TAG>/` (gitignored; the newest 12 are kept). The menu toggle **HOI4 > Record Sessions** (remembered per machine) turns it off, for example for clean profiling: recording costs about 15 ms per game day in a large war. With it off there is no recording to read, `perf.tsv` included. The files are TSVs that start with `tick` (game hours) and `date`. They cover:
@@ -77,7 +81,7 @@ The engine provides the mechanism (`Core.Recording.SessionRecorder`, see `Assets
 When the user reports odd behaviour, read the newest recording before guessing:
 
 ```
-python Tools/recorder/report.py [REC]            # overview and anomalies: divisions off the line, stuck, thrashing, AI outcomes
+python Tools/recorder/report.py [REC]            # overview and anomalies: divisions off the line, stuck, thrashing, AI outcomes, activity (holding/marching/attacking shares), strategy
 python Tools/recorder/unit.py [REC] ID           # one division's whole story
 python Tools/recorder/battles.py [REC]           # whole battles: outcome by terrain/river and attacker, entrenchment at the start
 python Tools/recorder/rows.py [REC] FILE col=val --cols a,b   # filter by column name; --schema, --count COL

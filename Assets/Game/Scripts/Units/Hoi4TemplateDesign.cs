@@ -164,11 +164,18 @@ namespace Hoi4.Units
     /// never regimental support); combat width counts battalions only; armour and piercing are 30% / 40% the best plus
     /// 70% / 60% the mean. Checked against HOI4's designer (FRA Division Coloniale).
     /// </summary>
+    /// <summary>A division's or sub-unit's modifiers in one terrain (HOI4 `forest = { attack defence movement }`).</summary>
+    public struct Hoi4TerrainModifier
+    {
+        public FP Attack, Defence, Movement;
+    }
+
     public struct Hoi4TemplateStats
     {
         public FP MaxStrength, MaxOrganisation, Recovery, Recon, Suppression, Weight, SupplyUse, Reliability;
         public FP SoftAttack, HardAttack, AirAttack, Defense, Breakthrough, Armor, Piercing, Initiative, Entrenchment;
         public FP CombatWidth, Hardness, SpeedKmh;
+        public Dictionary<string, Hoi4TerrainModifier> Terrain; // per terrain (and river, amphibious): see Hoi4Divisions.Sum
         public int Manpower, TrainingDays, Count;
         public FP[] Need;                         // per archetype (Hoi4Divisions.Archetypes)
         public Hoi4Division.Part[] Parts;         // per sub-unit: its strength share and archetypes
