@@ -965,7 +965,28 @@ namespace Hoi4.Units
         /// along a front runs from one end (the farthest province from the lowest id) by hop distance.
         /// Integer graph maths only, in id order, so every client gets the same fronts.
         /// </summary>
+        // Within one refresh or one AI run (null otherwise): fronts per (owner, country) and stretches per fronts
+        // list (by reference). Every army's line against an enemy asked for the same border: five armies on one
+        // front traced and split it five times per refresh. Callers don't modify the lists they get.
+        Dictionary<(ushort, ushort), List<List<ushort>>> frontsMemo;
+        Dictionary<List<List<ushort>>, List<List<int>>> stretchesMemo;
+
+        void BeginFrontsMemo()
+        {
+            frontsMemo = new Dictionary<(ushort, ushort), List<List<ushort>>>();
+            stretchesMemo = new Dictionary<List<List<ushort>>, List<List<int>>>();
+        }
+
+        void EndFrontsMemo() { frontsMemo = null; stretchesMemo = null; }
+
         List<List<ushort>> FrontsAgainst(ushort owner, ushort country)
+        {
+            if (frontsMemo == null) return TraceFronts(owner, country);
+            if (!frontsMemo.TryGetValue((owner, country), out var f)) frontsMemo[(owner, country)] = f = TraceFronts(owner, country);
+            return f;
+        }
+
+        List<List<ushort>> TraceFronts(ushort owner, ushort country)
         {
             var result = new List<List<ushort>>();
             if (owner == 0 || country == 0 || owner == country) return result;
@@ -1054,6 +1075,13 @@ namespace Hoi4.Units
         /// line) are one stretch; a third country in between (Luxembourg) splits them. Front indices, in order of the
         /// lowest front index.</summary>
         List<List<int>> Stretches(List<List<ushort>> fronts)
+        {
+            if (stretchesMemo == null) return GroupStretches(fronts);
+            if (!stretchesMemo.TryGetValue(fronts, out var s)) stretchesMemo[fronts] = s = GroupStretches(fronts);
+            return s;
+        }
+
+        List<List<int>> GroupStretches(List<List<ushort>> fronts)
         {
             var frontOf = new Dictionary<ushort, int>();
             for (int f = 0; f < fronts.Count; f++) foreach (ushort p in fronts[f]) frontOf[p] = f;
@@ -1403,6 +1431,7 @@ namespace Hoi4.Units
             int looked = 0, moved = 0, searches = distributeSearches;
 
             borderDirty = false;
+            BeginFrontsMemo();
             // One snapshot of every land province's controller, shared by all plans this hour
             Hoi4Occupation.Snapshot(gameState, landNeighbours.Length, out ctrl, out _); // shared: read only
             part.Restart();
@@ -1440,6 +1469,7 @@ namespace Hoi4.Units
                     $"AI plans {aiPlansMs:0}; {plans.Count} plans, {changedCountries.Count} countries changed land");
             ctrl = null; // outside a refresh, read live controllers
             ClearRefreshCaches();
+            EndFrontsMemo();
             if (Active) SetPreview(hoverProvince);
             if (any)
             {
@@ -1760,7 +1790,13 @@ namespace Hoi4.Units
             for (int s = 0; s < planned.Count; s++) plannedLeft[s] = true;
             foreach (ushort u in ids)
             {
-                if (!previous.TryGetValue(u, out ushort had) || !frontIndex.TryGetValue(had, out var at)) continue;
+                // A division standing on a front province of this line keeps that one (it took it, or the line
+                // moved onto it): going back to its old slot behind sent attackers back and forth, take, back, take
+                ushort here = units.GetUnit(u).provinceID;
+                ushort had;
+                if (frontIndex.ContainsKey(here) && !borrowed.Contains(u) && !units.MovementQueue.IsUnitMoving(u)) had = here;
+                else if (!previous.TryGetValue(u, out had)) continue;
+                if (!frontIndex.TryGetValue(had, out var at)) continue;
                 int f = at.front;
                 if (kept[f] >= alloc[f] || !Reaches(u, f)) continue;
                 if (pinned.TryGetValue(u, out int pinFront) && pinFront != f) continue;

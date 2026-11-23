@@ -9,14 +9,17 @@ namespace Hoi4.Units
     /// GAME: the war AI's country layer, and the strategic layer's front lines (Docs/ai-layers.md; prototype
     /// Tools/prototypes/ai_armies/theatres.py). Daily per AI country at its own hour (country id mod 24):
     /// - Theatres: its front provinces (passable land next to passable land of a country it is at war with),
-    ///   joined through land adjacency or through facing the same enemy province, across enemies. A theatre
-    ///   outside the walkable piece with the capital is a pocket: out of the budget, its budget the divisions in it.
-    /// - Per theatre: holding need max(fronts, provinces / HoldProvinces, HoldRatio x enemy divisions within
-    ///   FacingHops), and a score from the cheapest route on to an enemy's victory points (RouteCosts:
+    ///   joined through land adjacency or through facing the same enemy province, across enemies, never across
+    ///   landmasses (Landmasses: each shares its own divisions, with its own main effort).
+    /// - Per theatre: what it takes, enough to fill the line (one per front province) and to match the enemy
+    ///   divisions facing it (within FacingHops) times HoldMin..HoldMax by the danger to the homeland (HomeCosts:
+    ///   the enemy's cheapest route from there to our core victory points), whichever is more (the main effort
+    ///   AttackRatio times them), and a score (times 1 + danger) from the cheapest route on to an enemy's victory points (RouteCosts:
     ///   (0.25 + surrender progress) x 10 / (1 + cost); no route: 0, the theatre only holds). The main effort is
     ///   the best score, kept CommitDays unless another scores ScoreToSwitch times better (it follows its armies).
-    /// - Budget: holding needs first, the surplus to the main effort up to PerProvinceCap per front province,
-    ///   the overflow by score; the rest is reserve (divisions in no army). Short of divisions: shares of the need.
+    /// - Budget: each theatre its need, the spare shared in proportion to the needs; short of divisions, each the
+    ///   same fraction of its need. No cap, no reserve on purpose (reserve: divisions between armies).
+    /// - Posture: the main effort attacks while its armies have AttackRatio times the enemy facing it; the rest hold.
     /// - Armies: ceil(budget / ArmySize) per theatre, each holding a contiguous section of its front. Sections
     ///   carry over from the day before by nearness (each front province takes the army of the nearest earlier
     ///   front province within CarryHops), then the smallest army merges away or the largest splits until the
@@ -35,17 +38,19 @@ namespace Hoi4.Units
     {
         const int CommitDays = 60;
         const int FacingHops = 2;
-        const int HoldProvinces = 3;
-        const int PerProvinceCap = 2;   // the most divisions a theatre can use: this many per front province
         const int ArmySize = 24;        // HOI4's army limit
         const int CarryHops = 4;        // a section carries over to front provinces this close to it
-        const int MinTheatre = 4;       // a stretch of front shorter than this joins the nearest theatre ...
-        const int MergeHops = 6;        // ... this close (land hops)
+        const int MergeHops = 4;        // stretches of front this close (land hops) are one theatre ...
+        const int MinTheatre = 4;       // ... and one shorter than this provinces joins one up to ...
+        const int SliverHops = 8;       // ... this far: a theatre re-cut every day re-cut its armies
         const int MaxTransferHops = 20; // a division joins an army only this close to its section (walkable land)
         static readonly FP TransferKm = FP.FromInt(1500); // a whole army takes over another theatre only this close
         static readonly FP ObjectiveBase = FP.FromInt(8);   // a route to a victory point starts at 8 / (1 + VP / 5): bigger ones pull harder
         static readonly FP ScoreScale = FP.FromInt(10);
-        static readonly FP HoldRatio = FP.FromFraction(8, 10);
+        static readonly FP HomeScale = FP.FromInt(10);     // danger 0.5 at a route home costing 10 (about 10 plains provinces)
+        static readonly FP HoldMin = FP.FromFraction(1, 2); // a front's need: the enemy facing it times HoldMin (far from home) ...
+        static readonly FP HoldMax = FP.FromFraction(3, 2); // ... up to HoldMax (at our core victory points)
+        static readonly FP AttackRatio = FP.FromFraction(3, 2); // the main effort wants this many per enemy division facing it, and attacks only with them
         static readonly FP ScoreToSwitch = FP.FromFraction(3, 2);
         static readonly FP ProgressBase = FP.FromFraction(1, 4);
 
@@ -56,9 +61,10 @@ namespace Hoi4.Units
             public Dictionary<ushort, List<ushort>> Links;    // neighbours along the front (sorted)
             public SortedSet<ushort> Enemies = new SortedSet<ushort>();
             public int Facing, Need, Budget, Label;
+            public FP HomeCost = FP.MaxValue, Danger;          // the enemy's cheapest route from here to our core VPs; HomeScale / (HomeScale + it)
             public FP Cost = FP.MaxValue, Score;
             public ushort BestEnemy;
-            public bool Overseas, Main;                       // Overseas: not on the landmass with the capital
+            public bool Overseas, Main, Attacking;            // Overseas: not on the landmass with the capital
             public Dictionary<ushort, int> ArmyOf;            // province -> army id
             public List<int> Armies = new List<int>();        // in order along the front
         }
@@ -67,6 +73,7 @@ namespace Hoi4.Units
         {
             public ushort MainEnemy;
             public readonly HashSet<int> MainArmies = new HashSet<int>();                // the armies of the main efforts
+            public readonly HashSet<int> AttackArmies = new HashSet<int>();              // armies whose theatre attacks (posture)
             public readonly Dictionary<int, int> MainSince = new Dictionary<int, int>(); // army -> day its theatre became the main effort
             public Dictionary<ushort, int> Section = new Dictionary<ushort, int>(); // yesterday's front province -> army
             public readonly Dictionary<int, ushort> Anchor = new Dictionary<int, ushort>(); // army -> middle province of its section
@@ -118,6 +125,16 @@ namespace Hoi4.Units
         /// <summary>The enemy an AI country's main effort is against (0: none).</summary>
         public ushort MainEffort(ushort country) => aiStates.TryGetValue(country, out var s) ? s.MainEnemy : (ushort)0;
 
+        /// <summary>The province is next to a section of an army whose theatre attacks (the main effort, with
+        /// enough divisions for it): Hoi4EnemyAI attacks there; elsewhere the country holds.</summary>
+        public bool IsAttackFront(ushort country, ushort province)
+        {
+            if (!aiStates.TryGetValue(country, out var s) || s.AttackArmies.Count == 0) return false;
+            foreach (ushort n in Neighbours(province))
+                if (s.Section.TryGetValue(n, out int a) && s.AttackArmies.Contains(a)) return true;
+            return false;
+        }
+
         /// <summary>The divisions the AI gives an army (-1: not an AI army).</summary>
         public int ArmyBudget(ushort owner, int armyId) =>
             aiStates.TryGetValue(owner, out var s) && s.Budget.TryGetValue(armyId, out int b) ? b : -1;
@@ -137,11 +154,14 @@ namespace Hoi4.Units
                 if (c % 24 == hour && c != player && c != 0) countries.Add(c);
             }
             foreach (var a in armies.All) if (a.Owner % 24 == hour && a.Owner != player && a.Owner != 0) countries.Add(a.Owner);
+            if (countries.Count == 0) return;
+            BeginFrontsMemo();
             foreach (ushort c in countries)
             {
                 if (diplomacy.IsAtWar(c)) RunCountry(c);
                 else if (aiStates.ContainsKey(c)) StandDown(c);
             }
+            EndFrontsMemo();
         }
 
         /// <summary>At peace: the country's armies are disbanded (their lines go with them), its divisions reserve.</summary>
@@ -199,16 +219,22 @@ namespace Hoi4.Units
                         l.Add(p);
                     }
                 }
-            foreach (var l in faced.Values) for (int i = 1; i < l.Count; i++) Union(l[0], l[i]);
-            var labels = WalkLabels(country);
+            // Facing the same enemy province joins fronts only on the same landmass: a cut-off piece facing the
+            // main front's enemy took the main front onto its landmass (its label came from whichever province
+            // was first) and starved it of divisions
+            var labels = Landmasses(country);
+            var homeCost = HomeCosts(country);
+            foreach (var l in faced.Values)
+                for (int i = 1; i < l.Count; i++) if (labels[l[i]] == labels[l[0]]) Union(l[0], l[i]);
             var groups = Groups(front, Find);
-            // A sliver of front (under MinTheatre provinces: a bit of enemy land cut off, a bulge) joins the nearest
-            // other theatre within MergeHops land hops instead of getting an army of its own: the nearby army's
-            // line covers it. The two closest provinces are linked so the walk along the front goes through
+            // Stretches of front within MergeHops land hops of each other are one theatre (a front cut by a lake,
+            // a neutral or a bulge isn't two), and a sliver (under MinTheatre provinces: a bit of enemy land cut
+            // off) joins one up to SliverHops away instead of getting an army of its own. Same landmass only. The
+            // two closest provinces are linked so the walk along the front goes through
             var bridges = new List<(ushort a, ushort b)>();
             foreach (var g in new List<List<ushort>>(groups.Values))
             {
-                if (g.Count >= MinTheatre) continue;
+                int reach = g.Count < MinTheatre ? SliverHops : MergeHops;
                 var origin = new Dictionary<ushort, ushort>();
                 var hops = new Dictionary<ushort, int>();
                 var q = new List<ushort>(g);
@@ -217,7 +243,7 @@ namespace Hoi4.Units
                 for (int i = 0; i < q.Count && found == 0; i++)
                 {
                     ushort x = q[i];
-                    if (hops[x] >= MergeHops) continue;
+                    if (hops[x] >= reach) continue;
                     foreach (ushort y in Neighbours(x))
                     {
                         if (hops.ContainsKey(y) || !Land(y)) continue;
@@ -277,7 +303,14 @@ namespace Hoi4.Units
                 t.Label = labels[g[0]];
                 t.Overseas = t.Label != home;
                 t.Facing = FacingDivisions(g, t.Enemies);
-                t.Need = Math.Max(1, Math.Max((g.Count + HoldProvinces - 1) / HoldProvinces, FP.Ceiling(FP.FromInt(t.Facing) * HoldRatio).ToInt()));
+                // How many it takes: enough to fill the line (one per front province) and to match the enemy
+                // divisions facing it, whichever is more (the main effort: AttackRatio times them, below)
+                // Weighted by the danger to the homeland: an enemy here with a cheap route to our core victory
+                // points (HomeCosts) is matched up to HoldMax times, one with a long walk through non-core land
+                // only HoldMin times (Finland -> Sweden -> Denmark -> Germany costs little to lose)
+                foreach (ushort p in g) if (homeCost.TryGetValue(p, out FP hc) && hc < t.HomeCost) t.HomeCost = hc;
+                t.Danger = t.HomeCost == FP.MaxValue ? FP.Zero : HomeScale / (HomeScale + t.HomeCost);
+                t.Need = Math.Max(1, Math.Max(g.Count, FP.Ceiling(FP.FromInt(t.Facing) * (HoldMin + (HoldMax - HoldMin) * t.Danger)).ToInt()));
                 foreach (ushort p in g)
                     foreach (ushort q in Neighbours(p))
                     {
@@ -288,7 +321,8 @@ namespace Hoi4.Units
                     }
                 if (t.BestEnemy == 0) t.BestEnemy = t.Enemies.Min;
                 FP progress = war != null ? war.SurrenderProgress(t.BestEnemy) : FP.Zero;
-                t.Score = t.Cost == FP.MaxValue ? FP.Zero : (ProgressBase + progress) * ScoreScale / (FP.One + t.Cost);
+                // a front near home is the better place to attack too: it pushes the enemy away from our cores
+                t.Score = t.Cost == FP.MaxValue ? FP.Zero : (ProgressBase + progress) * ScoreScale / (FP.One + t.Cost) * (FP.One + t.Danger);
                 theatres.Add(t);
             }
 
@@ -373,31 +407,23 @@ namespace Hoi4.Units
                 if (!theatres[main].Overseas) homeMain = theatres[main].BestEnemy;
                 if (total > biggest) { biggest = total; biggestMain = theatres[main].BestEnemy; }
 
-                int sumNeed = 0;
+                // Targets: each theatre its need, the main effort enough to attack (AttackRatio times the enemy
+                // facing it). Enough divisions: each its target and the spare shared in proportion to the targets
+                // (no reserve, no cap). Short: each the same fraction of its target
+                theatres[main].Need = Math.Max(theatres[main].Need, FP.Ceiling(FP.FromInt(theatres[main].Facing) * AttackRatio).ToInt());
+                long sumNeed = 0;
                 foreach (int i in open) sumNeed += theatres[i].Need;
-                if (sumNeed <= total)
+                int given = 0;
+                var rem = new List<(long r, int i)>();
+                foreach (int i in open)
                 {
-                    int rest = total - sumNeed;
-                    foreach (int i in open) theatres[i].Budget = theatres[i].Need;
-                    var byScore = new List<int>(open);
-                    byScore.Remove(main);
-                    byScore.Sort((a, b) => theatres[b].Score != theatres[a].Score ? theatres[b].Score.CompareTo(theatres[a].Score) : a.CompareTo(b));
-                    byScore.Insert(0, main);
-                    foreach (int i in byScore)
-                    {
-                        int room = Math.Max(0, theatres[i].Provinces.Count * PerProvinceCap - theatres[i].Budget);
-                        int give = Math.Min(room, rest);
-                        theatres[i].Budget += give;
-                        rest -= give;
-                    }
-                    reserve += rest;
+                    long share = (long)theatres[i].Need * total;
+                    theatres[i].Budget = (int)(share / Math.Max(1, sumNeed));
+                    given += theatres[i].Budget;
+                    rem.Add((share % Math.Max(1, sumNeed), i));
                 }
-                else
-                {
-                    int given = 0;
-                    foreach (int i in open) { theatres[i].Budget = (int)((long)theatres[i].Need * total / Math.Max(1, sumNeed)); given += theatres[i].Budget; }
-                    theatres[main].Budget += total - given;
-                }
+                rem.Sort((x, y) => x.r != y.r ? y.r.CompareTo(x.r) : (x.i == main ? -1 : y.i == main ? 1 : x.i.CompareTo(y.i)));
+                for (int k = 0; k < total - given && k < rem.Count; k++) theatres[rem[k].i].Budget++;
             }
             st.MainEnemy = homeMain != 0 ? homeMain : biggestMain;
 
@@ -408,7 +434,9 @@ namespace Hoi4.Units
             for (int i = 0; i < theatres.Count; i++)
             {
                 var t = theatres[i];
-                int n = t.Budget > 0 ? Math.Max(1, (t.Budget + ArmySize - 1) / ArmySize) : 0;
+                // at most one army per front province: each holds a stretch of at least one (a short front with
+                // many divisions has bigger armies, not armies sharing a province)
+                int n = t.Budget > 0 ? Math.Min(t.Order.Count, Math.Max(1, (t.Budget + ArmySize - 1) / ArmySize)) : 0;
                 wants[i] = n;
                 var keep = new Dictionary<ushort, int>();
                 if (n > 0)
@@ -458,6 +486,7 @@ namespace Hoi4.Units
                     int big = Largest(t.ArmyOf);
                     var ps = new List<ushort>();
                     foreach (var kv in t.ArmyOf) if (kv.Value == big) ps.Add(kv.Key);
+                    if (ps.Count < 2) break; // can't split a one-province stretch (the cap above keeps this from happening)
                     ps.Sort((a, b) => pos[a].CompareTo(pos[b]));
                     int fresh = Take();
                     for (int k = ps.Count / 2; k < ps.Count; k++) t.ArmyOf[ps[k]] = fresh;
@@ -535,6 +564,18 @@ namespace Hoi4.Units
             UpdateArmyLines(country, theatres);
             UpdateMembership(country, st, theatres, own, labels);
 
+            // Posture: the main effort attacks while it has AttackRatio times the enemy divisions facing it; every
+            // other theatre (and a main effort short of that) holds (Hoi4EnemyAI: only flattening bulges at
+            // crushing odds)
+            st.AttackArmies.Clear();
+            foreach (var t in theatres)
+            {
+                int have = 0;
+                foreach (int a in t.Armies) have += armies.Get(a)?.Units.Count ?? 0;
+                t.Attacking = t.Main && FP.FromInt(have) >= FP.FromInt(t.Facing) * AttackRatio;
+                if (t.Attacking) foreach (int a in t.Armies) st.AttackArmies.Add(a);
+            }
+
             var summary = new List<string>();
             foreach (var t in theatres)
             {
@@ -546,10 +587,49 @@ namespace Hoi4.Units
                     foreach (var kv in t.ArmyOf) if (kv.Value == a) n++;
                     parts.Add($"{army?.Name ?? a.ToString()} {army?.Units.Count ?? 0}/{st.Budget[a]} on {n}p");
                 }
-                summary.Add($"{TheatreName(t)}{(t.Main ? " MAIN" : "")}{(t.Overseas ? " OVERSEAS" : "")} {t.Provinces.Count}p need {t.Need} budget {t.Budget}: {string.Join(", ", parts)}");
+                summary.Add($"{TheatreName(t)}{(t.Main ? " MAIN" : "")}{(t.Attacking ? " ATTACK" : "")}{(t.Overseas ? " OVERSEAS" : "")} {t.Provinces.Count}p danger {t.Danger.ToFloat():0.00} need {t.Need} budget {t.Budget}: {string.Join(", ", parts)}");
             }
             Core.Recording.SessionRecorder.Note("ai_country", "theatres", country, 0, 0, st.MainEnemy,
                 $"{own.Count} divisions, reserve target {reserve}; {string.Join(" | ", summary)}");
+        }
+
+        /// <summary>
+        /// The country's landmasses: connected pieces of passable land it may walk on (its own, allies', access)
+        /// that no enemy controls, by province id; -1 elsewhere. Unlike WalkLabels an enemy division standing in our
+        /// land doesn't split it (that flickered fronts between "landmasses" hour to hour). Its divisions can reach
+        /// each other's landmass only by sea, which isn't modelled: budgets are per landmass.
+        /// </summary>
+        int[] Landmasses(ushort country)
+        {
+            movementRules ??= new Hoi4MovementRules(gameState);
+            SnapshotHour();
+            var diplomacy = gameState.Diplomacy;
+            var label = new int[landNeighbours.Length];
+            var walk = new bool[landNeighbours.Length];
+            var ok = new Dictionary<(ushort owner, ushort ctrl), bool>();
+            foreach (ushort p in landProvinces)
+            {
+                label[p] = -1;
+                if (Hoi4Regions.IsImpassable(p)) continue;
+                ushort c = hourCtrl[p], o = hourOwner[p];
+                if (!ok.TryGetValue((o, c), out bool w))
+                    ok[(o, c)] = w = c != 0 && (c == country || !diplomacy.IsAtWar(country, c)) && (c == country || movementRules.HasAccess(country, o));
+                walk[p] = w;
+            }
+            int next = 0;
+            var queue = new List<ushort>();
+            foreach (ushort s in landProvinces)
+            {
+                if (!walk[s] || label[s] >= 0) continue;
+                int id = next++;
+                queue.Clear();
+                queue.Add(s);
+                label[s] = id;
+                for (int k = 0; k < queue.Count; k++)
+                    foreach (ushort r in Neighbours(queue[k]))
+                        if (walk[r] && label[r] < 0) { label[r] = id; queue.Add(r); }
+            }
+            return label;
         }
 
         static SortedDictionary<ushort, List<ushort>> Groups(List<ushort> front, Func<ushort, ushort> find)
@@ -698,29 +778,51 @@ namespace Hoi4.Units
             var units = gameState.Units;
             var queue = units.MovementQueue;
             bool Busy(ushort u) => Hoi4Combat.IsFighting(u) || Hoi4Combat.IsRetreating(u) || borrowed.Contains(u);
+            // Per theatre, not per army: an army's budget is its share of the theatre's by section length, and a
+            // section a province longer or shorter swung it by several divisions, released by one army and taken
+            // back by its neighbour on the same line the next day. Divisions go to reserve only when the whole
+            // theatre is clearly over (more than a quarter, at least 2), from the armies most over their share,
+            // the ones furthest from their section first; joins below fill a theatre only up to its budget
             var released = new List<ushort>();
-            foreach (var army in armies.Of(country))
+            var theatreOf = new Dictionary<int, int>(); // army -> its theatre's index
+            var room = new int[theatres.Count];
+            for (int ti = 0; ti < theatres.Count; ti++)
             {
-                if (!st.Budget.TryGetValue(army.Id, out int budget)) continue;
-                // only when clearly over (more than a tenth, at least 2): budgets wobble daily with the enemy count
-                int excess = army.Units.Count - budget;
-                if (excess <= Math.Max(1, budget / 10)) continue;
-                ushort anchor = st.Anchor[army.Id];
-                var far = new List<(long km, ushort u)>();
-                foreach (ushort u in army.Units)
+                var th = theatres[ti];
+                int have = 0;
+                foreach (int a in th.Armies) { have += armies.Get(a)?.Units.Count ?? 0; theatreOf[a] = ti; }
+                room[ti] = th.Budget - have;
+                int over = have - th.Budget;
+                if (over <= Math.Max(2, th.Budget / 4)) continue;
+                var byExcess = new List<(int excess, int id)>();
+                foreach (int a in th.Armies)
                 {
-                    if (!units.HasUnit(u) || Busy(u)) continue;
-                    long km = Hoi4Movement.TryDistanceKm(units.GetUnit(u).provinceID, anchor, out FP d) ? d.RawValue : long.MaxValue;
-                    far.Add((km, u));
+                    var army = armies.Get(a);
+                    if (army != null && st.Budget.TryGetValue(a, out int b) && army.Units.Count > b) byExcess.Add((army.Units.Count - b, a));
                 }
-                far.Sort((a, b) => a.km != b.km ? b.km.CompareTo(a.km) : b.u.CompareTo(a.u));
-                for (int i = 0; i < far.Count && i < excess; i++) released.Add(far[i].u);
+                byExcess.Sort((x, y) => x.excess != y.excess ? y.excess.CompareTo(x.excess) : x.id.CompareTo(y.id));
+                foreach (var (excess, a) in byExcess)
+                {
+                    if (over <= 0) break;
+                    var army = armies.Get(a);
+                    ushort anchor = st.Anchor[a];
+                    var far = new List<(long km, ushort u)>();
+                    foreach (ushort u in army.Units)
+                    {
+                        if (!units.HasUnit(u) || Busy(u)) continue;
+                        long km = Hoi4Movement.TryDistanceKm(units.GetUnit(u).provinceID, anchor, out FP d) ? d.RawValue : long.MaxValue;
+                        far.Add((km, u));
+                    }
+                    far.Sort((x, y) => x.km != y.km ? y.km.CompareTo(x.km) : y.u.CompareTo(x.u));
+                    int n = Math.Min(excess, over);
+                    for (int i = 0; i < far.Count && i < n; i++) { released.Add(far[i].u); over--; room[ti]++; }
+                }
             }
             if (released.Count > 0)
             {
                 foreach (ushort u in released) if (queue.IsUnitMoving(u)) queue.CancelMovement(u);
                 armies.Release(released);
-                Core.Recording.SessionRecorder.Note("ai_country", "reserve", country, 0, 0, 0, $"{released.Count} divisions over their army's budget to reserve: {string.Join(" ", released)}");
+                Core.Recording.SessionRecorder.Note("ai_country", "reserve", country, 0, 0, 0, $"{released.Count} divisions over their theatre's budget to reserve: {string.Join(" ", released)}");
             }
 
             // reserve divisions by province
@@ -747,8 +849,11 @@ namespace Hoi4.Units
             {
                 var army = armies.Get(id);
                 int gap = st.Budget[id] - army.Units.Count;
+                int ti = theatreOf.TryGetValue(id, out int tix) ? tix : -1;
+                if (ti >= 0) gap = Math.Min(gap, room[ti]);
                 if (gap <= 0) continue;
                 int maxHops = pass == 0 ? MaxTransferHops : int.MaxValue;
+                if (pass == 1 && army.Units.Count * 2 >= st.Budget[id]) continue; // far only when below half its budget
                 var section = new List<ushort>();
                 foreach (var kv in st.Section) if (kv.Value == id) section.Add(kv.Key);
                 section.Sort();
@@ -773,11 +878,65 @@ namespace Hoi4.Units
                     ring = next;
                 }
                 if (take.Count == 0) continue;
+                if (ti >= 0) room[ti] -= take.Count;
                 armies.Add(army, take);
                 log.Add($"{army.Name} +{take.Count}{(pass == 1 ? " (far)" : "")}");
             }
             if (log.Count > 0)
                 Core.Recording.SessionRecorder.Note("ai_country", "join", country, 0, 0, 0, $"reserve to armies: {string.Join(", ", log)}");
+        }
+
+        /// <summary>
+        /// The homeland's mirror of RouteCosts (prototype Tools/prototypes/ai_armies/defence.py): over land the
+        /// country controls, the cheapest route an enemy would take from each province to its core victory points
+        /// (in states it has a core on, still its own), each starting at ObjectiveBase / (1 + VP / 5); a step costs
+        /// the terrain (movement cost / (1 + attack modifier)) plus 1 or 2 for a river. Our own divisions don't
+        /// count: they are what is being placed. Once per run.
+        /// </summary>
+        Dictionary<ushort, FP> HomeCosts(ushort country)
+        {
+            var result = new Dictionary<ushort, FP>();
+            var war = Hoi4.War.Hoi4War.Instance;
+            string tag = Tag(country);
+            bool Mine(ushort p) => p < hourCtrl.Length && hourCtrl[p] == country && !Hoi4.Map.Hoi4Regions.IsImpassable(p);
+            var queue = new SortedSet<(long cost, ushort p)>();
+            foreach (ushort p in landProvinces)
+            {
+                if (!Mine(p)) continue;
+                int vp = war != null ? war.VictoryPoints(p) : 0;
+                if (vp <= 0) continue;
+                var s = Hoi4.Map.Hoi4StateData.Get(Hoi4.Map.Hoi4Regions.State(p));
+                if (s == null || !s.Cores.Contains(tag)) continue;
+                FP c = ObjectiveBase / (FP.One + FP.FromInt(vp) / 5) + TerrainStep(p);
+                result[p] = c;
+                queue.Add((c.RawValue, p));
+            }
+            while (queue.Count > 0)
+            {
+                var top = queue.Min;
+                queue.Remove(top);
+                ushort p = top.p;
+                FP c = result[p];
+                foreach (ushort n in Neighbours(p))
+                {
+                    if (!Mine(n)) continue;
+                    FP nc = c + TerrainStep(n) + FP.FromInt(Hoi4.Map.Hoi4CombatTerrain.River(gameState, p, n));
+                    if (result.TryGetValue(n, out FP old))
+                    {
+                        if (nc >= old) continue;
+                        queue.Remove((old.RawValue, n));
+                    }
+                    result[n] = nc;
+                    queue.Add((nc.RawValue, n));
+                }
+            }
+            return result;
+        }
+
+        FP TerrainStep(ushort p)
+        {
+            FP attack = Hoi4.Map.Hoi4CombatTerrain.AttackModifier(gameState, p);
+            return Hoi4.Map.Hoi4CombatTerrain.MovementCost(gameState, p) / FP.Max(FP.FromFraction(1, 10), FP.One + attack);
         }
 
         /// <summary>

@@ -39,6 +39,7 @@ namespace Hoi4.Units
         static readonly FP MinStrength = FP.Half;                        // of max: battered divisions don't attack at all
         static readonly FP GoodOdds = FP.One;                            // attack when the attackers should break the defenders first
         static readonly FP BoldOdds = FP.FromFraction(6, 10);            // uneven fights: taken sometimes (BoldChance), never below this
+        static readonly FP StrongOdds = FP.FromInt(2);                   // a holding front attacks only this sure (or an empty province)
         const int BoldChance = 16384;                                    // out of 65536 (a quarter)
         static readonly FP BreakOffOrganisation = FP.FromFraction(3, 10); // of max: an attacker this worn down breaks off
         static readonly FP BreakOffStrength = FP.FromFraction(35, 100);
@@ -188,6 +189,14 @@ namespace Hoi4.Units
         {
             Hoi4Occupation.Snapshot(gameState, provinceIds.Length == 0 ? 1 : provinceIds[provinceIds.Length - 1] + 1, out var ctrl, out _);
             return ctrl; // shared: read only
+        }
+
+        int OwnNeighbours(ushort p, ushort[] ctrl, ushort country)
+        {
+            int n = 0;
+            if (landNeighbours.TryGetValue(p, out var ns))
+                foreach (ushort q in ns) if (q < ctrl.Length && ctrl[q] == country) n++;
+            return n;
         }
 
         bool Adjacent(ushort a, ushort b) =>
@@ -340,7 +349,9 @@ namespace Hoi4.Units
             FP bestRejected = FP.Zero;
             foreach (ushort t in order)
             {
-                bool onMain = main != 0 && ctrl[t] == main;
+                // Attacking only where the country's war AI attacks (the main effort, with the divisions for it);
+                // elsewhere it holds and only flattens bulges at crushing odds (below)
+                bool onMain = plansAI != null && plansAI.IsAttackFront(country, t);
                 bool breakout = breakouts.Contains(t);
                 var candidates = Nearby(t, ctrl, enemies, breakout ? pocketFreeAt : freeAt, launched, Reach);
                 if (candidates.Count == 0) continue;
@@ -371,8 +382,16 @@ namespace Hoi4.Units
                 if (group.Count == 0) { if (full) fullTargets++; continue; }
                 // Short of good odds: now and then an uneven fight, never a hopeless one
                 bool bold = odds < GoodOdds;
-                // Uneven fights only on the main effort: the other fronts hold and take only good chances. A
-                // breakout takes any fight that isn't hopeless: holding a pocket only waits for its end
+                // Holding fronts: only a bulge into our line (the target borders at least two of our provinces) at
+                // crushing odds (StrongOdds, or empty); a front that takes every good chance never settles
+                if (!onMain && !breakout && (odds < StrongOdds || OwnNeighbours(t, ctrl, country) < 2))
+                {
+                    turnedDown++;
+                    if (odds > bestRejected) bestRejected = odds;
+                    continue;
+                }
+                // Uneven fights only on the main effort. A breakout takes any fight that isn't hopeless: holding a
+                // pocket only waits for its end
                 if (bold && (breakout ? odds < BoldOdds
                                       : !onMain && main != 0 || odds < BoldOdds || Roll(country, t, today) >= BoldChance))
                 {

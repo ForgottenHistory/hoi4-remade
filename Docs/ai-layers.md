@@ -132,6 +132,64 @@ Measured: a section's centre moves a mean 47–64 km per step when carried, agai
   nearest theatre on their landmass within 6 hops (`MinTheatre`, `MergeHops`), instead of a one-division army each.
 - **Duplicate army names** (two "5th Army"): fixed, the lowest free number is used.
 
+#### Second play test (`Recordings/20261123_130713_CUB`, to 1942-02)
+
+- Committed before it as a checkpoint: engine aa43f46, game 2fcf202.
+- **Churn still high:** the Soviets had 5,813 joins, 3,565 releases and 167 disbands; China had 2,950, 1,963 and 66.
+  Causes, and the fixes:
+  - **Theatres re-cut daily** (one front in 3-4 changing pieces). Fix: stretches within MergeHops (4) are one
+    theatre, slivers join one up to SliverHops (8) away.
+  - **Budgets follow the front's length day to day.** Fix: release only when more than a quarter over budget (at
+    least 2); fetch divisions from far only when an army is below half its budget.
+  - **Landmasses flickered** because enemy divisions in our land split them. Fix: `Landmasses` splits only on
+    enemy-controlled land.
+  - **Big idle reserves:** a cap of 2 per front province left 103-134 of 235 Soviet divisions out of any army.
+    Fix: the cap is 3.
+- **Lag: plans cost 187 ms per game day** (44 before armies). Of that, line refresh was 121 ms (38 before) and the
+  country layer about 50 ms. Cause: every army's line against an enemy traced and split the same border again. Fix:
+  `FrontsAgainst` and `Stretches` are memoised within a refresh and within an AI run (`BeginFrontsMemo`).
+
+#### User feedback after the second test (2026-11-23)
+
+- "Our AI is definitely very aggressive. Fronts never really stabilize." Fix: posture. Only the main effort attacks,
+  and only while its armies have AttackRatio (1.5) times the enemy divisions facing it. Holding fronts take only
+  bulges into their line (target next to 2+ of our provinces) at 2:1 odds or empty (`Hoi4EnemyAI.StrongOdds`,
+  `IsAttackFront`).
+- "Capping armies at 2 divisions per front is arbitrary... How many units to fill the line? How many troops does my
+  enemy have?" Fix: a theatre's need is max(front provinces, enemy divisions facing it), the main effort's
+  max(front provinces, 1.5 x facing). The budget is each its need, the spare shared in proportion, or when short
+  the same fraction each. `PerProvinceCap`, `HoldProvinces` and `HoldRatio` are gone.
+- German tanks bounced between a taken province and their old slot. Fix: in `DistributeInner` a division standing
+  still on a front province of its line keeps that province instead of its previous slot.
+
+#### Third test (`Recordings/20261123_133326_CUB`): Germany against the Soviets
+
+- User: "most german troops are now going up to scandinavia while russians are in the heartland of Germany. Core
+  territory should be valued more... I don't want the enemy to have a good path to my homeland."
+- **Bug found first:** from 1943-02-07 to 03-02 Germany's central front (46-81 provinces) was "overseas" with
+  3 divisions while Finland got 134. Fronts facing the same enemy province were joined across landmasses, and the
+  theatre's landmass came from its first province: a cut-off piece took the main front with it. Fix: that join
+  only within a landmass.
+- **Defence weight** (prototype `Tools/prototypes/ai_armies/defence.py`, render on 1943-03-04): the mirror of the
+  attack route cost, the enemy's cheapest route from a front to our core victory points over land we control.
+  Germany: central front 3.6 (danger 0.74), East Prussia 4.7 (0.68), Alps 8.6 to 13.6 (0.54 to 0.42),
+  Finland 51 (0.16), cut-off pieces none (0). `danger = HomeScale / (HomeScale + cost)`, HomeScale 10; a front's
+  need is max(provinces, facing x (0.5 + danger)), so 0.5x far from home to 1.5x at the core; the attack score
+  times 1 + danger.
+
+#### Fourth test (`Recordings/20261123_135230_CUB`, to 1942-05)
+
+- **Better:** holding (last 90 days) is Soviets 71% (was 20%), and China, Germany and Japan 100%; organisation is
+  98-100%.
+- **Churn worse:** the Soviets had 9,570 joins, 5,973 releases and 239 disbands. With about 6 divisions per front
+  province, a section a province longer or shorter swung an army's budget by around 5: one army released and its
+  neighbour on the same line took them back. Fix: release per theatre (only when the theatre is over its budget);
+  joins fill a theatre only up to its budget.
+- **Open, stacking:** with no cap, all spare divisions go to the existing fronts. China had 170 on a 4-province
+  front against Spain (about 43 per province), the Soviets 143 on 27 provinces. Candidate rule: a front province
+  takes only what its battles can use (HOI4 combat width by terrain over division width, plus a reserve line); the
+  rest waits in reserve behind the most dangerous front.
+
 ## State
 
 - Done (compiles, untested in play): armies have an owner (the player's UI lists only the player's); the IsAI-special
