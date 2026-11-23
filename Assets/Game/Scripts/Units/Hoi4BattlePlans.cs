@@ -622,12 +622,12 @@ namespace Hoi4.Units
             if (OffensiveActive) { UpdateOffensiveTool(); return; }
             if (DeleteActive || AssignActive)
             {
-                if (Input.GetKeyDown(KeyCode.Escape)) { toolEscapeFrame = Time.frameCount; CancelDelete(); CancelAssign(); }
+                if (global::Utils.KeyboardFocus.KeyDown(KeyCode.Escape)) { toolEscapeFrame = Time.frameCount; CancelDelete(); CancelAssign(); }
                 else if (AssignActive && !HasOwnSelection) CancelAssign();
                 return;
             }
             if (!Active) return;
-            if (Input.GetKeyDown(KeyCode.Escape)) { toolEscapeFrame = Time.frameCount; Cancel(); return; }
+            if (global::Utils.KeyboardFocus.KeyDown(KeyCode.Escape)) { toolEscapeFrame = Time.frameCount; Cancel(); return; }
             if (!HasArmySelection) { Cancel(); return; }
 
             ushort province = 0;

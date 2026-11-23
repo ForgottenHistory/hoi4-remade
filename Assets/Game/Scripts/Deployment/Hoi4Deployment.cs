@@ -145,6 +145,21 @@ namespace Hoi4.Deployment
             IsReady && country != 0 && Hoi4Divisions.Instance.HasTemplate(Tag(country), template)
             && Hoi4Divisions.Instance.TrainingDays(Tag(country), template) > 0;
 
+        /// <summary>A template was saved in the division designer: orders follow a rename, and divisions in training
+        /// take the new layout (what they no longer need goes back, as for divisions in the field).</summary>
+        public void TemplateSaved(ushort country, string original, string name)
+        {
+            if (original == null || !countries.TryGetValue(country, out var c)) return;
+            var divisions = Hoi4.Units.Hoi4Divisions.Instance;
+            foreach (var order in c.Orders)
+            {
+                if (order.Template != original) continue;
+                order.Template = name;
+                foreach (var line in order.Lines) divisions.Restructure(gameState, country, line.Division, name);
+            }
+            Changed?.Invoke(country);
+        }
+
         /// <summary>Whether divisions of the country use the template, in the field or in training (HOI4 then won't
         /// delete it).</summary>
         public bool TemplateInUse(ushort country, string template)

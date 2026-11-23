@@ -179,6 +179,34 @@ namespace Hoi4.Deployment
 
     /// <summary>A division template's reinforcement priority: 0 reserve, 1 normal, 2 elite (HOI4 sets it in the division
     /// designer; here the template's chevrons on the recruit screen cycle it).</summary>
+    /// <summary>Save a division designer layout: over a template (Original; renaming it when the name changed) or as a
+    /// new one (Original empty). Divisions of the template, in the field and in training, take the new layout.</summary>
+    public sealed class SaveTemplateCommand : BaseCommand
+    {
+        public ushort CountryId;
+        public string Original = "";
+        public Hoi4.Units.Hoi4TemplateDesign Design;
+
+        string OriginalOrNull => string.IsNullOrEmpty(Original) ? null : Original;
+
+        public override bool Validate(GameState gameState)
+        {
+            var divisions = Hoi4.Units.Hoi4Divisions.Instance;
+            return divisions != null && Hoi4Deployment.Instance != null && Hoi4Deployment.Instance.IsReady && Design != null
+                   && divisions.CanSave(gameState.Countries.GetCountryTag(CountryId), OriginalOrNull, Design, out _);
+        }
+
+        public override void Execute(GameState gameState)
+        {
+            Hoi4.Units.Hoi4Divisions.Instance.SaveTemplate(gameState, CountryId, OriginalOrNull, Design);
+            Hoi4Deployment.Instance.TemplateSaved(CountryId, OriginalOrNull, Design.Name.Trim());
+        }
+
+        public override void Undo(GameState gameState) { }
+        public override void Serialize(BinaryWriter w) { w.Write(CountryId); w.Write(Original ?? ""); Design.Write(w); }
+        public override void Deserialize(BinaryReader r) { CountryId = r.ReadUInt16(); Original = r.ReadString(); Design = Hoi4.Units.Hoi4TemplateDesign.Read(r); }
+    }
+
     /// <summary>Delete a division template no division uses, in the field or in training.</summary>
     public sealed class DeleteTemplateCommand : BaseCommand
     {

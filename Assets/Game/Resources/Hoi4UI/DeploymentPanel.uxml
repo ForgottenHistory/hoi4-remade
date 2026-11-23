@@ -24,7 +24,7 @@
             <ui:Label class="hoi4-label center dt-title" text="DIVISION TEMPLATES" picking-mode="Ignore" />
             <ui:VisualElement class="spr dt-special-icon" picking-mode="Position" tooltip="Special forces battalions in use, of the most allowed (5% of the other battalions, at least 24)" />
             <ui:Label name="dt-special" class="hoi4-label dt-special" text="0/24" picking-mode="Ignore" />
-            <ui:VisualElement class="spr dt-designer disabled" picking-mode="Position" tooltip="Division designer: not available yet">
+            <ui:VisualElement name="dt-designer" class="spr hoi4-button dt-designer" picking-mode="Position" tooltip="Design a new division template">
                 <ui:Label class="hoi4-label center dt-designer-text" text="Division Designer" picking-mode="Ignore" />
             </ui:VisualElement>
             <ui:VisualElement class="spr dt-decom-bg" picking-mode="Ignore" />

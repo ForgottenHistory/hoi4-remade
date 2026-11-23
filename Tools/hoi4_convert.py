@@ -515,7 +515,7 @@ def convert(hoi4: Path, out: Path):
             shutil.copy2(src, dst)
 
     # 1936 land armies (after the template copy: our unit types replace the template infantry)
-    oob_countries, main_types = convert_oob(hoi4, out, {o for o, _ in province_owner.values()}, ruling_party)
+    oob_countries, main_types, land_subs = convert_oob(hoi4, out, {o for o, _ in province_owner.values()}, ruling_party)
     convert_counter_gfx(hoi4, out, {t: c["ideology"] for t, c in oob_countries.items()}, main_types)
     convert_unit_panel(hoi4, out, main_types)
     convert_army_cards(hoi4, out)
@@ -524,6 +524,7 @@ def convert(hoi4: Path, out: Path):
     convert_production_gfx(hoi4, out, oob_countries)
     convert_construction_gfx(hoi4, out)
     convert_deployment_gfx(hoi4, out)
+    convert_designer_gfx(hoi4, out, land_subs)
     convert_front_line(hoi4, out)
     convert_state_view(hoi4, out, state_centers)
     convert_move_arrow(hoi4, out)
@@ -779,7 +780,8 @@ def load_division_name_groups(hoi4: Path):
     return groups
 
 
-COMBAT_STATS = ("soft_attack", "hard_attack", "defense", "breakthrough", "hardness", "armor_value", "ap_attack")
+COMBAT_STATS = ("soft_attack", "hard_attack", "defense", "breakthrough", "hardness", "armor_value", "ap_attack",
+                "air_attack", "reliability")
 
 
 def load_equipment_combat(hoi4: Path, year=1936):
@@ -868,6 +870,7 @@ def load_sub_units(hoi4: Path):
                         pass
                 eq = [combat_eq.get(n, {}) for n in needs]
                 stat = lambda k: sum(e.get(k, 0.0) for e in eq) * (1 + num(k))
+                rel = [e["reliability"] for e in eq if "reliability" in e]
                 subs[name] = {
                     "abbreviation": get(u, "abbreviation", name[:3].upper()),
                     "group": get(u, "group", "infantry"),
@@ -886,6 +889,28 @@ def load_sub_units(hoi4: Path):
                     "hardness": round(max((e.get("hardness", 0.0) for e in eq), default=0.0), 3),
                     "armor": round(max((e.get("armor_value", 0.0) for e in eq), default=0.0), 1),
                     "piercing": round(max((e.get("ap_attack", 0.0) for e in eq), default=0.0), 1),
+                    "air_attack": round(stat("air_attack"), 2),
+                    # division designer: base stats of the sub-unit itself
+                    "recovery": num("default_morale"),        # HOI4 recovery rate
+                    "recon": num("recon"),
+                    "suppression": num("suppression"),
+                    "weight": num("weight"),
+                    "supply_use": num("supply_consumption"),
+                    "entrenchment": num("entrenchment"),
+                    "initiative": num("initiative"),
+                    "reliability": round(sum(rel) / len(rel), 3) if rel else 0.0,  # average of its equipment's
+                    "sprite": get(u, "sprite", name),         # GFX_unit_<sprite>_icon_medium
+                    "active": get(u, "active", "yes") != "no",  # usable without a technology
+                    "land": get(u, "group") is not None,         # ships, planes and missiles have no group
+                    # where a support company goes: the divisional support column (divisional = no keeps it out) and/or
+                    # under a brigade as regimental support (regimental = no keeps it out) of the battalion groups in
+                    # allowed_battalion_groups; affects_speed = no leaves it out of the division's max speed
+                    "divisional": get(u, "group") == "support" and get(u, "divisional") != "no",
+                    "regimental": get(u, "group") == "support" and get(u, "regimental") != "no"
+                                  and isinstance(get(u, "allowed_battalion_groups"), list),
+                    "battalion_groups": [v for _, _, v in get(u, "allowed_battalion_groups")]
+                                        if isinstance(get(u, "allowed_battalion_groups"), list) else [],
+                    "affects_speed": get(u, "affects_speed") != "no",
                     "need": need,  # equipment archetype -> amount (HOI4 `need`)
                 }
     return subs
@@ -986,16 +1011,50 @@ def load_tech_equipment(hoi4: Path):
     return techs
 
 
-def available_equipment(country_root, equipment, tech_equipment, land_archetypes):
-    """What a country can build at the start, per land archetype: the newest buildable equipment that its history's
-    set_technology unlocks, or that no technology unlocks (always available). {archetype: {"equipment", "cost"}}.
-    Tanks: a bare chassis is not buildable here (the 1936 lines build designs, which cost the modules too), and a
-    design (light_tank_equipment_N) needs the technology of its chassis (light_tank_chassis_N)."""
+def load_tech_subunits(hoi4: Path):
+    """{technology: [sub-units it enables]} from common/technologies (enable_subunits; DLC-limited ones too)."""
+    techs = {}
+    for f in sorted((hoi4 / "common" / "technologies").glob("*.txt")):
+        for key, _, block in parse_pdx(read_text(f)):
+            if key != "technologies" or not isinstance(block, list):
+                continue
+            for name, _, t in block:
+                if not isinstance(t, list):
+                    continue
+                for k, _, en in t:
+                    if k == "enable_subunits" and isinstance(en, list):
+                        techs.setdefault(name, []).extend(v for kk, _, v in en if kk is None or kk not in ("limit",))
+                        techs[name].extend(kk for kk, _, v in en if kk not in (None, "limit") and v is None)
+    for name, subs in techs.items():
+        techs[name] = sorted({s for s in subs if isinstance(s, str)})
+    return techs
+
+
+# sub-units the division designer never offers (army HQs, intelligence decoys)
+DESIGNER_EXCLUDED = ("fake_intel_unit",)
+
+
+def designer_sub_units(subs):
+    """Land sub-units a division template can use: battalions and support companies, not HQs."""
+    return {n for n, s in subs.items() if s["land"] and not n.startswith("hq_") and n not in DESIGNER_EXCLUDED}
+
+
+def known_technologies(country_root):
+    """Technologies a country's history sets at the start."""
     known = set()
     for block in collect_blocks(country_root, "set_technology", []):
         for k, _, v in block:
             if isinstance(k, str) and str(v) != "0":
                 known.add(k)
+    return known
+
+
+def available_equipment(country_root, equipment, tech_equipment, land_archetypes):
+    """What a country can build at the start, per land archetype: the newest buildable equipment that its history's
+    set_technology unlocks, or that no technology unlocks (always available). {archetype: {"equipment", "cost"}}.
+    Tanks: a bare chassis is not buildable here (the 1936 lines build designs, which cost the modules too), and a
+    design (light_tank_equipment_N) needs the technology of its chassis (light_tank_chassis_N)."""
+    known = known_technologies(country_root)
     locked = {e for es in tech_equipment.values() for e in es}
     unlocked = {e for t in known for e in tech_equipment.get(t, [])}
     best = {}
@@ -1076,6 +1135,9 @@ def convert_oob(hoi4: Path, out: Path, existing_tags, ruling_party):
     import hoi4_gui as gui
     equipment = load_equipment_info(hoi4)
     tech_equipment = load_tech_equipment(hoi4)
+    tech_subunits = load_tech_subunits(hoi4)
+    tech_gated = {s for v in tech_subunits.values() for s in v}
+    designer_subs = designer_sub_units(subs)
     loc = load_localisation(hoi4 / "localisation" / "english")
     def has_texture(s):
         tex = s.get("texture")
@@ -1084,7 +1146,7 @@ def convert_oob(hoi4: Path, out: Path, existing_tags, ruling_party):
         f = hoi4 / tex
         return any(f.with_suffix(ext).exists() for ext in (f.suffix, ".dds", ".tga", ".png"))
     sprite_names = {n for n, s in gui.load_sprites(hoi4).items() if has_texture(s)}  # pictures that exist
-    land_archetypes = {a for s in subs.values() for a in s["need"]}
+    land_archetypes = {a for n in designer_subs for a in subs[n]["need"]}
     countries = {}
     used_subs = set()
     main_types = set()
@@ -1103,15 +1165,31 @@ def convert_oob(hoi4: Path, out: Path, existing_tags, ruling_party):
         root = parse_pdx(read_text(path))
 
         templates = {}
+        def slots(block):
+            """[(sub-unit, x, y)] of a template's regiments / support block, in file order."""
+            out = []
+            for k, _, v in (block or []):
+                if k in subs:
+                    out.append((k, int(float(get(v, "x", 0) or 0)), int(float(get(v, "y", 0) or 0))))
+            return out
+
         for t in get_all(root, "division_template"):
-            regs = [k for k, _, _ in (get(t, "regiments") or []) if k in subs]
-            sups = [k for k, _, _ in (get(t, "support") or []) if k in subs]
+            reg_slots = slots(get(t, "regiments"))
+            sup_slots = slots(get(t, "support"))
+            rs_slots = slots(get(t, "regimental_support"))  # one company under a brigade: x is its column
+            regs = [k for k, _, _ in reg_slots]
+            sups = [k for k, _, _ in sup_slots]
+            rsups = [k for k, _, _ in rs_slots]
             if not regs:
                 continue
             # HOI4 shows a division by its highest-priority regiment
             main = max(regs, key=lambda r: subs[r]["priority"])
             # priority: reinforcement priority of the template, 0 reserve, 1 normal (default), 2 elite
             templates[get(t, "name")] = {"regiments": regs, "support": sups, "main": main,
+                                         # division designer grid: [column, row] per regiment, row per support
+                                         "grid": [[x, y] for _, x, y in reg_slots],
+                                         "support_grid": [y for _, _, y in sup_slots],
+                                         "regimental_support": rsups, "regimental_grid": [x for _, x, _ in rs_slots],
                                          "priority": int(get(t, "priority", 1) or 0),
                                          "names_group": get(t, "division_names_group")}
 
@@ -1148,7 +1226,7 @@ def convert_oob(hoi4: Path, out: Path, existing_tags, ruling_party):
                     "experience": float(get(d, "start_experience_factor", 0) or 0),
                     "equipment": float(get(d, "start_equipment_factor", 1) or 1),
                 })
-                used_subs.update(t["regiments"] + t["support"])
+                used_subs.update(t["regiments"] + t["support"] + t["regimental_support"])
                 main_types.add(t["main"])
         if divisions:
             lines_, stock = starting_equipment(hoi4, root, country_root, equipment, land_archetypes)
@@ -1156,14 +1234,25 @@ def convert_oob(hoi4: Path, out: Path, existing_tags, ruling_party):
             for p in lines_:  # what a 1936 line builds is buildable, whatever the technology check says
                 buildable[p["archetype"]] = {"equipment": p["equipment"], "cost": p["cost"]}
             describe_equipment(tag, buildable, equipment, tech_equipment, loc, sprite_names)
+            known = known_technologies(country_root)
+            unlocked = {s for tech in known for s in tech_subunits.get(tech, [])}
+            # a technology unlocks it, or no technology gates it and it is active (active alone doesn't do:
+            # mechanized is active and still needs its technology)
+            # and it has its equipment: every archetype it needs is buildable or in the stockpile (rocket artillery
+            # and anti-air are active and ungated, their equipment is not)
+            has_equipment = set(buildable) | set(stock)
+            usable = sorted(n for n in designer_subs
+                            if (n in unlocked or (subs[n]["active"] and n not in tech_gated))
+                            and all(a in has_equipment for a in subs[n]["need"]))
             countries[tag] = {"ideology": ruling_party.get(tag) or "neutrality",
+                              "sub_units": usable,  # what its division designer offers at the start
                               "equipment": buildable,
                               "templates": {k: {kk: vv for kk, vv in v.items() if kk != "names_group"}
                                             for k, v in templates.items()},
                               "divisions": divisions, "production": lines_, "stockpile": stock}
 
-    # Only the equipment the converted land divisions use (sub-units also cover ships and planes)
-    land_archetypes = {a for name in used_subs for a in subs[name]["need"]}
+    # Only land equipment (sub-units also cover ships and planes): what the designer's sub-units use
+    land_archetypes = {a for name in designer_subs for a in subs[name]["need"]}
     for c in countries.values():
         c["production"] = [p for p in c["production"] if p["archetype"] in land_archetypes]
         c["stockpile"] = {a: n for a, n in c["stockpile"].items() if a in land_archetypes}
@@ -1174,12 +1263,18 @@ def convert_oob(hoi4: Path, out: Path, existing_tags, ruling_party):
 
     lines = ["{", f"  // Generated from HOI4 history/units ({OOB_START} land OOBs) and common/units",
              f'  date: "{OOB_START}.1.1",', "  sub_units: {"]
-    for name in sorted(used_subs):
+    for name in sorted(used_subs | designer_subs):
+        subs[name]["name"] = loc.get(name) or name.replace("_", " ").capitalize()  # display name (localisation)
         lines.append(f"    {name}: {j(subs[name])},")
-    lines += ["  },", "  countries: {"]
+    lines += ["  },"]
+    # sub-unit groups (the division designer's battalion categories): group -> name (group_<g>_title)
+    groups = sorted({subs[n]["group"] for n in used_subs | designer_subs})
+    lines.append(f"  sub_unit_groups: {j({g: loc.get(f'group_{g}_title') or g.replace('_', ' ').title() for g in groups})},")
+    lines += ["  countries: {"]
     for tag, c in sorted(countries.items()):
         lines.append(f"    {tag}: {{")
         lines.append(f"      ideology: {j(c['ideology'])},")
+        lines.append(f"      sub_units: {j(c['sub_units'])},")
         lines.append("      templates: {")
         for tname, t in c["templates"].items():
             lines.append(f"        {j(tname)}: {j(t)},")
@@ -1201,7 +1296,9 @@ def convert_oob(hoi4: Path, out: Path, existing_tags, ruling_party):
     (out / "history" / "units").mkdir(parents=True, exist_ok=True)
     (out / "history" / "units" / f"oob_{OOB_START}.json5").write_text("\n".join(lines), encoding="utf-8")
 
-    # Engine unit types (StarterKit format), one per division main type. speed = days per province.
+    # Engine unit types (StarterKit format), one per division main type. speed = days per province. Every battalion
+    # type counts: a template made in the division designer can have any of them as its main type.
+    main_types |= {n for n in designer_subs if subs[n]["group"] != "support"}
     (out / "units").mkdir(parents=True, exist_ok=True)
     for f in (out / "units").glob("*.json5"):
         f.unlink()
@@ -1222,7 +1319,7 @@ def convert_oob(hoi4: Path, out: Path, existing_tags, ruling_party):
           f"archetypes needed {sorted(land_archetypes)}")
     print(f"Armies {OOB_START}: {total} divisions in {len(countries)} countries, "
           f"{sum(len(c['templates']) for c in countries.values())} templates, unit types {sorted(main_types)}")
-    return countries, main_types
+    return countries, main_types, {n: subs[n] for n in used_subs | designer_subs}
 
 
 COUNTER_IDEOLOGIES = ["democratic", "communism", "fascism", "neutrality"]  # frame order of the ideology sprite
@@ -1556,6 +1653,18 @@ UNITPANEL_SPRITES = {
 }
 
 
+def unit_icon(hoi4: Path, sprites, sub_unit, sprite=None, suffix="_icon_medium"):
+    """Frame 0 of a sub-unit's pictogram (GFX_unit_<sub_unit><suffix>, else GFX_unit_<sprite><suffix>), None when
+    neither exists. HOI4 names most sub-units' own icon even when their `sprite` is a generic one."""
+    import hoi4_gui as gui
+    for cand in (sub_unit, sprite):
+        if cand and f"GFX_unit_{cand}{suffix}" in sprites:
+            frames = gui.sprite_frames(hoi4, sprites, f"GFX_unit_{cand}{suffix}")
+            if frames:
+                return frames[0]
+    return None
+
+
 def convert_unit_panel(hoi4: Path, out: Path, main_types):
     """Sprites of HOI4's selected-units list (gui layout is hardcoded in Hoi4DivisionPanel.cs) as PNGs
     under gfx/interface/unitpanel/: the window frame tile, buttons, entry background frames, bars
@@ -1586,17 +1695,11 @@ def convert_unit_panel(hoi4: Path, out: Path, main_types):
             if img is not None:
                 img.save(dst / f"{name}{part}.png")
                 sizes[name + part] = [img.width, img.height, 1]
-    icon_files = {}
-    for name, tex in re.findall(r'name\s*=\s*"GFX_unit_(\w+?)_icon_medium"\s*textureFile\s*=\s*"?([^"\s}]+)',
-                                read_text(hoi4 / "interface" / "subuniticons.gfx")):
-        icon_files.setdefault(name, tex)
     for t in sorted(main_types):
-        tex = icon_files.get(t) or icon_files.get("infantry")
-        img = gui.load_image(hoi4, tex)
+        img = unit_icon(hoi4, sprites, t) or unit_icon(hoi4, sprites, "infantry")
         if img is None:
             print(f"  unit panel icon missing for {t}")
             continue
-        img = img.crop((0, 0, img.width // 2, img.height))  # frame 0 of 2
         img.save(dst / "icons" / f"{t}.png")
         sizes["icon_" + t] = [img.width, img.height, 1]
     (dst / "unitpanel.json5").write_text(
@@ -1837,6 +1940,50 @@ DEPLOYMENT_BARS = {
     "priority_bar": "gfx/interface/deployment_progressbar.dds",
     "priority_bar_bg": "gfx/interface/deployment_progressbar_bg.dds",
 }
+
+
+# Division designer (interface/divisiondesignerview.gui) sprites: file name -> GFX sprite; multi-frame ones as name_N.png
+DESIGNER_SPRITES = {
+    "popup_bg": "GFX_division_designer_popup_bg", "regiment_bg": "GFX_div_unit_item_bg_wide",
+    "support_bg": "GFX_div_subunit_item_bg", "locked": "GFX_locked_icon", "blocked": "GFX_blocked_icon", "unlocked": "GFX_unlocked_icon",
+    "icon_bg": "GFX_division_icon_bg", "priority_bg": "GFX_division_priority_bg", "priority": "GFX_div_priority_strip",
+    "priority_icon": "GFX_division_priority_icon_strip", "composition_icon": "GFX_army_composition_icon",
+    "hardness_icon": "GFX_armor_softness_icon", "org_icon": "GFX_organization_texticon",
+    "strength_icon": "GFX_strenght_texticon", "speed_icon": "GFX_MODIFIER_ARMY_SPEED_FACTOR",
+    "value_bg": "GFX_value_bg", "mini_tooltip": "GFX_mini_tooltip", "button_123": "GFX_button_123x34",
+    "button_123_alt": "GFX_button_123x34_alt", "button_reset": "GFX_button_reset_123x34",
+    "button_221": "GFX_button_221x34", "close": "GFX_closebutton", "cost_bg": "GFX_generic_background",
+    "nametag": "GFX_division_nametag_icon", "army_xp": "GFX_army_experience",
+    "new_slot": "GFX_new_regiment_slot", "replace_slot": "GFX_replace_regiment_slot", "remove": "GFX_remove_icon",
+    "template_icon": "GFX_division_template_icon", "softness_frame": "GFX_softness_ratio_frame",
+    "picker_bg": "GFX_tiled_window_1b_border",
+}
+
+
+def convert_designer_gfx(hoi4: Path, out: Path, land_subs):
+    """Sprites of the division designer under gfx/interface/designer/ (DESIGNER_SPRITES), plus a medium
+    pictogram per land sub-unit (icons/<sub-unit>.png: unit_icon, its own GFX_unit_<name>_icon_medium first)."""
+    import hoi4_gui as gui
+    dst = out / "gfx" / "interface" / "designer"
+    (dst / "icons").mkdir(parents=True, exist_ok=True)
+    sprites = gui.load_sprites(hoi4)
+    for name, spr in DESIGNER_SPRITES.items():
+        frames = gui.sprite_frames(hoi4, sprites, spr)
+        if not frames:
+            print(f"  designer: no sprite {spr}")
+            continue
+        for i, fr in enumerate(frames):
+            fr.save(dst / (f"{name}.png" if len(frames) == 1 else f"{name}_{i}.png"))
+    missing = []
+    for name, s in sorted(land_subs.items()):
+        img = unit_icon(hoi4, sprites, name, s.get("sprite"))
+        if img is None:
+            missing.append(name)
+            continue
+        img.save(dst / "icons" / f"{name}.png")
+    if missing:
+        print(f"  designer: no icon for {missing}")
+    print(f"Division designer sprites written ({len(land_subs) - len(missing)} sub-unit icons)")
 
 
 def convert_deployment_gfx(hoi4: Path, out: Path):
@@ -2117,14 +2264,13 @@ def convert_counter_gfx(hoi4: Path, out: Path, tag_ideology, main_types):
         bar = Image.open(gi / "mapicons" / f"mapicon_bar_{kind}_sprite.dds").convert("RGBA")
         bar.rotate(90, expand=True).save(dst / f"bar_{kind}.png")  # 17x3, full end on the left
 
-    icon_files = {}
-    for name, tex in re.findall(r'name\s*=\s*"GFX_unit_(\w+?)_icon_medium_white"\s*textureFile\s*=\s*"([^"]+)"',
-                                read_text(hoi4 / "interface" / "subuniticons.gfx")):
-        icon_files.setdefault(name, tex)
+    import hoi4_gui as gui
+    sprites = gui.load_sprites(hoi4)
     for t in sorted(main_types):
-        tex = icon_files.get(t) or icon_files.get("infantry")
-        if tex and (hoi4 / tex).exists():
-            frame(Image.open(hoi4 / tex).convert("RGBA"), 0, 2).save(dst / "icons" / f"{t}.png")
+        img = unit_icon(hoi4, sprites, t, suffix="_icon_medium_white") or \
+            unit_icon(hoi4, sprites, "infantry", suffix="_icon_medium_white")
+        if img is not None:
+            img.save(dst / "icons" / f"{t}.png")
         else:
             print(f"  counter icon missing for {t}")
 

@@ -122,11 +122,11 @@ namespace Hoi4.Units
         {
             if (gameState == null) return;
             bool drawing = Hoi4BattlePlans.Instance != null && Hoi4BattlePlans.Instance.ToolOn;
-            if (Input.GetKeyDown(KeyCode.Escape) && selection.Count > 0 && !drawing && !Hoi4.UI.Hoi4ConfirmDialog.IsOpen)
+            if (global::Utils.KeyboardFocus.KeyDown(KeyCode.Escape) && selection.Count > 0 && !drawing && !Hoi4.UI.Hoi4ConfirmDialog.IsOpen)
                 Clear();
-            if (Input.GetKeyDown(KeyCode.S) && !Input.GetKey(KeyCode.LeftControl) && !Input.GetKey(KeyCode.RightControl))
+            if (global::Utils.KeyboardFocus.KeyDown(KeyCode.S) && !Input.GetKey(KeyCode.LeftControl) && !Input.GetKey(KeyCode.RightControl))
                 Hoi4DivisionPresenter.SelectHalf(this);
-            if (Input.GetKeyDown(KeyCode.H)) HaltSelected();
+            if (global::Utils.KeyboardFocus.KeyDown(KeyCode.H)) HaltSelected();
             UpdateBox();
         }
 

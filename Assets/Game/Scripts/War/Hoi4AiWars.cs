@@ -73,7 +73,7 @@ namespace Hoi4.War
 
         void Update()
         {
-            if (!Input.GetKeyDown(KeyCode.F8)) return;
+            if (!global::Utils.KeyboardFocus.KeyDown(KeyCode.F8)) return;
             stressTest = !stressTest;
             ArchonLogger.Log($"Hoi4AiWars: AI war stress test {(stressTest ? "ON" : "OFF")}", "game_war");
             Core.Recording.SessionRecorder.Note("ai_war", stressTest ? "stress_on" : "stress_off", 0, 0, 0, 0,

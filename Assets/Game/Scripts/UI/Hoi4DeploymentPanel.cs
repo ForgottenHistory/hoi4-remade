@@ -33,7 +33,8 @@ namespace Hoi4.UI
     /// - Division templates window: the country's templates with their icons and priority chevrons (click to cycle
     ///   reserve, normal, elite: HOI4 sets it in the division designer); Train starts an order of one at the
     ///   capital. Delete (red, right of Edit) removes a template no division uses, in the field or in training (greyed
-    ///   out otherwise). Edit, the designer and decommissioning wait for a division designer (greyed out).
+    ///   out otherwise). Edit opens the template in the division designer (Hoi4DivisionDesigner), the Division
+    ///   Designer button a new template there. Decommissioning is greyed out (not modelled).
     /// Values refresh four times a real second (presentation, not game time); the order list is rebuilt only when the
     /// orders or their lines change.
     /// </summary>
@@ -144,8 +145,11 @@ namespace Hoi4.UI
             priorityHost = root.Q("dp-priorities");
             templateList = root.Q<ScrollView>("dt-list");
             root.Q("dp-close").RegisterCallback<ClickEvent>(evt => Close());
+            root.Q("dt-designer").RegisterCallback<ClickEvent>(evt => Hoi4DivisionDesigner.Instance?.Open(null));
             BuildPriorityRows();
 
+            while (Hoi4Divisions.Instance == null) yield return null;
+            Hoi4Divisions.Instance.TemplateSaved += (savedTag, was, now) => shownTemplates = null; // the list shows the change
             while (Hoi4Deployment.Instance == null) yield return null;
             Hoi4Deployment.Instance.Changed += c => { if (c == shownCountry) dirty = true; };
             // selecting units closes the screen (the division panel takes the left side), as in HOI4
@@ -271,6 +275,7 @@ namespace Hoi4.UI
         {
             open = false;
             SetPicking(0);
+            if (Hoi4DivisionDesigner.IsOpen) Hoi4DivisionDesigner.Instance.Close(); // it works on the screen's templates
             if (root != null) root.style.display = DisplayStyle.None;
         }
 
@@ -560,9 +565,10 @@ namespace Hoi4.UI
                 train.Add(MakeLabel("Train", "center", "dte-button-text"));
                 train.RegisterCallback<ClickEvent>(evt => Train(template));
                 entry.Add(train);
-                var edit = Hoi4Sprites.Make("dte-edit", "disabled");
+                var edit = Hoi4Sprites.Make("dte-edit", "hoi4-button");
                 edit.pickingMode = PickingMode.Position;
-                edit.tooltip = "Division designer: not available yet";
+                edit.tooltip = "Edit this template in the division designer";
+                edit.RegisterCallback<ClickEvent>(evt => Hoi4DivisionDesigner.Instance?.Open(template));
                 edit.Add(MakeLabel("Edit", "center", "dte-button-text"));
                 entry.Add(edit);
                 var delete = Hoi4Sprites.Make("dte-delete", "hoi4-button");
@@ -639,8 +645,8 @@ namespace Hoi4.UI
                 if (open) Close();
                 return;
             }
-            if (Input.GetKeyDown(KeyCode.U)) Toggle();
-            if (open && Input.GetKeyDown(KeyCode.Escape) && !Hoi4ConfirmDialog.IsOpen)
+            if (global::Utils.KeyboardFocus.KeyDown(KeyCode.U)) Toggle();
+            if (open && global::Utils.KeyboardFocus.KeyDown(KeyCode.Escape) && !Hoi4ConfirmDialog.IsOpen && !Hoi4DivisionDesigner.IsOpen)
             {
                 if (pickingOrder != 0) SetPicking(0); else Close();
             }

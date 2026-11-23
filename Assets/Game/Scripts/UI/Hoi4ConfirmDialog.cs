@@ -107,8 +107,8 @@ namespace Hoi4.UI
             if (dialog == null) return;
             Hoi4UiHover.Report(this, open ? dialog : null); // the wheel scrolls the text, not the map
             if (!open) return;
-            if (Input.GetKeyDown(KeyCode.Escape)) Close();
-            else if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter)) Accept();
+            if (global::Utils.KeyboardFocus.KeyDown(KeyCode.Escape)) Close();
+            else if (global::Utils.KeyboardFocus.KeyDown(KeyCode.Return) || global::Utils.KeyboardFocus.KeyDown(KeyCode.KeypadEnter)) Accept();
         }
 
         void OnDestroy()

@@ -245,8 +245,8 @@ namespace Hoi4.UI
                 if (open) Close();
                 return;
             }
-            if (Input.GetKeyDown(KeyCode.Y)) Toggle();
-            if (open && Input.GetKeyDown(KeyCode.Escape))
+            if (global::Utils.KeyboardFocus.KeyDown(KeyCode.Y)) Toggle();
+            if (open && global::Utils.KeyboardFocus.KeyDown(KeyCode.Escape))
             {
                 if (pickerOpenFor >= 0) ClosePicker(); else Close();
             }

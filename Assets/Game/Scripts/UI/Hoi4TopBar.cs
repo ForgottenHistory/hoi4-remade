@@ -184,9 +184,9 @@ namespace Hoi4.UI
             bar.style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
             if (!visible) return;
 
-            if (Input.GetKeyDown(KeyCode.Space) && !InConference) time.TogglePause();
-            if (Input.GetKeyDown(KeyCode.KeypadPlus) || Input.GetKeyDown(KeyCode.Equals)) StepSpeed(+1);
-            if (Input.GetKeyDown(KeyCode.KeypadMinus) || Input.GetKeyDown(KeyCode.Minus)) StepSpeed(-1);
+            if (global::Utils.KeyboardFocus.KeyDown(KeyCode.Space) && !InConference) time.TogglePause();
+            if (global::Utils.KeyboardFocus.KeyDown(KeyCode.KeypadPlus) || global::Utils.KeyboardFocus.KeyDown(KeyCode.Equals)) StepSpeed(+1);
+            if (global::Utils.KeyboardFocus.KeyDown(KeyCode.KeypadMinus) || global::Utils.KeyboardFocus.KeyDown(KeyCode.Minus)) StepSpeed(-1);
 
             if (shownCountry != player.PlayerCountryId) ShowCountry(player.PlayerCountryId);
             UpdateProductionButton();

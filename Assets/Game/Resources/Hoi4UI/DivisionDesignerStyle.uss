@@ -1,0 +1,125 @@
+/* HOI4 division designer (interface/divisiondesignerview.gui countrydivisiondesignerview): 1200 x 720, centred.
+   Coordinates are HOI4 pixel. Prototype: Tools/prototypes/designer/render_designer.py */
+.ddg {
+    --sprite: "gfx/interface/designer/popup_bg.png";
+    position: absolute; left: 50%; top: 50%; width: 1200px; height: 720px; translate: -50% -50%;
+    display: none;
+}
+.ddg-layer { position: absolute; left: 0; top: 0; width: 1200px; height: 720px; }
+.ddg-title { left: 0; top: 4px; width: 1200px; height: 38px; font-size: 26px; letter-spacing: 6px; }
+.ddg-close { --sprite: "gfx/interface/designer/close.png"; left: 1156px; top: 6px; width: 32px; height: 33px; }
+
+/* header */
+.ddg-icon-bg { --sprite: "gfx/interface/designer/icon_bg.png"; left: 29px; top: 50px; width: 96px; height: 45px; }
+.ddg-icon { left: 39px; top: 51px; width: 76px; height: 42px; }
+/* division_priority_icon (GFX_division_priority_icon_strip): chevrons on the icon, frame 0 reserve, 1 none, 2 elite */
+.ddg-icon-priority { left: 105px; top: 56px; width: 16px; height: 35px; }
+.ddg-name-box {
+    position: absolute; left: 150px; top: 57px; width: 330px; height: 32px;
+    background-color: rgba(8, 9, 8, 0.75); border-width: 1px; border-color: rgba(120, 120, 110, 0.5); border-radius: 2px;
+}
+.ddg-name { position: absolute; left: 152px; top: 58px; width: 326px; height: 30px; margin: 0; padding: 0; }
+.ddg-name .unity-text-field__input, .ddg-name .unity-base-text-field__input {
+    background-color: rgba(0, 0, 0, 0); border-width: 0; padding: 0 0 0 8px; margin: 0;
+    color: rgb(242, 240, 230); font-size: 18px; -unity-font-style: bold; -unity-text-align: middle-left;
+}
+.ddg-nametag { --sprite: "gfx/interface/designer/nametag.png"; left: 118px; top: 117px; width: 24px; height: 24px; }
+.ddg-names { left: 152px; top: 114px; width: 330px; height: 30px; font-size: 17px; color: rgb(205, 205, 195); }
+.ddg-equipment { --sprite: "gfx/interface/designer/button_123_alt.png"; left: 511px; top: 52px; width: 123px; height: 36px; }
+.ddg-priority-bg { --sprite: "gfx/interface/designer/priority_bg.png"; left: 508px; top: 107px; width: 127px; height: 44px; }
+.ddg-prio { top: 110px; width: 36px; height: 37px; }
+.ddg-prio-0 { --sprite: "gfx/interface/designer/priority_0.png"; left: 517px; }
+.ddg-prio-1 { --sprite: "gfx/interface/designer/priority_1.png"; left: 553px; }
+.ddg-prio-2 { --sprite: "gfx/interface/designer/priority_2.png"; left: 589px; top: 109px; }
+.ddg-prio-0.on { --sprite: "gfx/interface/designer/priority_3.png"; }
+.ddg-prio-1.on { --sprite: "gfx/interface/designer/priority_4.png"; }
+.ddg-prio-2.on { --sprite: "gfx/interface/designer/priority_5.png"; }
+
+/* composition summary */
+.ddg-composition-icon { --sprite: "gfx/interface/designer/composition_icon.png"; left: 30px; top: 159px; width: 22px; height: 22px; }
+.ddg-composition { left: 60px; top: 160px; width: 220px; height: 20px; font-size: 17px; -unity-font-style: bold; }
+.ddg-chip {
+    --sprite: "gfx/interface/designer/cost_bg.png"; top: 192px; height: 24px;
+    -unity-slice-left: 8; -unity-slice-right: 8; -unity-slice-top: 8; -unity-slice-bottom: 8;
+}
+.ddg-chip-hardness { left: 86px; width: 100px; }
+.ddg-chip-org { left: 216px; width: 80px; }
+.ddg-chip-hp { left: 326px; width: 80px; }
+.ddg-chip-speed { left: 436px; width: 115px; }
+.ddg-chip-icon { left: 7px; }
+.ddg-icon-hardness { --sprite: "gfx/interface/designer/hardness_icon.png"; top: 6px; width: 32px; height: 13px; }
+.ddg-icon-org { --sprite: "gfx/interface/designer/org_icon.png"; left: 8px; top: 5px; width: 14px; height: 14px; }
+.ddg-icon-hp { --sprite: "gfx/interface/designer/strength_icon.png"; left: 8px; top: 5px; width: 14px; height: 14px; }
+.ddg-icon-speed { --sprite: "gfx/interface/designer/speed_icon.png"; left: 6px; top: 2px; width: 30px; height: 20px; }
+.ddg-chip-text { left: 30px; top: 0; right: 10px; height: 24px; font-size: 16px; -unity-font-style: bold; }
+.ddg-width { left: 290px; top: 240px; width: 40px; height: 20px; font-size: 16px; -unity-font-style: bold; }
+
+/* slots: regiment background 87 x 42 (a branch line on its left), the unit / + / lock picture 76 x 42 on it */
+.ddg-slot { position: absolute; width: 87px; height: 42px; --sprite: "gfx/interface/designer/regiment_bg_0.png"; }
+.ddg-slot-pic { position: absolute; left: 13px; top: -1px; width: 76px; height: 42px; }
+.ddg-slot.open:hover .ddg-slot-pic, .ddg-slot.unit:hover .ddg-slot-pic { -unity-background-image-tint-color: rgb(255, 255, 210); }
+.ddg-slot.unit:hover { -unity-background-image-tint-color: rgb(255, 255, 230); }
+.ddg-support { position: absolute; width: 64px; height: 32px; --sprite: "gfx/interface/designer/support_bg_0.png"; }
+.ddg-support .ddg-slot-pic { left: 2px; top: -1px; width: 61px; height: 34px; }
+.ddg-support.open:hover .ddg-slot-pic, .ddg-support.unit:hover .ddg-slot-pic { -unity-background-image-tint-color: rgb(255, 255, 210); }
+.ddg-support-title { left: 530px; top: 298px; width: 110px; height: 20px; font-size: 16px; -unity-font-style: bold; }
+.ddg-regsupport-title { left: 165px; top: 570px; width: 250px; height: 20px; font-size: 16px; -unity-font-style: bold; }
+
+/* stat sheets on the paper: info (660, 13) */
+.ddg-sheet-title { top: 45px; height: 22px; font-size: 21px; color: rgb(52, 40, 28); }
+.ddg-sheet-base { left: 674px; width: 160px; }
+.ddg-sheet-combat { left: 847px; width: 160px; }
+.ddg-sheet-equipment { left: 1022px; width: 170px; }
+.ddg-row-label { height: 20px; font-size: 14px; color: rgb(52, 40, 28); }
+.ddg-row-value { height: 20px; font-size: 14px; color: rgb(52, 40, 28); -unity-text-align: middle-right; }
+
+/* bottom */
+.ddg-reset { --sprite: "gfx/interface/designer/button_reset.png"; left: 20px; top: 620px; width: 123px; height: 36px; }
+.ddg-duplicate { --sprite: "gfx/interface/designer/button_123.png"; left: 150px; top: 620px; width: 123px; height: 36px; }
+.ddg-button-text { left: 0; top: 0; width: 123px; height: 36px; font-size: 16px; -unity-font-style: bold; }
+.ddg-xp-bg {
+    --sprite: "gfx/interface/designer/cost_bg.png"; left: 300px; top: 624px; width: 70px; height: 29px;
+    -unity-slice-left: 8; -unity-slice-right: 8; -unity-slice-top: 8; -unity-slice-bottom: 8;
+}
+.ddg-xp { left: 0; top: 0; width: 70px; height: 29px; font-size: 16px; -unity-font-style: bold; color: rgb(242, 240, 230); }
+.ddg-status { left: 390px; top: 624px; width: 790px; height: 29px; font-size: 15px; color: rgb(230, 90, 70); }
+/* save_button alone (no save_and_deploy_button), centred as in HOI4 */
+.ddg-save { --sprite: "gfx/interface/designer/button_221.png"; left: 490px; top: 667px; width: 221px; height: 36px; }
+.ddg-wide-text { left: 0; top: 0; width: 221px; height: 36px; font-size: 16px; -unity-font-style: bold; }
+
+/* greyed out */
+.ddg .disabled, .ddg .disabled:hover, .ddg .disabled:active { -unity-background-image-tint-color: rgb(95, 95, 95); }
+.ddg .disabled .hoi4-label { color: rgb(140, 140, 140); }
+
+/* sub-unit picker (designerregimentswindow): (0, 40), 660 x 580, GFX_tiled_window_1b_border (64 px borders) */
+.ddg-picker {
+    position: absolute; left: 0; top: 40px; width: 660px; height: 580px; display: none;
+    --sprite: "gfx/interface/designer/picker_bg.png";
+    -unity-slice-left: 64; -unity-slice-right: 64; -unity-slice-top: 64; -unity-slice-bottom: 64;
+}
+.ddg-picker-title { left: 30px; top: 25px; width: 400px; height: 28px; overflow: visible; font-size: 18px; -unity-font-style: bold; }
+.ddg-picker-cancel { --sprite: "gfx/interface/designer/button_123.png"; left: 506px; top: 20px; width: 123px; height: 36px; }
+/* lower than the gui's (title 13, button 2, list 40): room between the header and the entries */
+.ddg-picker-list { position: absolute; left: 72px; top: 76px; width: 530px; height: 490px; }
+.ddg-picker-list .unity-scroll-view__content-container { flex-direction: row; flex-wrap: wrap; }
+.ddg-picker-list .unity-scroller--vertical { width: 8px; background-color: rgba(10, 13, 13, 0.85); }
+.ddg-picker-list .unity-scroller__low-button, .ddg-picker-list .unity-scroller__high-button { display: none; }
+.ddg-picker-list .unity-scroller__slider { margin: 0; border-width: 0; background-color: rgba(0, 0, 0, 0); }
+.ddg-picker-list .unity-base-slider__tracker { display: none; }
+.ddg-picker-list .unity-base-slider__dragger { width: 8px; border-width: 0; border-radius: 2px; background-color: rgb(140, 158, 128); }
+
+/* designer_subunit_entry / _category_entry: 250 x 66 on the mini tooltip tile, in 256 x 69 slots */
+.ddg-entry {
+    position: relative; width: 250px; height: 66px; margin: 0 6px 3px 0;
+    --sprite: "gfx/interface/designer/mini_tooltip.png";
+    -unity-slice-left: 8; -unity-slice-right: 8; -unity-slice-top: 8; -unity-slice-bottom: 8;
+    -unity-background-scale-mode: stretch-to-fill;
+}
+.ddg-entry:hover { -unity-background-image-tint-color: rgb(255, 245, 200); }
+.ddg-entry-icon { position: absolute; left: 4px; top: 17px; width: 76px; height: 42px; }
+.ddg-entry-name { left: 85px; top: 3px; width: 160px; height: 22px; font-size: 16px; -unity-font-style: bold; }
+.ddg-entry-name-2 { top: 21px; }
+.ddg-entry-cost-row { position: absolute; left: 85px; top: 41px; height: 20px; flex-direction: row; align-items: center; }
+.ddg-entry-cost { position: relative; height: 20px; font-size: 16px; -unity-font-style: bold; }
+.ddg-entry-star { width: 14px; height: 14px; margin-left: 3px; }
+.ddg-entry-cost-after { margin-left: 4px; }

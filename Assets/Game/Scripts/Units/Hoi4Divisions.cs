@@ -185,6 +185,210 @@ namespace Hoi4.Units
             templatePriority.Remove(tag + "/" + template);
         }
 
+        readonly Dictionary<string, List<string>> subUnitsByTag = new Dictionary<string, List<string>>();
+
+        /// <summary>A sub-unit's data (common/units: stats, group, need, name), null when unknown.</summary>
+        public JObject SubUnit(string name) => name != null && subUnitData != null ? subUnitData[name] as JObject : null;
+
+        /// <summary>A sub-unit's display name (HOI4 localisation).</summary>
+        public string SubUnitName(string name) => (string)SubUnit(name)?["name"] ?? name;
+
+        readonly Dictionary<string, string> groupNames = new Dictionary<string, string>();
+
+        /// <summary>A sub-unit group's name (HOI4 group_*_title: "Infantry Battalions", "Support Companies").</summary>
+        public string GroupName(string group) =>
+            group != null && groupNames.TryGetValue(group, out var n) ? n : (group ?? "").Replace('_', ' ');
+
+        /// <summary>A sub-unit's group: infantry, mobile, armor, combat_support... or support (support companies).</summary>
+        public string SubUnitGroup(string name) => (string)SubUnit(name)?["group"] ?? "infantry";
+
+        /// <summary>Sub-units the country's division designer offers (1936 technology and equipment).</summary>
+        public IReadOnlyList<string> SubUnitsOf(string tag) =>
+            tag != null && subUnitsByTag.TryGetValue(tag, out var l) ? l : (IReadOnlyList<string>)System.Array.Empty<string>();
+
+        /// <summary>The template's layout for the division designer (null when it doesn't exist).</summary>
+        public Hoi4TemplateDesign Design(string tag, string template)
+        {
+            if (!HasTemplate(tag, template)) return null;
+            var tj = (JObject)templatesByTag[tag][template];
+            var design = new Hoi4TemplateDesign { Name = template, Priority = TemplatePriority(tag, template) };
+            var regiments = tj["regiments"] as JArray ?? new JArray();
+            var grid = tj["grid"] as JArray;
+            for (int i = 0; i < regiments.Count; i++)
+            {
+                // without positions (older data): three to a column, as HOI4's 1936 templates mostly are
+                int x = grid != null && i < grid.Count ? (int)grid[i][0] : i / 3, y = grid != null && i < grid.Count ? (int)grid[i][1] : i % 3;
+                while (design.RegimentAt(x, y) != null) y++; // history files sometimes stack two on one slot
+                design.Regiments.Add(new Hoi4TemplateDesign.Slot((string)regiments[i], x, y));
+            }
+            var regimental = tj["regimental_support"] as JArray ?? new JArray();
+            var columns = tj["regimental_grid"] as JArray;
+            for (int i = 0; i < regimental.Count; i++)
+            {
+                int x = columns != null && i < columns.Count ? (int)columns[i] : i;
+                if (design.RegimentalAt(x) == null) design.Regimental.Add(new Hoi4TemplateDesign.Slot((string)regimental[i], x, 0));
+            }
+            var support = tj["support"] as JArray ?? new JArray();
+            var rows = tj["support_grid"] as JArray;
+            for (int i = 0; i < support.Count; i++)
+                design.Support.Add(new Hoi4TemplateDesign.Slot((string)support[i], 0, rows != null && i < rows.Count ? (int)rows[i] : i));
+            // HOI4 data can stack two companies on one row: the designer shows one per row
+            design.Support.Sort((a, b) => a.Y.CompareTo(b.Y));
+            for (int i = 0; i < design.Support.Count; i++) design.Support[i] = new Hoi4TemplateDesign.Slot(design.Support[i].Type, 0, i);
+            return design;
+        }
+
+        /// <summary>Whether the country may save the design over the template (null: a new template). Sub-units must be
+        /// ones it may use or already in the template; one group per brigade, battalions in the open rows (or where the
+        /// template already had them), at most 5 support companies, one of each type; a unique name.</summary>
+        public bool CanSave(string tag, string original, Hoi4TemplateDesign design, out string why)
+        {
+            why = null;
+            if (design == null || !templatesByTag.ContainsKey(tag)) { why = "No templates"; return false; }
+            string name = design.Name?.Trim();
+            if (string.IsNullOrEmpty(name)) { why = "The template needs a name"; return false; }
+            if (name != original && HasTemplate(tag, name)) { why = "Another template has this name"; return false; }
+            if (design.Regiments.Count == 0) { why = "The template needs at least one battalion"; return false; }
+            if (original != null && !HasTemplate(tag, original)) { why = "The template no longer exists"; return false; }
+            var had = original != null ? Design(tag, original) : null;
+            var allowed = new HashSet<string>(SubUnitsOf(tag));
+            if (had != null)
+            {
+                foreach (var s in had.Regiments) allowed.Add(s.Type);
+                foreach (var s in had.Support) allowed.Add(s.Type);
+                foreach (var s in had.Regimental) allowed.Add(s.Type);
+            }
+            var groups = new Dictionary<int, string>();
+            var seen = new HashSet<(int, int)>();
+            foreach (var s in design.Regiments)
+            {
+                if (SubUnit(s.Type) == null || !allowed.Contains(s.Type) || SubUnitGroup(s.Type) == "support") { why = $"{s.Type} can't be used"; return false; }
+                bool hadSlot = had != null && had.RegimentAt(s.X, s.Y) != null;
+                if (s.X < 0 || s.X >= Hoi4TemplateDesign.Columns || s.Y < 0 || (s.Y >= Hoi4TemplateDesign.OpenRows && !hadSlot) || !seen.Add((s.X, s.Y)))
+                { why = "A battalion is outside the open slots"; return false; }
+                string g = SubUnitGroup(s.Type);
+                if (groups.TryGetValue(s.X, out string other) && other != g) { why = "A brigade can only hold one kind of battalion"; return false; }
+                groups[s.X] = g;
+            }
+            if (design.Support.Count > Hoi4TemplateDesign.SupportRows) { why = "At most 5 support companies"; return false; }
+            var types = new HashSet<string>();
+            foreach (var s in design.Support)
+            {
+                if (SubUnit(s.Type) == null || !allowed.Contains(s.Type) || !IsDivisionalSupport(s.Type)) { why = $"{SubUnitName(s.Type)} can't be divisional support"; return false; }
+                if (!types.Add(s.Type)) { why = "Only one support company of each type"; return false; }
+            }
+            var under = new HashSet<int>();
+            foreach (var s in design.Regimental)
+            {
+                if (SubUnit(s.Type) == null || !allowed.Contains(s.Type)) { why = $"{s.Type} can't be used"; return false; }
+                if (!under.Add(s.X) || design.ColumnCount(s.X) < Hoi4TemplateDesign.RegimentalBattalions)
+                { why = $"Regimental support needs a brigade of {Hoi4TemplateDesign.RegimentalBattalions} battalions"; return false; }
+                if (!CanSupportBrigade(s.Type, groups.TryGetValue(s.X, out string g) ? g : null))
+                { why = $"{SubUnitName(s.Type)} can't support that brigade"; return false; }
+            }
+            return true;
+        }
+
+        /// <summary>A support company for the divisional support column (not divisional = no).</summary>
+        public bool IsDivisionalSupport(string name) => SubUnitGroup(name) == "support" && ((bool?)SubUnit(name)?["divisional"] ?? true);
+
+        /// <summary>A regimental support company that may go under a brigade of the group (allowed_battalion_groups).</summary>
+        public bool CanSupportBrigade(string name, string group)
+        {
+            var s = SubUnit(name);
+            if (s == null || group == null || !((bool?)s["regimental"] ?? false)) return false;
+            return s["battalion_groups"] is JArray groups && groups.Any(g => (string)g == group);
+        }
+
+        /// <summary>Raised after a template is saved: (tag, old name or null for a new one, new name).</summary>
+        public event System.Action<string, string, string> TemplateSaved;
+
+        /// <summary>Save a design (callers check CanSave): a new template, or over ORIGINAL (renaming it when the name
+        /// changed). Divisions of the template take the new layout: equipment and men past what it needs go back to the
+        /// stockpile and the manpower pool, strength and organisation stay at the same share of their new maximum.</summary>
+        public void SaveTemplate(GameState gameState, ushort country, string original, Hoi4TemplateDesign design)
+        {
+            string tag = gameState.Countries.GetCountryTag(country);
+            var templates = templatesByTag[tag];
+            string name = design.Name.Trim();
+            var regiments = design.RegimentTypes();
+            var support = design.SupportTypes();
+            var regimentalOrdered = new List<Hoi4TemplateDesign.Slot>(design.Regimental);
+            regimentalOrdered.Sort((a, b) => a.X.CompareTo(b.X));
+            var ordered = new List<Hoi4TemplateDesign.Slot>(design.Regiments);
+            ordered.Sort((a, b) => a.X != b.X ? a.X.CompareTo(b.X) : a.Y.CompareTo(b.Y));
+            var supportOrdered = new List<Hoi4TemplateDesign.Slot>(design.Support);
+            supportOrdered.Sort((a, b) => a.Y.CompareTo(b.Y));
+
+            var tj = original != null && templates[original] is JObject old ? (JObject)old.DeepClone() : new JObject();
+            tj["regiments"] = new JArray(regiments);
+            tj["support"] = new JArray(support);
+            tj["grid"] = new JArray(ordered.Select(s => new JArray(s.X, s.Y)));
+            tj["support_grid"] = new JArray(supportOrdered.Select(s => s.Y));
+            tj["regimental_support"] = new JArray(regimentalOrdered.Select(s => s.Type));
+            tj["regimental_grid"] = new JArray(regimentalOrdered.Select(s => s.X));
+            tj["main"] = MainOf(regiments, subUnitData);
+            tj["priority"] = Mathf.Clamp(design.Priority, Reserve, Elite);
+            if (tj["next_number"] == null) tj["next_number"] = 1;
+
+            if (original != null && original != name)
+            {
+                // keep the template's place in the list under its new name
+                var rebuilt = new JObject();
+                foreach (var p in templates.Properties()) rebuilt[p.Name == original ? name : p.Name] = p.Name == original ? tj : p.Value;
+                templates.RemoveAll();
+                foreach (var p in rebuilt.Properties()) templates[p.Name] = p.Value;
+                if (nextNumber.TryGetValue(tag + "/" + original, out int n)) { nextNumber.Remove(tag + "/" + original); nextNumber[tag + "/" + name] = n; }
+            }
+            else templates[name] = tj;
+            templatePriority.Remove(tag + "/" + (original ?? name));
+            templatePriority.Remove(tag + "/" + name);
+
+            if (original != null)
+                foreach (var d in divisions.Values)
+                    if (d.Tag == tag && d.Template == original) Restructure(gameState, country, d, name, tj);
+            TemplateSaved?.Invoke(tag, original, name);
+            Core.Recording.SessionRecorder.Note("designer", original == null ? "template_new" : "template_saved", country, 0, 0, 0,
+                $"{name}: {string.Join(" ", regiments)} | {string.Join(" ", support)} | {string.Join(" ", design.RegimentalTypes())}" + (original != null && original != name ? $" (was {original})" : ""));
+        }
+
+        /// <summary>A division (in the field or in training) takes its template's new layout.</summary>
+        public void Restructure(GameState gameState, ushort country, Hoi4Division d, string template, JObject tj = null)
+        {
+            tj = tj ?? (HasTemplate(d.Tag, template) ? (JObject)templatesByTag[d.Tag][template] : null);
+            if (tj == null) return;
+            FP strengthShare = d.MaxStrength > FP.Zero ? d.Strength / d.MaxStrength : FP.One;
+            FP orgShare = d.MaxOrganisation > FP.Zero ? d.Organisation / d.MaxOrganisation : FP.One;
+            var oldHave = d.Have ?? new FP[0];
+            d.Template = template;
+            ApplyStructure(d, tj, subUnitData);
+            var resources = gameState.Resources;
+            d.Have = new FP[d.Need.Length];
+            for (int a = 0; a < d.Need.Length; a++)
+            {
+                FP had = a < oldHave.Length ? oldHave[a] : FP.Zero;
+                d.Have[a] = FP.Min(had, d.Need[a]);
+                FP surplus = had - d.Have[a];
+                if (surplus > FP.Zero)
+                {
+                    ushort id = (ushort)(Hoi4Equipment.StockResourceBase + a);
+                    resources.SetResource(country, id, resources.GetResource(country, id) + surplus);
+                }
+            }
+            FP men = FP.FromInt(d.Manpower);
+            if (d.Men > men)
+            {
+                resources.SetResource(country, Hoi4Manpower.ResourceId, resources.GetResource(country, Hoi4Manpower.ResourceId) + (d.Men - men));
+                d.Men = men;
+            }
+            d.Strength = FP.Min(d.MaxStrength * strengthShare, d.FullStrength);
+            d.Organisation = d.MaxOrganisation * orgShare;
+        }
+
+        /// <summary>The template's division name format ("%d Infantry Division"), null when it has none.</summary>
+        public string NameFormat(string tag, string template) =>
+            HasTemplate(tag, template) ? (string)templatesByTag[tag][template]["name_format"] : null;
+
         /// <summary>The template's main regiment type (HOI4 shows a division by it; its icon), null when unknown.</summary>
         public string TemplateMain(string tag, string template) =>
             HasTemplate(tag, template) ? (string)templatesByTag[tag][template]["main"] : null;
@@ -194,11 +398,9 @@ namespace Hoi4.Units
         {
             if (!HasTemplate(tag, template) || subUnitData == null) return 0;
             var tj = (JObject)templatesByTag[tag][template];
-            int days = 0;
-            foreach (string name in (tj["regiments"]?.Select(x => (string)x) ?? Enumerable.Empty<string>())
-                         .Concat(tj["support"]?.Select(x => (string)x) ?? Enumerable.Empty<string>()))
-                if (subUnitData[name] is JObject s) days = System.Math.Max(days, (int?)s["training_time"] ?? 0);
-            return days;
+            return Sum(tj["regiments"]?.Select(x => (string)x).ToList() ?? new List<string>(),
+                       tj["support"]?.Select(x => (string)x).ToList() ?? new List<string>(),
+                       tj["regimental_support"]?.Select(x => (string)x).ToList() ?? new List<string>(), subUnitData).TrainingDays;
         }
 
         /// <summary>A new division of the template that isn't on the map yet (UnitId 0): full manpower, no equipment,
@@ -302,6 +504,8 @@ namespace Hoi4.Units
             if (subUnits == null || countries == null)
                 yield break;
             subUnitData = subUnits;
+            if (root["sub_unit_groups"] is JObject groups)
+                foreach (var g in groups.Properties()) groupNames[g.Name] = (string)g.Value;
 
             var archetypes = new SortedSet<string>(System.StringComparer.Ordinal);
             foreach (var s in subUnits.Properties())
@@ -327,6 +531,7 @@ namespace Hoi4.Units
                 var list = country.Value["divisions"] as JArray;
                 if (templates == null || list == null) continue;
                 templatesByTag[tag] = templates;
+                subUnitsByTag[tag] = (country.Value["sub_units"] as JArray)?.Select(x => (string)x).ToList() ?? new List<string>();
 
                 foreach (var d in list)
                 {
@@ -377,78 +582,120 @@ namespace Hoi4.Units
 
         static Hoi4Division Build(ushort unitId, string tag, JToken d, string templateName, JObject template, JObject subUnits)
         {
-            var regiments = template["regiments"]?.Select(t => (string)t).ToList() ?? new List<string>();
-            var support = template["support"]?.Select(t => (string)t).ToList() ?? new List<string>();
-
-            // Equipment: the template's need per archetype, and per sub-unit its strength share and archetypes
-            var need = new FP[Archetypes.Length];
-            var parts = new List<Hoi4Division.Part>();
-            foreach (string name in regiments.Concat(support))
-            {
-                if (!(subUnits[name] is JObject s)) continue;
-                var uses = new List<int>();
-                if (s["need"] is JObject n)
-                    foreach (var a in n.Properties())
-                        if (archetypeIndex.TryGetValue(a.Name, out int i))
-                        {
-                            need[i] += Num(a.Value);
-                            uses.Add(i);
-                        }
-                parts.Add(new Hoi4Division.Part { Weight = Val(s, "max_strength"), Archetypes = uses.ToArray() });
-            }
-
-            FP strength = FP.Zero, org = FP.Zero, width = FP.Zero, speed = FP.MaxValue;
-            FP soft = FP.Zero, hard = FP.Zero, def = FP.Zero, brk = FP.Zero, hardness = FP.Zero;
-            FP armorMax = FP.Zero, armorSum = FP.Zero, pierceMax = FP.Zero, pierceSum = FP.Zero;
-            int manpower = 0, count = 0;
-            foreach (string name in regiments.Concat(support))
-            {
-                if (!(subUnits[name] is JObject s)) continue;
-                strength += Val(s, "max_strength");
-                org += Val(s, "max_organisation");
-                manpower += (int)s["manpower"];
-                speed = FP.Min(speed, Val(s, "speed"));
-                soft += Val(s, "soft_attack"); hard += Val(s, "hard_attack");
-                def += Val(s, "defense"); brk += Val(s, "breakthrough");
-                hardness += Val(s, "hardness");
-                armorMax = FP.Max(armorMax, Val(s, "armor")); armorSum += Val(s, "armor");
-                pierceMax = FP.Max(pierceMax, Val(s, "piercing")); pierceSum += Val(s, "piercing");
-                count++;
-            }
-            foreach (string name in regiments)
-                if (subUnits[name] is JObject s)
-                    width += Val(s, "combat_width");
-
-            FP equipment = FP.Clamp(d["equipment"] != null ? Num(d["equipment"]) : FP.One, FP.Zero, FP.One);
-            var have = new FP[need.Length];
-            for (int i = 0; i < need.Length; i++) have[i] = need[i] * equipment; // HOI4 start_equipment_factor
             var division = new Hoi4Division
             {
                 UnitId = unitId,
                 Tag = tag,
                 Name = (string)d["name"],
                 Template = templateName,
-                MainType = (string)template["main"],
-                Regiments = regiments.Count,
-                SupportCompanies = support.Count,
-                MaxStrength = strength,
-                Need = need,
-                Have = have,
-                Parts = parts.ToArray(),
-                Men = FP.FromInt(manpower), // HOI4 1936 divisions have their full manpower; equipment is what they lack
-                MaxOrganisation = count > 0 ? org / count : FP.Zero,
-                CombatWidth = width,
-                SpeedKmh = speed == FP.MaxValue ? FP.FromInt(4) : speed,
-                Manpower = manpower,
                 Experience = Num(d["experience"]),
-                SoftAttack = soft, HardAttack = hard, Defense = def, Breakthrough = brk,
-                Hardness = count > 0 ? hardness / count : FP.Zero,
-                Armor = count > 0 ? P3 * armorMax + P7 * armorSum / count : FP.Zero,
-                Piercing = count > 0 ? P4 * pierceMax + P6 * pierceSum / count : FP.Zero,
             };
+            ApplyStructure(division, template, subUnits);
+            FP equipment = FP.Clamp(d["equipment"] != null ? Num(d["equipment"]) : FP.One, FP.Zero, FP.One);
+            division.Have = new FP[division.Need.Length];
+            for (int i = 0; i < division.Need.Length; i++) division.Have[i] = division.Need[i] * equipment; // HOI4 start_equipment_factor
+            division.Men = FP.FromInt(division.Manpower); // HOI4 1936 divisions have their full manpower; equipment is what they lack
             division.Organisation = division.MaxOrganisation;
             division.Strength = division.FullStrength; // = max strength x start_equipment_factor
             return division;
+        }
+
+        /// <summary>A division's template-given numbers (sub-unit counts, main type, stats, equipment need and parts)
+        /// from its template; what it has (equipment, men, strength, organisation) is left to the caller.</summary>
+        static void ApplyStructure(Hoi4Division division, JObject template, JObject subUnits)
+        {
+            var regiments = template["regiments"]?.Select(x => (string)x).ToList() ?? new List<string>();
+            var support = template["support"]?.Select(x => (string)x).ToList() ?? new List<string>();
+            var regimental = template["regimental_support"]?.Select(x => (string)x).ToList() ?? new List<string>();
+            var st = Sum(regiments, support, regimental, subUnits);
+            division.MainType = (string)template["main"] ?? MainOf(regiments, subUnits);
+            division.Regiments = regiments.Count;
+            division.SupportCompanies = support.Count;
+            division.MaxStrength = st.MaxStrength;
+            division.Need = st.Need;
+            division.Parts = st.Parts;
+            division.MaxOrganisation = st.MaxOrganisation;
+            division.CombatWidth = st.CombatWidth;
+            division.SpeedKmh = st.SpeedKmh;
+            division.Manpower = st.Manpower;
+            division.SoftAttack = st.SoftAttack; division.HardAttack = st.HardAttack;
+            division.Defense = st.Defense; division.Breakthrough = st.Breakthrough;
+            division.Hardness = st.Hardness; division.Armor = st.Armor; division.Piercing = st.Piercing;
+        }
+
+        /// <summary>HOI4 shows a division by its highest-priority battalion (sub-unit `priority`).</summary>
+        static string MainOf(List<string> regiments, JObject subUnits)
+        {
+            string main = null;
+            int best = int.MinValue;
+            foreach (string r in regiments)
+            {
+                int p = subUnits[r] is JObject s ? ((int?)s["priority"] ?? 0) : 0;
+                if (main == null || p > best) { main = r; best = p; }
+            }
+            return main ?? "infantry";
+        }
+
+        /// <summary>What the sub-units add up to (Hoi4TemplateStats).</summary>
+        public Hoi4TemplateStats Stats(IEnumerable<string> regiments, IEnumerable<string> support, IEnumerable<string> regimental) =>
+            Sum(regiments.ToList(), support.ToList(), regimental.ToList(), subUnitData ?? new JObject());
+
+        /// <summary>Regimental support companies count like support companies, except for speed (HOI4: they never
+        /// affect it). How HOI4 scales them with their brigade's size isn't in the data; they count in full.</summary>
+        static Hoi4TemplateStats Sum(List<string> regiments, List<string> support, List<string> regimental, JObject subUnits)
+        {
+            var st = new Hoi4TemplateStats { Need = new FP[Archetypes.Length] };
+            var parts = new List<Hoi4Division.Part>();
+            FP speed = FP.MaxValue, armorMax = FP.Zero, armorSum = FP.Zero, pierceMax = FP.Zero, pierceSum = FP.Zero;
+            int index = -1;
+            foreach (string name in regiments.Concat(support).Concat(regimental))
+            {
+                index++;
+                if (!(subUnits[name] is JObject s)) continue;
+                bool isRegimental = index >= regiments.Count + support.Count;
+                var uses = new List<int>();
+                if (s["need"] is JObject n)
+                    foreach (var a in n.Properties())
+                        if (archetypeIndex.TryGetValue(a.Name, out int i))
+                        {
+                            st.Need[i] += Num(a.Value);
+                            uses.Add(i);
+                        }
+                parts.Add(new Hoi4Division.Part { Weight = Val(s, "max_strength"), Archetypes = uses.ToArray() });
+                st.MaxStrength += Val(s, "max_strength");
+                st.MaxOrganisation += Val(s, "max_organisation");
+                st.Recovery += Val(s, "recovery");
+                st.Recon += Val(s, "recon");
+                st.Suppression += Val(s, "suppression");
+                st.Weight += Val(s, "weight");
+                st.SupplyUse += Val(s, "supply_use");
+                st.Reliability += Val(s, "reliability");
+                st.Initiative += Val(s, "initiative");
+                st.Entrenchment += Val(s, "entrenchment");
+                st.Manpower += (int?)s["manpower"] ?? 0;
+                st.TrainingDays = System.Math.Max(st.TrainingDays, (int?)s["training_time"] ?? 0);
+                if (!isRegimental && ((bool?)s["affects_speed"] ?? true)) speed = FP.Min(speed, Val(s, "speed"));
+                st.SoftAttack += Val(s, "soft_attack"); st.HardAttack += Val(s, "hard_attack");
+                st.AirAttack += Val(s, "air_attack");
+                st.Defense += Val(s, "defense"); st.Breakthrough += Val(s, "breakthrough");
+                st.Hardness += Val(s, "hardness");
+                armorMax = FP.Max(armorMax, Val(s, "armor")); armorSum += Val(s, "armor");
+                pierceMax = FP.Max(pierceMax, Val(s, "piercing")); pierceSum += Val(s, "piercing");
+                st.Count++;
+            }
+            foreach (string name in regiments)
+                if (subUnits[name] is JObject s)
+                    st.CombatWidth += Val(s, "combat_width");
+            st.Parts = parts.ToArray();
+            st.SpeedKmh = speed == FP.MaxValue ? FP.FromInt(4) : speed;
+            if (st.Count > 0)
+            {
+                FP n = FP.FromInt(st.Count);
+                st.MaxOrganisation /= n; st.Recovery /= n; st.Reliability /= n; st.Initiative /= n; st.Hardness /= n;
+                st.Armor = P3 * armorMax + P7 * armorSum / n;
+                st.Piercing = P4 * pierceMax + P6 * pierceSum / n;
+            }
+            return st;
         }
     }
 }

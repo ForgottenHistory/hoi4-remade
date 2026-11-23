@@ -537,8 +537,8 @@ namespace Hoi4.UI
                 ClearBoxes();
                 return;
             }
-            if (Input.GetKeyDown(KeyCode.T)) Toggle();
-            if (open && Input.GetKeyDown(KeyCode.Escape))
+            if (global::Utils.KeyboardFocus.KeyDown(KeyCode.T)) Toggle();
+            if (open && global::Utils.KeyboardFocus.KeyDown(KeyCode.Escape))
             {
                 if (selected != null) Select(selected); else Close();
             }

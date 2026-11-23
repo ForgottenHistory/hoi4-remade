@@ -1,0 +1,80 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <!-- countrydivisiondesignerview (interface/divisiondesignerview.gui): 1200 x 720, centred. Slots, sheet rows and
+         picker entries are built by Hoi4DivisionDesigner. -->
+    <ui:VisualElement name="designer" class="spr ddg" picking-mode="Position">
+        <ui:Label class="hoi4-label center ddg-title" text="DIVISION DESIGNER" picking-mode="Ignore" />
+        <ui:VisualElement name="ddg-close" class="spr hoi4-button ddg-close" picking-mode="Position" tooltip="Close (Escape)" />
+
+        <!-- template header -->
+        <ui:VisualElement class="spr ddg-icon-bg" picking-mode="Ignore" />
+        <ui:VisualElement name="ddg-icon" class="spr ddg-icon" picking-mode="Ignore" />
+        <ui:VisualElement name="ddg-icon-priority" class="spr ddg-icon-priority" picking-mode="Ignore" />
+        <ui:VisualElement class="ddg-name-box" picking-mode="Ignore" />
+        <ui:TextField name="ddg-name" class="ddg-name" max-length="60" />
+        <ui:VisualElement class="spr ddg-nametag" picking-mode="Ignore" />
+        <ui:Label name="ddg-names" class="hoi4-label ddg-names" picking-mode="Position" tooltip="The template's name list: divisions are named from it" />
+        <ui:VisualElement name="ddg-equipment" class="spr ddg-equipment disabled" picking-mode="Position" tooltip="Division equipment: not available yet">
+            <ui:Label class="hoi4-label center ddg-button-text" text="Equipment" picking-mode="Ignore" />
+        </ui:VisualElement>
+        <ui:VisualElement class="spr ddg-priority-bg" picking-mode="Ignore" />
+        <ui:VisualElement name="ddg-prio-0" class="spr hoi4-button ddg-prio ddg-prio-0" picking-mode="Position" tooltip="Reserve: equipment and reinforcements last" />
+        <ui:VisualElement name="ddg-prio-1" class="spr hoi4-button ddg-prio ddg-prio-1" picking-mode="Position" tooltip="Normal priority" />
+        <ui:VisualElement name="ddg-prio-2" class="spr hoi4-button ddg-prio ddg-prio-2" picking-mode="Position" tooltip="Elite: equipment and reinforcements first" />
+
+        <!-- composition summary -->
+        <ui:VisualElement class="spr ddg-composition-icon" picking-mode="Ignore" />
+        <ui:Label class="hoi4-label ddg-composition" text="Divisional Composition" picking-mode="Ignore" />
+        <ui:VisualElement class="spr ddg-chip ddg-chip-hardness" picking-mode="Position" tooltip="Hardness: the share of soft or hard attacks it takes">
+            <ui:VisualElement class="spr ddg-chip-icon ddg-icon-hardness" picking-mode="Ignore" />
+            <ui:Label name="ddg-hardness" class="hoi4-label right gold ddg-chip-text" picking-mode="Ignore" />
+        </ui:VisualElement>
+        <ui:VisualElement class="spr ddg-chip ddg-chip-org" picking-mode="Position" tooltip="Organisation">
+            <ui:VisualElement class="spr ddg-chip-icon ddg-icon-org" picking-mode="Ignore" />
+            <ui:Label name="ddg-org" class="hoi4-label right gold ddg-chip-text" picking-mode="Ignore" />
+        </ui:VisualElement>
+        <ui:VisualElement class="spr ddg-chip ddg-chip-hp" picking-mode="Position" tooltip="HP">
+            <ui:VisualElement class="spr ddg-chip-icon ddg-icon-hp" picking-mode="Ignore" />
+            <ui:Label name="ddg-hp" class="hoi4-label right gold ddg-chip-text" picking-mode="Ignore" />
+        </ui:VisualElement>
+        <ui:VisualElement class="spr ddg-chip ddg-chip-speed" picking-mode="Position" tooltip="Max speed">
+            <ui:VisualElement class="spr ddg-chip-icon ddg-icon-speed" picking-mode="Ignore" />
+            <ui:Label name="ddg-speed" class="hoi4-label right gold ddg-chip-text" picking-mode="Ignore" />
+        </ui:VisualElement>
+        <ui:Label name="ddg-width" class="hoi4-label center ddg-width" picking-mode="Position" tooltip="Combat width" />
+
+        <!-- brigade grid, support column, regimental support row (slots built in code) -->
+        <ui:VisualElement name="ddg-slots" class="ddg-layer" picking-mode="Ignore" />
+        <ui:Label class="hoi4-label center ddg-support-title" text="Support" picking-mode="Ignore" />
+        <ui:Label class="hoi4-label center ddg-regsupport-title" text="Regimental Support" picking-mode="Ignore" />
+
+        <!-- stat sheets (rows built in code) -->
+        <ui:Label class="hoi4-label ddg-sheet-title ddg-sheet-base" text="Base Stats" picking-mode="Ignore" />
+        <ui:Label class="hoi4-label ddg-sheet-title ddg-sheet-combat" text="Combat Stats" picking-mode="Ignore" />
+        <ui:Label class="hoi4-label ddg-sheet-title ddg-sheet-equipment" text="Equipment Cost" picking-mode="Ignore" />
+        <ui:VisualElement name="ddg-sheets" class="ddg-layer" picking-mode="Ignore" />
+
+        <!-- bottom -->
+        <ui:VisualElement name="ddg-reset" class="spr hoi4-button ddg-reset" picking-mode="Position" tooltip="Undo every change since it was opened or saved">
+            <ui:Label class="hoi4-label center ddg-button-text" text="Reset" picking-mode="Ignore" />
+        </ui:VisualElement>
+        <ui:VisualElement name="ddg-duplicate" class="spr hoi4-button ddg-duplicate" picking-mode="Position" tooltip="Copy this template into a new one (saved when you press Save)">
+            <ui:Label class="hoi4-label center ddg-button-text" text="Duplicate" picking-mode="Ignore" />
+        </ui:VisualElement>
+        <ui:VisualElement class="spr ddg-xp-bg" picking-mode="Position" tooltip="Army experience the changes cost (not charged yet: no army experience)">
+            <ui:Label name="ddg-xp" class="hoi4-label center ddg-xp" picking-mode="Ignore" />
+        </ui:VisualElement>
+        <ui:Label name="ddg-status" class="hoi4-label ddg-status" picking-mode="Ignore" />
+        <ui:VisualElement name="ddg-save" class="spr hoi4-button ddg-save" picking-mode="Position">
+            <ui:Label name="ddg-save-text" class="hoi4-label center ddg-wide-text" text="Save" picking-mode="Ignore" />
+        </ui:VisualElement>
+
+        <!-- designerregimentswindow: the sub-unit picker over the left side -->
+        <ui:VisualElement name="ddg-picker" class="spr ddg-picker" picking-mode="Position">
+            <ui:Label name="ddg-picker-title" class="hoi4-label ddg-picker-title" text="Make a selection to change or add battalion" picking-mode="Ignore" />
+            <ui:VisualElement name="ddg-picker-cancel" class="spr hoi4-button ddg-picker-cancel" picking-mode="Position">
+                <ui:Label class="hoi4-label center ddg-button-text" text="Back" picking-mode="Ignore" />
+            </ui:VisualElement>
+            <ui:ScrollView name="ddg-picker-list" class="ddg-picker-list" horizontal-scroller-visibility="Hidden" vertical-scroller-visibility="Auto" />
+        </ui:VisualElement>
+    </ui:VisualElement>
+</ui:UXML>

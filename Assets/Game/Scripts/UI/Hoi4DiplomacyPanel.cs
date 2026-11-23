@@ -188,7 +188,7 @@ namespace Hoi4.UI
             if (panel == null) return;
             Hoi4UiHover.Report(this, panel);
             if (!open) return;
-            if (!HasCountry() || Input.GetKeyDown(KeyCode.Escape)) { Close(); return; }
+            if (!HasCountry() || global::Utils.KeyboardFocus.KeyDown(KeyCode.Escape)) { Close(); return; }
             // selecting divisions leaves diplomacy mode, back to the normal map
             var units = Hoi4.Units.Hoi4UnitSelection.Instance;
             if (units != null && units.Selected.Count > 0) { Close(); return; }

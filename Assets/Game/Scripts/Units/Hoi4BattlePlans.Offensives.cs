@@ -229,7 +229,7 @@ namespace Hoi4.Units
 
         void UpdateOffensiveTool()
         {
-            if (Input.GetKeyDown(KeyCode.Escape) || !CanPlanOffensive) { CancelOffensive(); return; }
+            if (global::Utils.KeyboardFocus.KeyDown(KeyCode.Escape) || !CanPlanOffensive) { CancelOffensive(); return; }
             ushort province = 0;
             var cam = Camera.main;
             var selector = Engine.ArchonEngine.Instance.ProvinceSelector;
@@ -245,7 +245,7 @@ namespace Hoi4.Units
                 if (!Input.GetMouseButton(1)) { FinishDrag(); return; }
                 if (cam != null && TryCursorPixel(cam, out var px)) ExtendDrag(px);
             }
-            UpdatePreview(Input.GetKeyDown(KeyCode.Tab));
+            UpdatePreview(global::Utils.KeyboardFocus.KeyDown(KeyCode.Tab));
             RebuildTexture();
         }
 

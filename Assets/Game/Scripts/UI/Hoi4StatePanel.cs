@@ -148,7 +148,7 @@ namespace Hoi4.UI
             if (panel == null) return;
             Hoi4UiHover.Report(this, panel);
             if (!HasCountry()) { if (province != 0) Hide(); return; }
-            if (Input.GetKeyDown(KeyCode.Escape) && province != 0) { Hide(); return; }
+            if (global::Utils.KeyboardFocus.KeyDown(KeyCode.Escape) && province != 0) { Hide(); return; }
             bool diplomacy = Hoi4DiplomacyPanel.IsOpen;
             if (diplomacy != wasDiplomacy) { wasDiplomacy = diplomacy; dirty = true; }
             if (diplomacy && panel.resolvedStyle.display != DisplayStyle.None) panel.style.display = DisplayStyle.None;
