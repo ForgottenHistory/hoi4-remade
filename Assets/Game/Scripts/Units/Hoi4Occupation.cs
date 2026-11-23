@@ -12,7 +12,8 @@ namespace Hoi4.Units
     /// <summary>
     /// GAME: occupation. A division that walks into a province held by a country it is at war with takes
     /// control of it: the province's controller changes, its owner does not (the engine's
-    /// SetProvinceController). An owner's division walking back in, or an ally's, takes it back. Retreating
+    /// SetProvinceController). An owner's division walking back in, or any country's not at war with the owner
+    /// (an ally, or a third country taking it from the occupier), hands it back to the owner. Retreating
     /// divisions only ever arrive on friendly ground, so they occupy nothing.
     /// The map paints an occupied province in the controller's colour, like HOI4, using
     /// a province-indexed texture (_Hoi4ControllerTex, 0 = not occupied, else the controller) read by
@@ -207,9 +208,10 @@ namespace Hoi4.Units
             ushort controller = ControllerOf(gameState, province);
             if (owner == 0 || controller == country || !diplomacy.IsAtWar(country, controller)) return;
 
-            // Allies liberate land for its owner rather than keeping it
-            bool liberates = owner != country && diplomacy.AreAllied(country, owner) && !diplomacy.IsAtWar(owner, country);
-            gameState.Provinces.SetProvinceController(province, liberates && diplomacy.IsAtWar(owner, controller) ? owner : country);
+            // Land of a country it isn't at war with (an enemy held it: an ally's, or a third country's the enemy
+            // occupied) goes back to its owner rather than being kept (HOI4 liberation)
+            bool liberates = owner != country && !diplomacy.IsAtWar(owner, country);
+            gameState.Provinces.SetProvinceController(province, liberates ? owner : country);
         }
     }
 }

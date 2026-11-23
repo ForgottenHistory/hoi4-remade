@@ -40,6 +40,7 @@ namespace Hoi4.Units
         const int BreakOffPercent = 25;       // or when its side holds less than this share of the battle's organisation
         const int PathBudget = 12;            // path searches per country per day (divisions not next to a target)
         const int MaxReach = 3;               // land hops from a target to gather its attackers
+        const int ReserveDepth = 3;           // an attack short of good odds gathers up to this many times the width (reserves)
 
         public static Hoi4EnemyAI Instance { get; private set; }
 
@@ -308,7 +309,9 @@ namespace Hoi4.Units
                 foreach (var (id, hops) in candidates)
                 {
                     var d = Hoi4Divisions.Instance.Get(id);
-                    if (side.Count > 0 && committed + d.CombatWidth > width) { full = true; continue; }
+                    // the front line, then reserves behind it while the odds aren't good yet (they step in as
+                    // the front breaks: a narrow front is ground down rather than never attacked)
+                    if (side.Count > 0 && committed + d.CombatWidth > width * ReserveDepth) { full = true; continue; }
                     var unit = gameState.Units.GetUnit(id);
                     List<ushort> path;
                     if (hops == 1) path = new List<ushort> { unit.provinceID, t }; // straight in

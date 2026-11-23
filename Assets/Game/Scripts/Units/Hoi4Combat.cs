@@ -398,13 +398,18 @@ namespace Hoi4.Units
 
         /// <summary>
         /// Rough odds of an attack, from the same hit formula as the battle: how fast each side wears down the
-        /// other's organisation. Above 1 the attackers should break the defenders first. Ignores combat width,
-        /// armour and reserves; infinite when nobody defends.
+        /// other's organisation. Above 1 the attackers should break the defenders first. The hits come from what
+        /// fits the combat width; the organisation to wear down is every live division's, reserves included (they
+        /// step in as the front line breaks), so a deep attack grinds down a thin defence. Ignores armour;
+        /// infinite when nobody defends.
         /// </summary>
         public static FP Odds(List<Hoi4Division> attackers, List<Hoi4Division> defenders, ushort target)
         {
             if (defenders.Count == 0) return FP.MaxValue;
             if (attackers.Count == 0) return FP.Zero;
+            FP aOrg = FP.Zero, dOrg = FP.Zero; // staying power: everyone who can still fight, reserves included
+            foreach (var d in attackers) if (d.Organisation > FP.Zero) aOrg += d.Organisation;
+            foreach (var d in defenders) if (d.Organisation > FP.Zero) dOrg += d.Organisation;
             var gs = Instance != null ? Instance.gameState : null;
             // Only what fits the combat width fights (the rest waits in reserve), so more divisions than the
             // width holds don't raise the odds. Base width: where the attackers will come from isn't known yet.
@@ -421,9 +426,6 @@ namespace Hoi4.Units
                 ? AttackerFactor(gs, d, gs.Units.GetUnit(d.UnitId).provinceID, target) : FP.One + d.Planning;
             Sums(attackers, aFactor, out FP aSoft, out FP aHard, out _, out FP aBrk, out _, out _, out _);
             Sums(defenders, DefenderFactor, out FP dSoft, out FP dHard, out FP dDef, out _, out _, out _, out _);
-            FP aOrg = FP.Zero, dOrg = FP.Zero;
-            foreach (var d in attackers) aOrg += d.Organisation;
-            foreach (var d in defenders) dOrg += d.Organisation;
             FP aRate = Hits(aSoft + aHard, dDef) / FP.Max(dOrg, FP.One);  // share of the defenders' org lost per hour
             FP dRate = Hits(dSoft + dHard, aBrk) / FP.Max(aOrg, FP.One);  // share of the attackers' org lost per hour
             return aRate / FP.Max(dRate, MinRate);

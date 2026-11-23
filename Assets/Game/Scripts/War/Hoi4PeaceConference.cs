@@ -315,29 +315,32 @@ namespace Hoi4.War
                 }
                 summary.Add($"{s}->{Tag(taker)}");
             }
-            // Occupations end: the loser's remaining land back to it, the winners' land it held back to them
+            int tick = (int)gameState.Time.CurrentTick;
+            foreach (var w in Winners)
+                if (gameState.Diplomacy.IsAtWar(Loser, w.Country)) gameState.Diplomacy.MakePeace(Loser, w.Country, tick);
+            // Occupations end: land held by a country not at war with its owner goes back to the owner (the
+            // loser's remaining land, the winners' land it held, and a third country's land a winner took from it)
             foreach (int s in Hoi4Regions.States)
                 foreach (ushort p in Hoi4Regions.ProvincesOf(s))
                 {
                     ushort owner = provinces.GetProvinceOwner(p), controller = provinces.GetProvinceController(p);
                     if (owner == 0 || controller == 0 || controller == owner) continue;
-                    if (owner == Loser && IsWinner(controller)) provinces.SetProvinceController(p, owner);
-                    else if (controller == Loser && IsWinner(owner)) provinces.SetProvinceController(p, owner);
+                    if (!gameState.Diplomacy.IsAtWar(owner, controller)) provinces.SetProvinceController(p, owner);
                 }
-            int tick = (int)gameState.Time.CurrentTick;
-            foreach (var w in Winners)
-                if (gameState.Diplomacy.IsAtWar(Loser, w.Country)) gameState.Diplomacy.MakePeace(Loser, w.Country, tick);
-            int sent = SendHome();
+            var changed = new HashSet<ushort>();
+            foreach (int s in sorted) foreach (ushort p in Hoi4Regions.ProvincesOf(s)) changed.Add(p);
+            int sent = SendHome(changed);
             Core.Recording.SessionRecorder.Note("war", "peace", Loser, 0, 0, 0,
                 $"{takers.Count} of {States.Count} states taken: {string.Join(" ", summary)}; {sent} divisions sent home");
         }
 
         /// <summary>
-        /// HOI4 after a peace: a division left on the loser's remaining land that its country may not be on (not its own, an ally's, an enemy's,
+        /// HOI4 after a peace: a division left on the loser's remaining land, or on land the peace gave to another
+        /// country, that its country may not be on (not its own, an ally's, an enemy's,
         /// nor with military access; Hoi4MovementRules) can't get out, so it goes to its capital (or, without the
         /// capital, its lowest-id province). Units in id order.
         /// </summary>
-        int SendHome()
+        int SendHome(HashSet<ushort> changed)
         {
             var units = gameState.Units;
             var rules = new Hoi4MovementRules(gameState);
@@ -351,9 +354,9 @@ namespace Hoi4.War
                 if (!units.HasUnit(u)) continue;
                 var unit = units.GetUnit(u);
                 ushort owner = gameState.Provinces.GetProvinceOwner(unit.provinceID);
-                // only the loser's remaining land changed: elsewhere divisions stay (e.g. garrisons stationed
-                // abroad at the start, whose access, colonies or puppets, isn't modelled)
-                if (owner != Loser || unit.countryID == Loser) continue;
+                // only the loser's remaining land and the land it lost changed hands: elsewhere divisions stay (e.g.
+                // garrisons stationed abroad at the start, whose access, colonies or puppets, isn't modelled)
+                if ((owner != Loser && !changed.Contains(unit.provinceID)) || unit.countryID == Loser || unit.countryID == owner) continue;
                 if (rules.HasAccess(unit.countryID, owner)) continue;
                 if (!home.TryGetValue(unit.countryID, out ushort to)) home[unit.countryID] = to = HomeOf(unit.countryID);
                 if (to == 0) continue;
