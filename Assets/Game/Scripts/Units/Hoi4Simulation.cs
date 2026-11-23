@@ -24,7 +24,7 @@ namespace Hoi4.Units
         // [8] war, [9] AI wars, [10] production, [11] AI production, [12] construction, [13] AI construction, [14] deployment, [15] AI deployment; then the worst single hour of [0], [1], [2], and the plans' daily line refresh
         static readonly string[] PerfNames =
             { "combat_h", "plans_h", "ai_h", "recorder", "combat_d", "equipment", "manpower", "plans_d", "war", "ai_wars", "production", "ai_production", "construction", "ai_construction", "deployment", "ai_deployment", "ai_army" };
-        static readonly string[] MaxNames = { "combat_h_max", "plans_h_max", "ai_h_max", "plans_refresh", "plans_distribute" };
+        static readonly string[] MaxNames = { "combat_h_max", "plans_h_max", "ai_h_max", "plans_refresh", "plans_distribute", "plans_ai" };
         readonly double[] perf = new double[PerfNames.Length];
         // One profiler marker per step, named like the perf.tsv columns: they show in a normal (not deep) capture
         static readonly Unity.Profiling.ProfilerMarker[] Markers = System.Array.ConvertAll(PerfNames, n => new Unity.Profiling.ProfilerMarker("Hoi4." + n));
@@ -67,6 +67,8 @@ namespace Hoi4.Units
                 sb.Append(refresh.ToString("0.00", inv)).Append('\t');
                 double distribute = Hoi4BattlePlans.Instance != null ? Hoi4BattlePlans.Instance.TakeDistributeMs() : 0;
                 sb.Append(distribute.ToString("0.00", inv)).Append('\t');
+                double ai = Hoi4BattlePlans.Instance != null ? Hoi4BattlePlans.Instance.TakeAIMs() : 0;
+                sb.Append(ai.ToString("0.00", inv)).Append('\t');
                 sb.Append(total.ToString("0.00", inv)).Append('\t');
                 sb.Append(frames).Append('\t');
                 sb.Append((frames > 0 ? frameSum / frames : 0).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)).Append('\t');

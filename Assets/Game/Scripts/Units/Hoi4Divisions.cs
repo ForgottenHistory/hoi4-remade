@@ -407,16 +407,29 @@ namespace Hoi4.Units
         public int TemplateManpower(string tag, string template)
         {
             var d = Design(tag, template);
-            return d == null ? 0 : Stats(d.RegimentTypes(), d.SupportTypes(), d.RegimentalTypes()).Manpower;
+            return d == null ? 0 : Totals(d.RegimentTypes().ToList(), d.SupportTypes().ToList(), d.RegimentalTypes().ToList()).manpower;
+        }
+
+        // Manpower and training days by composition (regiments | support | regimental): the deployment AI asked for
+        // them for every template and line every day, each a full Sum over the sub-units' JSON. Keyed by the
+        // composition itself, so a template saved with new battalions finds its own entry (nothing goes stale)
+        readonly Dictionary<string, (int manpower, int days)> totalsCache = new Dictionary<string, (int, int)>();
+
+        (int manpower, int days) Totals(List<string> regiments, List<string> support, List<string> regimental)
+        {
+            string key = string.Join(",", regiments) + "|" + string.Join(",", support) + "|" + string.Join(",", regimental);
+            if (totalsCache.TryGetValue(key, out var v)) return v;
+            var st = Sum(regiments, support, regimental, subUnitData ?? new JObject());
+            return totalsCache[key] = (st.Manpower, st.TrainingDays);
         }
 
         public int TrainingDays(string tag, string template)
         {
             if (!HasTemplate(tag, template) || subUnitData == null) return 0;
             var tj = (JObject)templatesByTag[tag][template];
-            return Sum(tj["regiments"]?.Select(x => (string)x).ToList() ?? new List<string>(),
-                       tj["support"]?.Select(x => (string)x).ToList() ?? new List<string>(),
-                       tj["regimental_support"]?.Select(x => (string)x).ToList() ?? new List<string>(), subUnitData).TrainingDays;
+            return Totals(tj["regiments"]?.Select(x => (string)x).ToList() ?? new List<string>(),
+                          tj["support"]?.Select(x => (string)x).ToList() ?? new List<string>(),
+                          tj["regimental_support"]?.Select(x => (string)x).ToList() ?? new List<string>()).days;
         }
 
         /// <summary>A new division of the template that isn't on the map yet (UnitId 0): full manpower, no equipment,

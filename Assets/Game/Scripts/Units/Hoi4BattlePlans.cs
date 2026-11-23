@@ -25,6 +25,7 @@ namespace Hoi4.Units
         // Presentation only (the player's plans): the traced border the line is drawn along
         public List<BorderArc> Arcs;                // the border arcs the line follows
         public List<List<Vector3>> Chains;          // the arcs joined into continuous polylines, enemy side on the left of travel
+        public bool TraceDirty;                     // the simulation moved the line: traced again at the next (throttled) redraw
         public readonly HashSet<ushort> Units = new HashSet<ushort>();
         public List<ushort> FrontProvinces;         // own provinces along the line, in line order (all fronts)
         public List<List<ushort>> Fronts;           // the same per separate stretch of the line (a pocket is its own front); simulation, from adjacency
@@ -687,6 +688,7 @@ namespace Hoi4.Units
             walkLabels.Clear();
             pieceReach.Clear();
             hourOwner = hourCtrl = null;
+            arcPairs = null;
             bool refreshed = borderDirty;
             if (borderDirty)
             {
@@ -694,11 +696,16 @@ namespace Hoi4.Units
                 RefreshPlans();
                 refreshMs += sw.Elapsed.TotalMilliseconds; // timing only (perf.tsv)
             }
-            PruneOffensives(refreshed);
-            PruneExecuting();
+            using (HourPruneMarker.Auto())
+            {
+                PruneOffensives(refreshed);
+                PruneExecuting();
+            }
             // The war AI's country and strategic layers, per country at its hour: armies, sections, lines (new
             // and moved lines are spread below, this hour). Before the no-plans return: a war starts with none
-            UpdateAI((int)(gameState.Time.CurrentTick % 24));
+            var aiWatch = System.Diagnostics.Stopwatch.StartNew();
+            using (HourAIMarker.Auto()) UpdateAI((int)(gameState.Time.CurrentTick % 24));
+            aiMs += aiWatch.Elapsed.TotalMilliseconds; // timing only (perf.tsv)
             if (plans.Count == 0) return;
             var units = gameState.Units;
             var queue = units.MovementQueue;
@@ -720,19 +727,36 @@ namespace Hoi4.Units
                 });
                 if (removed > 0) touched.Add(plan);
             }
-            AutoAssign(touched);
+            using (HourAssignMarker.Auto()) AutoAssign(touched);
             bool playerTouched = false;
-            foreach (var plan in plans)
+            using (HourHoldMarker.Auto())
+                foreach (var plan in plans)
+                {
+                    if (touched.Contains(plan)) { Distribute(plan); playerTouched |= !plan.IsAI; }
+                    else Hold(plan);
+                }
+            using (HourOffensivesMarker.Auto())
             {
-                if (touched.Contains(plan)) { Distribute(plan); playerTouched |= !plan.IsAI; }
-                else Hold(plan);
+                AssignOffensives();
+                Advance();
             }
-            AssignOffensives();
-            Advance();
             if (playerTouched) Changed?.Invoke();
         }
 
-        double refreshMs;
+        double refreshMs, aiMs;
+        bool simMeshDirty;    // the simulation changed what the lines look like (redrawn throttled, LateUpdate)
+        float nextSimRedraw;  // real time (presentation throttle)
+        const float MeshRedrawSeconds = 0.25f;
+        Dictionary<(ushort, ushort), List<int>> arcPairs; // controller pair (lower first) -> arc indices, this hour (BorderWith)
+        ushort HourController(ushort p) => p < hourCtrl.Length ? hourCtrl[p] : (ushort)0;
+        static readonly Unity.Profiling.ProfilerMarker HourPruneMarker = new Unity.Profiling.ProfilerMarker("Hoi4.plans.prune");
+        static readonly Unity.Profiling.ProfilerMarker HourAIMarker = new Unity.Profiling.ProfilerMarker("Hoi4.plans.ai_country");
+        static readonly Unity.Profiling.ProfilerMarker HourAssignMarker = new Unity.Profiling.ProfilerMarker("Hoi4.plans.auto_assign");
+        static readonly Unity.Profiling.ProfilerMarker HourHoldMarker = new Unity.Profiling.ProfilerMarker("Hoi4.plans.distribute_hold");
+        static readonly Unity.Profiling.ProfilerMarker HourOffensivesMarker = new Unity.Profiling.ProfilerMarker("Hoi4.plans.offensives");
+
+        /// <summary>Milliseconds spent in the war AI's country layer since the last call (perf.tsv).</summary>
+        public double TakeAIMs() { double v = aiMs; aiMs = 0; return v; }
         /// <summary>Milliseconds spent refreshing the lines since the last call (Hoi4Simulation's perf.tsv).</summary>
         public double TakeRefreshMs() { double v = refreshMs; refreshMs = 0; return v; }
 
@@ -939,15 +963,38 @@ namespace Hoi4.Units
         {
             var arcs = new List<BorderArc>();
             if (owner == 0 || !EnsureArcs()) return arcs;
-            for (int i = 0; i < allArcs.Count; i++)
+            if (!simReady) // no hourly snapshot yet: the live controllers, every arc
+            {
+                foreach (var arc in allArcs)
+                {
+                    ushort a = Hoi4Occupation.ControllerOf(gameState, arc.ProvinceA), b = Hoi4Occupation.ControllerOf(gameState, arc.ProvinceB);
+                    ushort own = a == owner && b == country ? arc.ProvinceA : b == owner && a == country ? arc.ProvinceB : (ushort)0;
+                    if (own == 0 || !InSection(section, own)) continue;
+                    ownSide.Add(own);
+                    arcs.Add(arc);
+                }
+                return arcs;
+            }
+            // The arcs between each pair of controllers, indexed once per hour (the hour's controller snapshot):
+            // every drawn line scanned all ~43,000 arcs with two controller lookups each, ~90% of a line refresh
+            if (arcPairs == null)
+            {
+                SnapshotHour();
+                arcPairs = new Dictionary<(ushort, ushort), List<int>>();
+                for (int i = 0; i < allArcs.Count; i++)
+                {
+                    ushort a = HourController(allArcs[i].ProvinceA), b = HourController(allArcs[i].ProvinceB);
+                    if (a == b || a == 0 || b == 0) continue;
+                    var key = (Math.Min(a, b), Math.Max(a, b));
+                    if (!arcPairs.TryGetValue(key, out var l)) arcPairs[key] = l = new List<int>();
+                    l.Add(i);
+                }
+            }
+            if (country == 0 || !arcPairs.TryGetValue((Math.Min(owner, country), Math.Max(owner, country)), out var list)) return arcs;
+            foreach (int i in list)
             {
                 var arc = allArcs[i];
-                ushort a = Hoi4Occupation.ControllerOf(gameState, arc.ProvinceA);
-                ushort b = Hoi4Occupation.ControllerOf(gameState, arc.ProvinceB);
-                ushort own;
-                if (a == owner && b == country) own = arc.ProvinceA;
-                else if (b == owner && a == country) own = arc.ProvinceB;
-                else continue;
+                ushort own = HourController(arc.ProvinceA) == owner ? arc.ProvinceA : arc.ProvinceB;
                 if (!InSection(section, own)) continue; // another stretch of the border
                 ownSide.Add(own);
                 arcs.Add(arc);
@@ -1392,7 +1439,8 @@ namespace Hoi4.Units
             var byFront = new SortedDictionary<int, List<BorderArc>>();
             foreach (var arc in plan.Arcs)
             {
-                bool aOwn = Hoi4Occupation.ControllerOf(gameState, arc.ProvinceA) == plan.Owner;
+                // the arcs' own controllers (BorderWith's hourly snapshot once the simulation runs)
+                bool aOwn = (simReady && hourCtrl != null ? HourController(arc.ProvinceA) : Hoi4Occupation.ControllerOf(gameState, arc.ProvinceA)) == plan.Owner;
                 ushort own = aOwn ? arc.ProvinceA : arc.ProvinceB, enemy = aOwn ? arc.ProvinceB : arc.ProvinceA;
                 int f = plan.FrontIndex.TryGetValue(own, out int fi) ? fi : -1; // -1: impassable, not part of a front
                 if (f >= 0 && piece.TryGetValue(enemy, out int ep) && frontPiece[f] != ep)
@@ -1454,7 +1502,7 @@ namespace Hoi4.Units
                 string before = FrontSizes(plan);
                 SetFronts(plan, fronts);
                 Core.Recording.SessionRecorder.Note("plans", "line_moved", plan.Owner, 0, 0, plan.Country, $"plan {plan.Id}: fronts {before} -> {FrontSizes(plan)}");
-                if (IsDrawn(plan)) { TraceLine(plan); any = true; }
+                if (IsDrawn(plan)) { plan.TraceDirty = true; any = true; }
                 moved++;
                 part.Restart();
                 using (RefreshDistributeMarker.Auto()) Distribute(plan);
@@ -1473,7 +1521,7 @@ namespace Hoi4.Units
             if (Active) SetPreview(hoverProvince);
             if (any)
             {
-                dirtyMesh = true;
+                simMeshDirty = true;
                 Changed?.Invoke();
             }
         }
@@ -1515,7 +1563,19 @@ namespace Hoi4.Units
         void LateUpdate()
         {
             if (!ready || hidden) return;
-            if (dirtyMesh) { dirtyMesh = false; Rebuild(); }
+            // The player's edits redraw at once; the simulation's (lines moving, divisions slotting, AI armies) at
+            // most MeshRedrawSeconds apart in real time: at several game hours a frame the mesh of every drawn line
+            // was rebuilt every frame (10 ms a frame with the AI lines shown)
+            if (dirtyMesh || (simMeshDirty && Time.unscaledTime >= nextSimRedraw))
+            {
+                dirtyMesh = simMeshDirty = false;
+                nextSimRedraw = Time.unscaledTime + MeshRedrawSeconds;
+                // lines the simulation moved are traced here, once per redraw, not in the simulation step for
+                // every change (with the AI lines shown, tracing was most of the AI's line updates)
+                foreach (var plan in plans)
+                    if (plan.TraceDirty) { plan.TraceDirty = false; if (IsDrawn(plan)) TraceLine(plan); }
+                Rebuild();
+            }
             if (mesh.vertexCount > 0)
                 Graphics.DrawMesh(mesh, Matrix4x4.identity, material, 0);
             DrawOffensiveArrows();
@@ -1674,7 +1734,7 @@ namespace Hoi4.Units
 
         void DistributeInner(Hoi4BattlePlan plan)
         {
-            if (IsDrawn(plan)) dirtyMesh = true; // a front may have gained or lost all its divisions (unassigned look)
+            if (IsDrawn(plan)) simMeshDirty = true; // a front may have gained or lost all its divisions (unassigned look)
             var previous = new Dictionary<ushort, ushort>(plan.Slot); // kept where still on the line (below)
             plan.Slot.Clear();
             var fronts = plan.Fronts;

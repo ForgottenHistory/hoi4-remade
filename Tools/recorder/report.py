@@ -455,7 +455,7 @@ def main():
               f"{s['retreating']:8.0%} {other:6.0%} {mpd:14.2f} {org:4.0f}%")
 
     # --- war AI country layer: theatres, main efforts, armies (Hoi4BattlePlans.AICountry, Docs/ai-layers.md) ---
-    print("\n## War AI (main efforts; theatres and armies at each country's last daily run, have/budget)")
+    print("\n## War AI (main efforts; theatres and armies at each country's last plan, have/budget; plans and why)")
     aic = [r for r in notes if r["system"] == "ai_country" and (not only or r["country"] == only)]
     mains = [r for r in aic if r["kind"] == "main_effort"]
     if not aic:
@@ -464,11 +464,13 @@ def main():
         print(f"{r['date']}  {r['country']:6} {r['text'][:400]}")
     if len(mains) > 40:
         print(f"... {len(mains) - 40} more main effort changes")
-    last, joined, reserved, disbanded = {}, Counter(), Counter(), Counter()
+    last, joined, reserved, disbanded, why = {}, Counter(), Counter(), Counter(), {}
     for r in aic:
         c = r["country"]
         if r["kind"] == "theatres":
             last[c] = r
+            m = re.match(r"plan \((.*?)\):", r["text"])
+            why.setdefault(c, Counter())[re.sub(r"\d+", "N", m.group(1)) if m else "daily"] += 1
         elif r["kind"] == "join":
             joined[c] += sum(int(x) for x in re.findall(r"\+(\d+)", r["text"]))
         elif r["kind"] == "reserve":
@@ -476,7 +478,8 @@ def main():
         elif r["kind"] == "disband":
             disbanded[c] += 1
     for c, r in sorted(last.items(), key=lambda kv: -(joined[kv[0]] + reserved[kv[0]]))[:a.top + 8]:
-        print(f"{c:6} joined {joined[c]}, to reserve {reserved[c]}, armies disbanded {disbanded[c]}; last {r['date']}: {r['text'][:600]}")
+        plans = ", ".join(f"{k} {n}" for k, n in why.get(c, Counter()).most_common(4))
+        print(f"{c:6} plans {sum(why.get(c, Counter()).values())} ({plans}); joined {joined[c]}, to reserve {reserved[c]}, armies disbanded {disbanded[c]}; last {r['date']}: {r['text'][:600]}")
 
     # --- timing (Hoi4Simulation perf.tsv, one row per day) -----------------------------------------
     _, perf = rec.load(path, "perf")
@@ -490,7 +493,7 @@ def main():
             except ValueError:
                 return 0.0
         systems = [k for k in perf[0] if k not in ("tick", "date", "sim_ms", "frames", "frame_ms_avg", "frame_ms_max", "wars", "divisions")
-                   and not k.endswith("_max") and k not in ("plans_refresh", "plans_distribute")]
+                   and not k.endswith("_max") and k not in ("plans_refresh", "plans_distribute", "plans_ai")]
         step = max(1, len(perf) // 12)
         print(f"{'date':14} {'wars':>4} {'divs':>5} {'sim_ms':>8} {'frame avg':>9} {'frame max':>9}  top systems")
         for i in range(0, len(perf), step):

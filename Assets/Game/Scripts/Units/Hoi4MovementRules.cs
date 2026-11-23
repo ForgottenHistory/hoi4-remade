@@ -19,7 +19,8 @@ namespace Hoi4.Units
     /// Cost: A* calls CanTraverse and GetMovementCost for every province it looks at, so they are array reads.
     /// Water, impassable and terrain cost never change in HOI4 and are read once. Owners are a snapshot
     /// rebuilt when ProvinceSystem.OwnershipVersion changes; access per (country, owner) is cached until
-    /// DiplomacySystem.RelationsVersion or the ownership changes. Same answers as reading them each time.
+    /// DiplomacySystem.RelationsVersion or the ownership changes, and folded per country into one passable array
+    /// (Passable) under the same versions. Same answers as reading them each time.
     /// </summary>
     public sealed class Hoi4MovementRules : IMovementCostCalculator
     {
@@ -48,8 +49,35 @@ namespace Hoi4.Units
             EnsureStatic();
             if (province >= blocked.Length || blocked[province])
                 return false;
-            if (context.UnitOwnerCountryId == 0) return true; // no owner given: terrain rules only
-            return HasAccess(context.UnitOwnerCountryId, OwnerOf(province));
+            ushort country = context.UnitOwnerCountryId;
+            if (country == 0) return true; // no owner given: terrain rules only
+            return Passable(country)[province];
+        }
+
+        // Per country: may it enter each province (terrain, impassable, the owner's war/alliance/access), as of the
+        // ownership and relations versions. A* asks for every province it looks at (hundreds of thousands of times
+        // an hour in a world war): one array read instead of version checks, an owner read and an access lookup
+        readonly Dictionary<ushort, (int ownership, int relations, bool[] ok)> passable = new Dictionary<ushort, (int, int, bool[])>();
+        ushort lastCountry;
+        bool[] lastPassable;
+        int lastOwnership = -1, lastRelations = -1;
+
+        bool[] Passable(ushort country)
+        {
+            int ownership = gameState.Provinces.OwnershipVersion;
+            int relations = gameState.Diplomacy?.RelationsVersion ?? 0;
+            if (country == lastCountry && lastPassable != null && ownership == lastOwnership && relations == lastRelations) return lastPassable;
+            if (!passable.TryGetValue(country, out var entry) || entry.ownership != ownership || entry.relations != relations)
+            {
+                var ok = entry.ok ?? new bool[blocked.Length];
+                for (int p = 0; p < ok.Length; p++) ok[p] = !blocked[p] && HasAccess(country, OwnerOf((ushort)p));
+                passable[country] = entry = (ownership, relations, ok);
+            }
+            lastCountry = country;
+            lastPassable = entry.ok;
+            lastOwnership = ownership;
+            lastRelations = relations;
+            return entry.ok;
         }
 
         /// <summary>May units of `country` enter land owned by `owner`?</summary>

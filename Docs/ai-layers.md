@@ -190,6 +190,26 @@ Measured: a section's centre moves a mean 47–64 km per step when carried, agai
   takes only what its battles can use (HOI4 combat width by terrain over division width, plus a reserve line); the
   rest waits in reserve behind the most dangerous front.
 
+#### Performance pass (2026-11-23)
+
+- **Line drawing:** `BorderWith` scanned all ~43,000 border arcs with two controller lookups each, for every drawn
+  line (about 90% of a line refresh). Arcs are now indexed per hour by controller pair.
+- **Line mesh:** rebuilt every frame while the simulation ran (10 ms a frame with AI lines shown). Simulation changes
+  now redraw at most every 0.25 s of real time; lines the simulation moved are traced at that redraw (`TraceDirty`),
+  not in the simulation step.
+- **Landmasses:** flood fill from the country's own land only.
+- **Country layer, weekly** (user: "we shouldnt run more than we have to"): `RunCountry` decides. `PlanCountry` (the
+  old daily run) runs weekly or early (first plan, other enemies, front +-25%, an army gone, over a tenth of the front
+  beyond every section's CarryHops reach). On other days `FollowCountry` carries the sections onto today's front
+  (`CarrySections`), then updates army lines, membership and posture with the plan's theatres and budgets. Route
+  costs are cached for a plan's lifetime (7 days). The theatres note says why it planned, and report.py counts plans
+  by reason.
+- **Measured after** (`Recordings/20261123_170848_CUB`, 84 war days, ~47 wars, ~1,000 divisions): sim 110 ms a game
+  day (was ~250), plans 56 (was ~200), line refresh 18 (was ~100), country layer 32, frame average 31 ms (was 62).
+  Plans: 364 weekly, 236 front beyond every section, 194 other enemies, 121 front +-25%, 85 first. Then: between plans
+  a front province goes to a section within FollowHops (8; the plan carries CarryHops 4), and the army lines are
+  skipped when no section changed (the hourly refresh follows the border within a section).
+
 ## State
 
 - Done (compiles, untested in play): armies have an owner (the player's UI lists only the player's); the IsAI-special

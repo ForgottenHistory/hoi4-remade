@@ -36,9 +36,18 @@ namespace Hoi4.Units
     /// </summary>
     public sealed partial class Hoi4BattlePlans
     {
+        static readonly Unity.Profiling.ProfilerMarker LandmassesMarker = new Unity.Profiling.ProfilerMarker("Hoi4.ai_country.landmasses");
+        static readonly Unity.Profiling.ProfilerMarker HomeCostsMarker = new Unity.Profiling.ProfilerMarker("Hoi4.ai_country.home_costs");
+        static readonly Unity.Profiling.ProfilerMarker RouteCostsMarker = new Unity.Profiling.ProfilerMarker("Hoi4.ai_country.route_costs");
+        static readonly Unity.Profiling.ProfilerMarker FacingMarker = new Unity.Profiling.ProfilerMarker("Hoi4.ai_country.facing");
+        static readonly Unity.Profiling.ProfilerMarker ArmyLinesMarker = new Unity.Profiling.ProfilerMarker("Hoi4.ai_country.army_lines");
+        static readonly Unity.Profiling.ProfilerMarker MembershipMarker = new Unity.Profiling.ProfilerMarker("Hoi4.ai_country.membership");
+
+        const int PlanDays = 7;         // the country layer plans weekly (and early when the picture changes, RunCountry)
         const int CommitDays = 60;
         const int FacingHops = 2;
         const int ArmySize = 24;        // HOI4's army limit
+        const int FollowHops = 8;       // between plans, a front province goes to the army of a section this close (else: plan)
         const int CarryHops = 4;        // a section carries over to front provinces this close to it
         const int MergeHops = 4;        // stretches of front this close (land hops) are one theatre ...
         const int MinTheatre = 4;       // ... and one shorter than this provinces joins one up to ...
@@ -78,6 +87,12 @@ namespace Hoi4.Units
             public Dictionary<ushort, int> Section = new Dictionary<ushort, int>(); // yesterday's front province -> army
             public readonly Dictionary<int, ushort> Anchor = new Dictionary<int, ushort>(); // army -> middle province of its section
             public readonly Dictionary<int, int> Budget = new Dictionary<int, int>();
+            // The last plan (PlanCountry), which the daily follow-up (FollowCountry) works from
+            public int LastPlan;
+            public List<Theatre> Theatres = new List<Theatre>();
+            public readonly Dictionary<int, int> ArmyTheatre = new Dictionary<int, int>(); // army -> index in Theatres
+            public SortedSet<ushort> Enemies = new SortedSet<ushort>();                    // the enemies its front faced
+            public int FrontSize;
         }
 
         readonly Dictionary<ushort, AIState> aiStates = new Dictionary<ushort, AIState>();
@@ -142,7 +157,7 @@ namespace Hoi4.Units
         /// <summary>Hourly: the AI countries whose hour it is (id mod 24) run their country layer, in id order.</summary>
         void UpdateAI(int hour)
         {
-            if (Today != routesDay) { routes.Clear(); routesDay = Today; }
+            if (routesDay < 0 || Today - routesDay >= PlanDays) { routes.Clear(); routesDay = Today; } // as long as a plan
             var armies = Hoi4Armies.Instance;
             var diplomacy = gameState.Diplomacy;
             if (armies == null || diplomacy == null) return;
@@ -176,14 +191,148 @@ namespace Hoi4.Units
         void DisbandAIArmy(Hoi4Army army)
         {
             foreach (var plan in new List<Hoi4BattlePlan>(plans))
-                if (plan.ArmyId == army.Id) { RemovePlan(plan); if (IsDrawn(plan)) dirtyMesh = true; }
+                if (plan.ArmyId == army.Id) { RemovePlan(plan); if (IsDrawn(plan)) simMeshDirty = true; }
             foreach (var o in new List<Hoi4Offensive>(offensives))
                 if (o.ArmyId == army.Id) RemoveOffensive(o, "army disbanded");
             executing.Remove(army.Id);
             Hoi4Armies.Instance.Disband(army);
         }
 
+        /// <summary>
+        /// Daily per country at war: the country layer plans (PlanCountry: theatres, scores, main effort, budgets,
+        /// armies) weekly, or early when the picture changed: no plan yet, other enemies, the front a quarter longer
+        /// or shorter, an army gone, or more than a tenth of the front (at least 3 provinces) beyond the reach of
+        /// every army's section. Otherwise the strategic layer follows the front (FollowCountry). Planning daily cost
+        /// ~16 ms a frame in a world war.
+        /// </summary>
         void RunCountry(ushort country)
+        {
+            SnapshotHour();
+            var diplomacy = gameState.Diplomacy;
+            var armies = Hoi4Armies.Instance;
+            var front = new List<ushort>();
+            var enemies = new SortedSet<ushort>();
+            foreach (ushort p in landProvinces)
+            {
+                if (hourCtrl[p] != country || Hoi4Regions.IsImpassable(p)) continue;
+                bool isFront = false;
+                foreach (ushort n in Neighbours(p))
+                {
+                    ushort e = hourCtrl[n];
+                    if (Hoi4Regions.IsImpassable(n) || e == 0 || e == country || !diplomacy.IsAtWar(country, e)) continue;
+                    isFront = true;
+                    enemies.Add(e);
+                }
+                if (isFront) front.Add(p);
+            }
+            if (front.Count == 0) { StandDown(country); return; }
+            string reason = null;
+            if (!aiStates.TryGetValue(country, out var st)) reason = "first plan";
+            else if (Today - st.LastPlan >= PlanDays) reason = "weekly";
+            else if (!enemies.SetEquals(st.Enemies)) reason = "other enemies";
+            else if (Math.Abs(front.Count - st.FrontSize) * 4 > st.FrontSize) reason = $"front {st.FrontSize} -> {front.Count} provinces";
+            else foreach (int a in st.Budget.Keys) if (armies.Get(a) == null) { reason = "an army is gone"; break; }
+            Dictionary<ushort, int> near = null;
+            if (reason == null)
+            {
+                near = CarrySections(st, FollowHops);
+                int uncovered = 0;
+                foreach (ushort p in front) if (!near.TryGetValue(p, out int a) || !st.ArmyTheatre.ContainsKey(a)) uncovered++;
+                if (uncovered > Math.Max(2, front.Count / 10)) reason = $"{uncovered} front provinces beyond every army's section";
+            }
+            if (reason != null) PlanCountry(country, reason);
+            else FollowCountry(country, st, front, near);
+        }
+
+        /// <summary>Each province within reach land hops of the last sections -> the army of the nearest
+        /// (ties: the lower army id, then the lower province id).</summary>
+        Dictionary<ushort, int> CarrySections(AIState st, int reach)
+        {
+            var near = new Dictionary<ushort, int>();
+            if (st.Section.Count == 0) return near;
+            var q = new List<ushort>(st.Section.Keys);
+            q.Sort((a, b) => st.Section[a] != st.Section[b] ? st.Section[a].CompareTo(st.Section[b]) : a.CompareTo(b));
+            var dist = new Dictionary<ushort, int>();
+            foreach (ushort p in q) { dist[p] = 0; near[p] = st.Section[p]; }
+            for (int i = 0; i < q.Count; i++)
+            {
+                ushort x = q[i];
+                if (dist[x] >= reach) continue;
+                foreach (ushort y in Neighbours(x))
+                    if (!dist.ContainsKey(y) && !Hoi4Regions.IsImpassable(y)) { dist[y] = dist[x] + 1; near[y] = near[x]; q.Add(y); }
+            }
+            return near;
+        }
+
+        /// <summary>
+        /// The strategic layer between plans: each front province takes the army of the nearest province of the
+        /// last sections (CarrySections), into that army's theatre; then the army lines, divisions and posture
+        /// follow, with the plan's theatres and budgets.
+        /// </summary>
+        void FollowCountry(ushort country, AIState st, List<ushort> front, Dictionary<ushort, int> near)
+        {
+            var diplomacy = gameState.Diplomacy;
+            // the attack AI ranks its targets by the main enemy's route costs (TryRouteCost): cached for a plan's
+            // lifetime, and computed here when the cache was cleared since this country last planned
+            if (st.MainEnemy != 0) RouteCosts(st.MainEnemy);
+            foreach (var th in st.Theatres) { th.ArmyOf = new Dictionary<ushort, int>(); th.Enemies.Clear(); }
+            var section = new Dictionary<ushort, int>();
+            foreach (ushort p in front)
+            {
+                if (!near.TryGetValue(p, out int a) || !st.ArmyTheatre.TryGetValue(a, out int ti)) continue;
+                section[p] = a;
+                var th = st.Theatres[ti];
+                th.ArmyOf[p] = a;
+                foreach (ushort n in Neighbours(p))
+                {
+                    ushort e = hourCtrl[n];
+                    if (!Hoi4Regions.IsImpassable(n) && e != 0 && e != country && diplomacy.IsAtWar(country, e)) th.Enemies.Add(e);
+                }
+            }
+            // Sections as before: nothing for the army lines to do (the hourly refresh follows the border within
+            // each section), which is most days on a front that holds
+            bool same = section.Count == st.Section.Count;
+            if (same) foreach (var kv in section) if (!st.Section.TryGetValue(kv.Key, out int was) || was != kv.Value) { same = false; break; }
+            st.Section = section;
+            // an army whose anchor left its section: the middle of its new one (by id)
+            var byArmy = new SortedDictionary<int, List<ushort>>();
+            foreach (var kv in section)
+            {
+                if (!byArmy.TryGetValue(kv.Value, out var l)) byArmy[kv.Value] = l = new List<ushort>();
+                l.Add(kv.Key);
+            }
+            foreach (var kv in byArmy)
+                if (!st.Anchor.TryGetValue(kv.Key, out ushort anchor) || !section.TryGetValue(anchor, out int at) || at != kv.Key)
+                {
+                    kv.Value.Sort();
+                    st.Anchor[kv.Key] = kv.Value[kv.Value.Count / 2];
+                }
+            int[] labels;
+            using (LandmassesMarker.Auto()) labels = Landmasses(country);
+            var own = gameState.Units.GetCountryUnits(country);
+            own.Sort();
+            if (!same) using (ArmyLinesMarker.Auto()) UpdateArmyLines(country, st.Theatres);
+            using (MembershipMarker.Auto()) UpdateMembership(country, st, st.Theatres, own, labels);
+            UpdatePosture(st, st.Theatres);
+        }
+
+        /// <summary>Posture: the main effort attacks while its armies have AttackRatio times the enemy divisions
+        /// facing it; every other theatre (and a main effort short of that) holds (Hoi4EnemyAI: only flattening
+        /// bulges at crushing odds).</summary>
+        void UpdatePosture(AIState st, List<Theatre> theatres)
+        {
+            var armies = Hoi4Armies.Instance;
+            st.AttackArmies.Clear();
+            foreach (var th in theatres)
+            {
+                int have = 0;
+                foreach (int a in th.Armies) have += armies.Get(a)?.Units.Count ?? 0;
+                th.Attacking = th.Main && FP.FromInt(have) >= FP.FromInt(th.Facing) * AttackRatio;
+                if (th.Attacking) foreach (int a in th.Armies) st.AttackArmies.Add(a);
+            }
+        }
+
+        void PlanCountry(ushort country, string reason)
         {
             SnapshotHour();
             var armies = Hoi4Armies.Instance;
@@ -222,8 +371,10 @@ namespace Hoi4.Units
             // Facing the same enemy province joins fronts only on the same landmass: a cut-off piece facing the
             // main front's enemy took the main front onto its landmass (its label came from whichever province
             // was first) and starved it of divisions
-            var labels = Landmasses(country);
-            var homeCost = HomeCosts(country);
+            int[] labels;
+            Dictionary<ushort, FP> homeCost;
+            using (LandmassesMarker.Auto()) labels = Landmasses(country);
+            using (HomeCostsMarker.Auto()) homeCost = HomeCosts(country);
             foreach (var l in faced.Values)
                 for (int i = 1; i < l.Count; i++) if (labels[l[i]] == labels[l[0]]) Union(l[0], l[i]);
             var groups = Groups(front, Find);
@@ -302,7 +453,7 @@ namespace Hoi4.Units
                 foreach (ushort p in g) foreach (ushort n in Neighbours(p)) if (Land(n) && IsEnemy(C(n))) t.Enemies.Add(C(n));
                 t.Label = labels[g[0]];
                 t.Overseas = t.Label != home;
-                t.Facing = FacingDivisions(g, t.Enemies);
+                using (FacingMarker.Auto()) t.Facing = FacingDivisions(g, t.Enemies);
                 // How many it takes: enough to fill the line (one per front province) and to match the enemy
                 // divisions facing it, whichever is more (the main effort: AttackRatio times them, below)
                 // Weighted by the danger to the homeland: an enemy here with a cheap route to our core victory
@@ -327,21 +478,7 @@ namespace Hoi4.Units
             }
 
             // --- Carry yesterday's sections by nearness; whose armies are where --------------------------
-            var near = new Dictionary<ushort, int>();
-            if (st.Section.Count > 0)
-            {
-                var q = new List<ushort>(st.Section.Keys);
-                q.Sort((a, b) => st.Section[a] != st.Section[b] ? st.Section[a].CompareTo(st.Section[b]) : a.CompareTo(b));
-                var dist = new Dictionary<ushort, int>();
-                foreach (ushort p in q) { dist[p] = 0; near[p] = st.Section[p]; }
-                for (int i = 0; i < q.Count; i++)
-                {
-                    ushort x = q[i];
-                    if (dist[x] >= CarryHops) continue;
-                    foreach (ushort y in Neighbours(x))
-                        if (!dist.ContainsKey(y) && Land(y)) { dist[y] = dist[x] + 1; near[y] = near[x]; q.Add(y); }
-                }
-            }
+            var near = CarrySections(st, CarryHops);
             var mine = new Dictionary<int, int>(); // army -> theatre holding most of its carried provinces
             {
                 var votes = new Dictionary<(int army, int theatre), int>();
@@ -561,20 +698,19 @@ namespace Hoi4.Units
                 }
             }
 
-            UpdateArmyLines(country, theatres);
-            UpdateMembership(country, st, theatres, own, labels);
+            using (ArmyLinesMarker.Auto()) UpdateArmyLines(country, theatres);
+            using (MembershipMarker.Auto()) UpdateMembership(country, st, theatres, own, labels);
 
-            // Posture: the main effort attacks while it has AttackRatio times the enemy divisions facing it; every
-            // other theatre (and a main effort short of that) holds (Hoi4EnemyAI: only flattening bulges at
-            // crushing odds)
-            st.AttackArmies.Clear();
-            foreach (var t in theatres)
-            {
-                int have = 0;
-                foreach (int a in t.Armies) have += armies.Get(a)?.Units.Count ?? 0;
-                t.Attacking = t.Main && FP.FromInt(have) >= FP.FromInt(t.Facing) * AttackRatio;
-                if (t.Attacking) foreach (int a in t.Armies) st.AttackArmies.Add(a);
-            }
+            UpdatePosture(st, theatres);
+
+            // what the daily follow-up works from until the next plan
+            st.LastPlan = today;
+            st.Theatres = theatres;
+            st.ArmyTheatre.Clear();
+            for (int ti = 0; ti < theatres.Count; ti++) foreach (int a in theatres[ti].Armies) st.ArmyTheatre[a] = ti;
+            st.Enemies = new SortedSet<ushort>();
+            foreach (var t in theatres) st.Enemies.UnionWith(t.Enemies);
+            st.FrontSize = front.Count;
 
             var summary = new List<string>();
             foreach (var t in theatres)
@@ -590,12 +726,12 @@ namespace Hoi4.Units
                 summary.Add($"{TheatreName(t)}{(t.Main ? " MAIN" : "")}{(t.Attacking ? " ATTACK" : "")}{(t.Overseas ? " OVERSEAS" : "")} {t.Provinces.Count}p danger {t.Danger.ToFloat():0.00} need {t.Need} budget {t.Budget}: {string.Join(", ", parts)}");
             }
             Core.Recording.SessionRecorder.Note("ai_country", "theatres", country, 0, 0, st.MainEnemy,
-                $"{own.Count} divisions, reserve target {reserve}; {string.Join(" | ", summary)}");
+                $"plan ({reason}): {own.Count} divisions, reserve target {reserve}; {string.Join(" | ", summary)}");
         }
 
         /// <summary>
         /// The country's landmasses: connected pieces of passable land it may walk on (its own, allies', access)
-        /// that no enemy controls, by province id; -1 elsewhere. Unlike WalkLabels an enemy division standing in our
+        /// that no enemy controls and that hold some of its own land, by province id; -1 elsewhere. Unlike WalkLabels an enemy division standing in our
         /// land doesn't split it (that flickered fronts between "landmasses" hour to hour). Its divisions can reach
         /// each other's landmass only by sea, which isn't modelled: budgets are per landmass.
         /// </summary>
@@ -605,29 +741,32 @@ namespace Hoi4.Units
             SnapshotHour();
             var diplomacy = gameState.Diplomacy;
             var label = new int[landNeighbours.Length];
-            var walk = new bool[landNeighbours.Length];
+            System.Array.Fill(label, -1);
+            // Only land reachable from the country's own: every caller looks at its fronts, sections and the
+            // divisions that can walk to them (labelling the whole map for every country was 3 ms a frame).
+            // Walkable is decided per province as the fill reaches it
             var ok = new Dictionary<(ushort owner, ushort ctrl), bool>();
-            foreach (ushort p in landProvinces)
+            bool Walk(ushort p)
             {
-                label[p] = -1;
-                if (Hoi4Regions.IsImpassable(p)) continue;
+                if (Hoi4Regions.IsImpassable(p)) return false;
                 ushort c = hourCtrl[p], o = hourOwner[p];
+                if (c == country) return true;
                 if (!ok.TryGetValue((o, c), out bool w))
-                    ok[(o, c)] = w = c != 0 && (c == country || !diplomacy.IsAtWar(country, c)) && (c == country || movementRules.HasAccess(country, o));
-                walk[p] = w;
+                    ok[(o, c)] = w = c != 0 && !diplomacy.IsAtWar(country, c) && movementRules.HasAccess(country, o);
+                return w;
             }
             int next = 0;
             var queue = new List<ushort>();
             foreach (ushort s in landProvinces)
             {
-                if (!walk[s] || label[s] >= 0) continue;
+                if (hourCtrl[s] != country || label[s] >= 0 || !Walk(s)) continue;
                 int id = next++;
                 queue.Clear();
                 queue.Add(s);
                 label[s] = id;
                 for (int k = 0; k < queue.Count; k++)
                     foreach (ushort r in Neighbours(queue[k]))
-                        if (walk[r] && label[r] < 0) { label[r] = id; queue.Add(r); }
+                        if (label[r] < 0 && Walk(r)) { label[r] = id; queue.Add(r); }
             }
             return label;
         }
@@ -735,7 +874,7 @@ namespace Hoi4.Units
                 if (!want.ContainsKey((plan.ArmyId, plan.Country)) || have.ContainsKey((plan.ArmyId, plan.Country)))
                 {
                     RemovePlan(plan);
-                    if (IsDrawn(plan)) dirtyMesh = true;
+                    if (IsDrawn(plan)) simMeshDirty = true;
                     continue;
                 }
                 have[(plan.ArmyId, plan.Country)] = plan;
@@ -761,7 +900,7 @@ namespace Hoi4.Units
                     plans.Add(plan);
                     Core.Recording.SessionRecorder.Note("plans", "created", country, 0, 0, key.enemy, $"plan {plan.Id} (AI) army {key.army}: fronts {FrontSizes(plan)}");
                 }
-                if (IsDrawn(plan)) { TraceLine(plan); dirtyMesh = true; }
+                if (IsDrawn(plan)) { plan.TraceDirty = true; simMeshDirty = true; }
                 dirtyPlans.Add(plan);
             }
         }
@@ -933,10 +1072,18 @@ namespace Hoi4.Units
             return result;
         }
 
+        // Terrain never changes: each province's step cost, read once (home and route costs ask tens of thousands of times)
+        FP[] terrainStep;
+        bool[] terrainStepKnown;
+
         FP TerrainStep(ushort p)
         {
+            if (terrainStep == null) { terrainStep = new FP[landNeighbours.Length]; terrainStepKnown = new bool[landNeighbours.Length]; }
+            if (p < terrainStep.Length && terrainStepKnown[p]) return terrainStep[p];
             FP attack = Hoi4.Map.Hoi4CombatTerrain.AttackModifier(gameState, p);
-            return Hoi4.Map.Hoi4CombatTerrain.MovementCost(gameState, p) / FP.Max(FP.FromFraction(1, 10), FP.One + attack);
+            FP step = Hoi4.Map.Hoi4CombatTerrain.MovementCost(gameState, p) / FP.Max(FP.FromFraction(1, 10), FP.One + attack);
+            if (p < terrainStep.Length) { terrainStep[p] = step; terrainStepKnown[p] = true; }
+            return step;
         }
 
         /// <summary>
@@ -950,6 +1097,7 @@ namespace Hoi4.Units
         Dictionary<ushort, FP> RouteCosts(ushort enemy)
         {
             if (routes.TryGetValue(enemy, out var known)) return known;
+            using var _ = RouteCostsMarker.Auto();
             var result = new Dictionary<ushort, FP>();
             routes[enemy] = result;
             if (!LandByController().TryGetValue(enemy, out var landList)) return result;
@@ -988,12 +1136,7 @@ namespace Hoi4.Units
                     FP share = d != null && d.MaxStrength > FP.Zero ? FP.Min(FP.One, d.Strength / d.MaxStrength) : FP.One;
                     foe[p] = (foe.TryGetValue(p, out FP f) ? f : FP.Zero) + share;
                 }
-            FP Step(ushort p)
-            {
-                FP attack = Hoi4.Map.Hoi4CombatTerrain.AttackModifier(gameState, p);
-                FP terrain = Hoi4.Map.Hoi4CombatTerrain.MovementCost(gameState, p) / FP.Max(FP.FromFraction(1, 10), FP.One + attack);
-                return terrain * (FP.One + (foe.TryGetValue(p, out FP f) ? f : FP.Zero));
-            }
+            FP Step(ushort p) => TerrainStep(p) * (FP.One + (foe.TryGetValue(p, out FP f) ? f : FP.Zero));
 
             // cheapest routes from the objectives (Dijkstra; ties by province id)
             var queue = new SortedSet<(long cost, ushort p)>();

@@ -835,7 +835,7 @@ namespace Hoi4.Units
                 offensiveOf[kv.Key] = kv.Value;
                 kv.Value.Units.Add(kv.Key);
             }
-            dirtyMesh = true; // an offensive may have gained or lost all its divisions (unassigned look)
+            simMeshDirty = true; // an offensive may have gained or lost all its divisions (unassigned look)
             Changed?.Invoke();
         }
 

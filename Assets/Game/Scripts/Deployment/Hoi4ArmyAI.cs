@@ -93,7 +93,16 @@ namespace Hoi4.Deployment
         static readonly Dictionary<ushort, Plan> plans = new Dictionary<ushort, Plan>();
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        static void ResetStatics() { plans.Clear(); subs.Clear(); }
+        static void ResetStatics() { plans.Clear(); subs.Clear(); searchMemo.Clear(); pending.Clear(); }
+
+        // Reviews due wait here, at most MaxReviewsPerDay a day: the first week had every country's first review
+        // (34-105 ms a day of design searches, stutters). Biggest military first, so the majors still plan day one
+        static readonly SortedSet<ushort> pending = new SortedSet<ushort>();
+        const int MaxReviewsPerDay = 3;
+
+        // Design searches by everything they depend on (start, role, what's on offer, equipment costs): countries
+        // with the same templates and technology (most of them in 1936) get the same design, searched once
+        static readonly Dictionary<string, (Layout layout, double score)> searchMemo = new Dictionary<string, (Layout, double)>();
 
         /// <summary>The country's plan, null before its first review.</summary>
         public static Plan PlanOf(ushort country) => plans.TryGetValue(country, out var p) ? p : null;
@@ -112,7 +121,15 @@ namespace Hoi4.Deployment
             {
                 // the first review in the first week (each country on its weekday), then every ReviewDays
                 bool due = plans.ContainsKey(country) ? (day + country * 7) % ReviewDays == 0 : (day + country) % 7 == 0;
-                if (country == player || !due) continue;
+                if (country != player && due) pending.Add(country);
+            }
+            if (pending.Count == 0) return;
+            // countries without a plan first, then by military factories, then by id
+            var next = pending.OrderBy(c => plans.ContainsKey(c) ? 1 : 0).ThenByDescending(c => production.Factories(c)).ThenBy(c => c)
+                .Take(MaxReviewsPerDay).ToList();
+            foreach (ushort country in next)
+            {
+                pending.Remove(country);
                 string tag = deployment.Tag(country);
                 if (tag == null || !divisions.Templates(tag).Any()) continue;
                 Review(gameState, country, tag);
@@ -351,6 +368,21 @@ namespace Hoi4.Deployment
         }
 
         static (Layout layout, double score) Search(Layout start, RoleRule rule, Sums reference, double[] cost, Options o)
+        {
+            var key = new StringBuilder();
+            key.Append(System.Array.IndexOf(Rules, rule)).Append('/').Append(start.Key()).Append('/');
+            foreach (var g in o.Battalions.OrderBy(g => g.Key, System.StringComparer.Ordinal)) key.Append(g.Key).Append(':').Append(string.Join(",", g.Value)).Append(';');
+            key.Append('/').Append(string.Join(",", o.Divisional)).Append('/').Append(string.Join(",", o.Regimental)).Append('/').Append(string.Join(",", o.Required)).Append('/');
+            foreach (double c in cost) key.Append(c.ToString("R", System.Globalization.CultureInfo.InvariantCulture)).Append(',');
+            string k = key.ToString();
+            if (searchMemo.TryGetValue(k, out var known)) return (known.layout.Copy(), known.score);
+            var found = SearchFrom(start, rule, reference, cost, o);
+            if (searchMemo.Count > 4096) searchMemo.Clear();
+            searchMemo[k] = (found.layout.Copy(), found.score);
+            return found;
+        }
+
+        static (Layout layout, double score) SearchFrom(Layout start, RoleRule rule, Sums reference, double[] cost, Options o)
         {
             var best = start;
             double bestScore = Score(start, rule, reference, cost) ?? -1e9;
