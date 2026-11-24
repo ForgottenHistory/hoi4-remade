@@ -306,7 +306,7 @@ namespace Hoi4.Units
             public void Begin(SessionRecorder r)
             {
                 countries = r.Table("supply", "tag	divisions	need	from_state	from_hubs	full	under_half	mean_ratio");
-                divisions = r.Table("division_supply", "unit	tag	province	ratio	target	hub_supply	state_supply");
+                divisions = r.Table("division_supply", "unit	tag	province	ratio	target	lack	hub_supply	state_supply");
             }
 
             public void Record(SessionRecorder r)
@@ -339,7 +339,7 @@ namespace Hoi4.Units
                     band[id] = b;
                     var u = r.GameState.Units.GetUnit(id);
                     ushort p = u.provinceID;
-                    divisions.Row($"{id}	{r.Tag(u.countryID)}	{p}	{ratio.ToString("0.00", inv)}	{Hoi4.Supply.Hoi4Supply.TargetRatio(id).ToDouble().ToString("0.00", inv)}	"
+                    divisions.Row($"{id}	{r.Tag(u.countryID)}	{p}	{ratio.ToString("0.00", inv)}	{Hoi4.Supply.Hoi4Supply.TargetRatio(id).ToDouble().ToString("0.00", inv)}	{Hoi4.Supply.Hoi4Supply.Lack(id).ToDouble().ToString("0.00", inv)}	"
                                   + $"{Hoi4.Supply.Hoi4Supply.HubSupply(p).ToDouble().ToString("0.00", inv)}	{Hoi4.Supply.Hoi4Supply.StateSupply(r.GameState, p).ToDouble().ToString("0.0", inv)}");
                 }
             }

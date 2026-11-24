@@ -9,7 +9,9 @@ namespace Hoi4.Supply
 {
     /// <summary>
     /// GAME: HOI4 supply in every land province and each division's supply ratio (no ports, convoys, air supply,
-    /// weather, motorization or allies' hubs yet; nothing reads the ratio yet).
+    /// weather, motorization or allies' hubs yet). Low supply weakens divisions through Lack: combat (Hoi4Combat),
+    /// max organisation and recovery (Hoi4Combat), speed (Hoi4Movement), manpower reinforcement (Hoi4Manpower) and
+    /// equipment attrition below 35% (here).
     /// Prototypes: Tools/prototypes/supply/supply_flow.py (province supply, checked against HOI4 tooltips in the
     /// Ruhr) and supply_demand.py (allocation). Numbers are NSupply defines unless said otherwise.
     ///
@@ -33,7 +35,7 @@ namespace Hoi4.Supply
     /// it needs); then each province's remaining need draws its hub supply, split over its sources by their flow; a
     /// source asked for more than its throughput (Hoi4Railways.Hub.Capacity) scales down what everyone draws from
     /// it. Target ratio = what it got / what it needs. A division's Ratio climbs toward the target by at most
-    /// RatioGainPerDay and falls to it at once (HOI4's divisions buffer supply; observed about +3 points a day).
+    /// RatioGainPerDay (3 points) and falls a quarter of the way a day (HOI4's divisions buffer supply; both measured).
     /// Divisions at sea, or in a province their country doesn't control, keep their ratio.
     ///
     /// Cost: province supply is recomputed only when control, buildings or hubs changed, and then only for the
@@ -61,6 +63,29 @@ namespace Hoi4.Supply
         static readonly FP LocalMult = FP.FromFraction(2, 10);            // SUPPLY_BASE_MULT
         static readonly FP MinNeed = FP.FromFraction(5, 100);             // NMilitary.MIN_SUPPLY_CONSUMPTION
         public static readonly FP RatioGainPerDay = FP.FromFraction(3, 100); // observed in HOI4 (72 -> 91 in a week)
+
+        // effects of low supply (NMilitary), all scaled by Lack
+        public static readonly FP AttackerAttackLack = FP.FromFraction(-25, 100);   // COMBAT_SUPPLY_LACK_ATTACKER_ATTACK
+        public static readonly FP AttackerDefendLack = FP.FromFraction(-65, 100);   // COMBAT_SUPPLY_LACK_ATTACKER_DEFEND
+        public static readonly FP DefenderAttackLack = FP.FromFraction(-35, 100);   // COMBAT_SUPPLY_LACK_DEFENDER_ATTACK
+        public static readonly FP DefenderDefendLack = FP.FromFraction(-15, 100);   // COMBAT_SUPPLY_LACK_DEFENDER_DEFEND
+        static readonly FP OrgMaxCap = FP.FromFraction(35, 100);                    // SUPPLY_ORG_MAX_CAP
+        static readonly FP OutOfSupplyMorale = FP.FromFraction(-2, 10);             // OUT_OF_SUPPLY_MORALE
+        static readonly FP OutOfSupplySpeed = FP.FromFraction(-8, 10);              // OUT_OF_SUPPLY_SPEED
+        static readonly FP LowSupply = FP.FromFraction(99, 100);                    // LOW_SUPPLY
+        const int MaxOutOfSupplyDays = 30;                                          // MAX_OUT_OF_SUPPLY_DAYS
+        static readonly FP AttritionThreshold = FP.FromFraction(35, 100);           // NSupply.SUPPLY_THRESHOLD_FOR_ARMY_ATTRITION
+        // equipment lost per day at no supply after the 30-day ramp: measured in a real HOI4 game (meme_ger: -0.12% a
+        // day at 0-9% supply with no reinforcement), not ATTRITION_EQUIPMENT_LOSS_CHANCE read literally (20x more)
+        static readonly FP AttritionLossPerDay = FP.FromFraction(15, 10000);
+        // organisation is only capped below half supply: measured in meme_ger (after 20+ days, 10-19% supply holds
+        // at most 0.60 of max org, 20-29% 0.68, 40-49% about all of it)
+        static readonly FP OrgCapStart = FP.Half;
+        // the stored ratio falls a quarter of the way to the target a day, at least 1 point: measured in meme_ger
+        // (drops median -0.8 a day, the steepest tenth -8.7 or more; HOI4 never empties it at once)
+        static readonly FP RatioDropShare = FP.FromFraction(1, 4);
+        static readonly FP RatioDropMin = FP.FromFraction(1, 100);
+        static readonly FP MinReinforce = FP.FromFraction(1, 10);                   // ours: very low supply still trickles men in
         static readonly FP FullTolerance = FP.FromFraction(1, 1000);
         const int MaxInfra = 5;
 
@@ -88,6 +113,7 @@ namespace Hoi4.Supply
         // divisions: unit id -> ratio now, and the last allocation's target and draw
         static readonly Dictionary<ushort, FP> ratio = new Dictionary<ushort, FP>();
         static readonly Dictionary<ushort, FP> target = new Dictionary<ushort, FP>();
+        static readonly Dictionary<ushort, int> lowDays = new Dictionary<ushort, int>(); // days in a row below LOW_SUPPLY (to 30)
         static readonly Dictionary<ushort, FP> sourceDraw = new Dictionary<ushort, FP>();
         static readonly Dictionary<ushort, CountrySupply> byCountry = new Dictionary<ushort, CountrySupply>();
 
@@ -127,7 +153,8 @@ namespace Hoi4.Supply
             topFlow = null; topSource = null; hubSupply = null;
             statePool.Clear(); capacity.Clear(); sourceOrder.Clear();
             prevCtrl = null; prevInfra = null; prevStart.Clear(); dirty.Clear();
-            ratio.Clear(); target.Clear(); sourceDraw.Clear(); byCountry.Clear();
+            ratio.Clear(); target.Clear(); lowDays.Clear(); sourceDraw.Clear(); byCountry.Clear();
+            AttritionLosses = 0;
             best = null; hops = stamp = settled = null; currentStamp = 0;
             heap.Clear();
             FlowVersion = 0;
@@ -161,6 +188,46 @@ namespace Hoi4.Supply
 
         /// <summary>The ratio the division's supply moves toward (what it got today / what it needs).</summary>
         public static FP TargetRatio(ushort unitId) => target.TryGetValue(unitId, out FP r) ? r : Ratio(unitId);
+
+        /// <summary>How hard low supply hits the division, 0..1: what it lacks (1 - ratio), reaching its full weight after
+        /// MAX_OUT_OF_SUPPLY_DAYS in a row below LOW_SUPPLY (HOI4: a delay before the full penalty kicks in).</summary>
+        public static FP Lack(ushort unitId)
+        {
+            FP r = Ratio(unitId);
+            if (r >= FP.One || !lowDays.TryGetValue(unitId, out int days) || days <= 0) return FP.Zero;
+            return (FP.One - r) * FP.FromInt(System.Math.Min(days, MaxOutOfSupplyDays)) / MaxOutOfSupplyDays;
+        }
+
+        /// <summary>Its attack (soft, hard) and defence (defence, breakthrough) multipliers in battle from low supply.</summary>
+        public static void CombatFactors(ushort unitId, bool attacking, out FP attack, out FP defence)
+        {
+            FP lack = Lack(unitId);
+            attack = FP.One + (attacking ? AttackerAttackLack : DefenderAttackLack) * lack;
+            defence = FP.One + (attacking ? AttackerDefendLack : DefenderDefendLack) * lack;
+        }
+
+        /// <summary>Share of its max organisation it can hold: full down to half supply, then falling to SUPPLY_ORG_MAX_CAP
+        /// (35%) at none (the threshold measured in a real HOI4 game), with the 30-day ramp.</summary>
+        public static FP OrganisationCap(ushort unitId)
+        {
+            FP r = Ratio(unitId);
+            if (r >= OrgCapStart || !lowDays.TryGetValue(unitId, out int days) || days <= 0) return FP.One;
+            FP below = (OrgCapStart - r) / OrgCapStart; // 0 at half supply, 1 at none
+            return FP.One - (FP.One - OrgMaxCap) * below * FP.FromInt(System.Math.Min(days, MaxOutOfSupplyDays)) / MaxOutOfSupplyDays;
+        }
+
+        /// <summary>Its organisation recovery multiplier: down by OUT_OF_SUPPLY_MORALE (20%).</summary>
+        public static FP RecoveryFactor(ushort unitId) => FP.One + OutOfSupplyMorale * Lack(unitId);
+
+        /// <summary>Its speed multiplier: down by OUT_OF_SUPPLY_SPEED (80%).</summary>
+        public static FP SpeedFactor(ushort unitId) => FP.One + OutOfSupplySpeed * Lack(unitId);
+
+        /// <summary>How much of the usual manpower reinforcement reaches it (the wiki: low supply slows men, not
+        /// equipment), at least 10%.</summary>
+        public static FP ReinforceFactor(ushort unitId) => FP.Max(MinReinforce, FP.One - Lack(unitId));
+
+        /// <summary>Equipment lost to attrition in the last daily step, in whole divisions' worth (summed shares).</summary>
+        public static double AttritionLosses { get; private set; }
 
         /// <summary>What the hub's provinces drew from it today, against its throughput.</summary>
         public static FP Drawn(ushort hubProvince) => sourceDraw.TryGetValue(hubProvince, out FP v) ? v : FP.Zero;
@@ -528,14 +595,19 @@ namespace Hoi4.Supply
 
             // 3. ratios
             byCountry.Clear();
+            AttritionLosses = 0;
             foreach (var s in slots)
             {
                 FP got = s.FromState + s.FromHubs;
                 FP goal = got + FullTolerance >= s.Need ? FP.One : got / s.Need; // fixed-point shares round a hair short
                 target[s.Unit] = goal;
                 FP now = ratio.TryGetValue(s.Unit, out FP r) ? r : goal; // a new division starts at what it gets
-                now = goal < now ? goal : FP.Min(goal, now + RatioGainPerDay);
+                now = goal < now ? FP.Max(goal, now - FP.Max(RatioDropMin, (now - goal) * RatioDropShare))
+                                 : FP.Min(goal, now + RatioGainPerDay);
                 ratio[s.Unit] = now;
+                lowDays.TryGetValue(s.Unit, out int low);
+                lowDays[s.Unit] = now < LowSupply ? System.Math.Min(MaxOutOfSupplyDays, low + 1) : System.Math.Max(0, low - 1);
+                Attrition(divisions.All[s.Unit], now);
                 byCountry.TryGetValue(s.Country, out var cs);
                 cs.Divisions++;
                 cs.Need += s.Need;
@@ -551,8 +623,30 @@ namespace Hoi4.Supply
             {
                 var gone = new List<ushort>();
                 foreach (ushort id in ratio.Keys) if (!divisions.All.ContainsKey(id)) gone.Add(id);
-                foreach (ushort id in gone) { ratio.Remove(id); target.Remove(id); }
+                foreach (ushort id in gone) { ratio.Remove(id); target.Remove(id); lowDays.Remove(id); }
             }
+        }
+
+        /// <summary>Below SUPPLY_THRESHOLD_FOR_ARMY_ATTRITION (35%) a division loses equipment every day: attrition
+        /// grows to AttritionLossPerDay (0.15%, measured) at no supply, scaled by 1 - reliability against an average
+        /// division's 0.8.
+        /// Weighted by the 30-day ramp like the other effects. Strength falls to what the equipment left allows.</summary>
+        static void Attrition(Hoi4Division d, FP now)
+        {
+            if (now >= AttritionThreshold || d.Need == null || d.Have == null) return;
+            FP ramp = lowDays.TryGetValue(d.UnitId, out int days)
+                ? FP.FromInt(System.Math.Min(days, MaxOutOfSupplyDays)) / MaxOutOfSupplyDays : FP.Zero;
+            FP severity = (AttritionThreshold - now) / AttritionThreshold * ramp; // 0..1 of the max attrition
+            // reliability scales it around an average division's (0.8): HOI4 scales attrition down by reliability
+            FP loss = AttritionLossPerDay * severity * FP.Clamp(FP.One - d.Reliability, FP.Zero, FP.One) * 5;
+            if (loss <= FP.Zero) return;
+            for (int a = 0; a < d.Have.Length; a++)
+            {
+                FP lost = d.Have[a] * loss;
+                d.Have[a] -= lost;
+                if (d.Need[a] > FP.Zero) AttritionLosses += (lost / d.Need[a]).ToDouble() / d.Have.Length;
+            }
+            d.Strength = FP.Min(d.Strength, d.FullStrength);
         }
 
         // --- loading ------------------------------------------------------------------------------------

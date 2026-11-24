@@ -28,9 +28,9 @@
 
 **War and peace:** War participation, surrender progress from victory points, capitulation, a basic peace conference (take states)
 
-**Supply:** The 1936 railways and supply hubs, rail conversion after capture, each hub's rail connection to the capital and its capacity, railways drawn on the map; hub and state supply in every province and each division's supply ratio (no effects from it yet)
+**Supply:** The 1936 railways and supply hubs, rail conversion after capture, each hub's rail connection to the capital and its capacity, railways drawn on the map; hub and state supply in every province and each division's supply ratio, and what low supply does to a division (combat, organisation, speed, reinforcement, attrition)
 
-**Not Implemented:** strategic resources and trade, research, politics, effects of low supply, generals, air and naval, factions, conditional surrender, saving/loading of HOI4-specific state, multiplayer in practice
+**Not Implemented:** strategic resources and trade, research, politics, generals, air and naval, factions, conditional surrender, saving/loading of HOI4-specific state, multiplayer in practice
 
 The goal is to stress-test Archon-Engine, not to ship a game. Big visual wins are preferred over exact HOI4 fidelity.
 
@@ -187,7 +187,8 @@ The goal is to stress-test Archon-Engine, not to ship a game. Big visual wins ar
 - **Recording** - `hubs.tsv`: every hub at the start, then a row when its controller, connection, level, distance (rail links from the capital) or capacity changes
 - **Hub supply** - `Hoi4Supply`: every connected hub sends supply over the land provinces its controller controls, starting at 5 for the capital and 2.8 for a hub (+0.34 per rail level) and losing on each step 0.5 + 1.2 (capital) or 0.7 (hub) times the defines' logistics curve, plus the terrain's `supply_flow_penalty_factor` (forest 0.08 to marsh 0.16, urban -0.2), cut by up to 30% by the infrastructure of the state it leaves, +0.2 over a river. A province's hub supply is the sum of its best three sources. Our reading of the defines, fitted in `Tools/prototypes/supply/supply_flow.py` to HOI4 tooltips in the Ruhr (Dortmund hub 7.06 against 7.46; light rain in the game, none here)
 - **State supply** - A pool per state: 0.3 per infrastructure level, 0.18 per million people, 0.2 + 0.05 x value per victory point, `local_supplies` x 0.2, rounded to 0.1 (matches HOI4's tooltips exactly: Westfalen 2.60, Rhineland 3.50). A state split between controllers splits all but the VPs by provinces held
-- **Division supply** - Each division needs its template's supply use (sum of its sub-units' `supply_consumption`; HOI4's designer shows about 14% more, a modifier not found yet). Daily: the state pool is shared evenly by the controller's divisions in the state, then each province's remaining need draws on its hub supply, split over its sources by flow; a hub asked for more than its capacity scales everyone down. A division's ratio climbs toward what it gets by at most 3 points a day and drops to it at once. Prototype `supply/supply_demand.py`: peacetime 1936 armies fully supplied, 33 divisions stacked in Berlin get 61%. Nothing reads the ratio yet
+- **Division supply** - Each division needs its template's supply use (sum of its sub-units' `supply_consumption`; HOI4's designer shows about 14% more, a modifier not found yet). Daily: the state pool is shared evenly by the controller's divisions in the state, then each province's remaining need draws on its hub supply, split over its sources by flow; a hub asked for more than its capacity scales everyone down. A division's ratio climbs toward what it gets by at most 3 points a day and falls a quarter of the way a day (at least 1 point); both measured in a real HOI4 game (rises median +1.9, steepest tenth +4.7; drops median -0.8, steepest tenth -8.7). Prototype `supply/supply_demand.py`: peacetime 1936 armies fully supplied, 33 divisions stacked in Berlin get 61%
+- **Low supply** - A division's lack is 1 - its ratio, reaching full weight after 30 days in a row below 99% (`MAX_OUT_OF_SUPPLY_DAYS`, `LOW_SUPPLY`). At full lack: attacking, -25% attack and -65% defence and breakthrough; defending, -35% attack and -15% defence (`COMBAT_SUPPLY_LACK_*`); organisation capped from half supply down, to 35% of max at none (`SUPPLY_ORG_MAX_CAP`; the half-supply start measured: real divisions after 20+ days at 10-19% supply hold at most 0.60 of max org, at 20-29% 0.68, from 40% about all; above the cap it drains) and recovering 20% slower (`OUT_OF_SUPPLY_MORALE`); 80% slower (`OUT_OF_SUPPLY_SPEED`); manpower reinforcement down to 10% (ours; the wiki: low supply slows men, not equipment). Below 35% supply (`SUPPLY_THRESHOLD_FOR_ARMY_ATTRITION`) it loses equipment daily, up to 0.15% a day at no supply for a division of average reliability (measured in a real HOI4 game: -0.12% a day at 0-9% supply; `ATTRITION_EQUIPMENT_LOSS_CHANCE` read literally gives 20 times that). Checked with `meme_ger`'s daily division snapshots (94,880 division-days); the combat penalties and the 30-day ramp are the defines, unchecked
 - **Supply recording** - `supply.tsv`: per country weekly, divisions, need, supply from states and hubs, divisions full and under half, mean ratio. `division_supply.tsv`: a division's ratio, target and the province's supply whenever the ratio enters another 10% band. `supply` column in perf.tsv
 
 ## AI
@@ -264,7 +265,7 @@ Tricky map algorithms are prototyped in Python under `Tools/prototypes/<topic>/`
 
 ## Known Gaps
 
-- Combat ignores forts, generals, supply, night, stacking and per-unit terrain modifiers (only the terrain's base penalty applies); max entrenchment ignores the division's own entrenchment stat (engineers)
+- Combat ignores forts, generals, night, stacking and per-unit terrain modifiers (only the terrain's base penalty applies); max entrenchment ignores the division's own entrenchment stat (engineers)
 - Offensives are broad-front only; no spearhead or encirclement logic
 - AI does not use offensives or armies, only odds-based border attacks
 - The division designer has no division equipment window, name list choice, 3D model, terrain adjusters or army experience (costs are shown, not paid); sub-unit availability is 1936's (no research)
@@ -275,7 +276,7 @@ Tricky map algorithms are prototyped in Python under `Tools/prototypes/<topic>/`
 - No recruiting new divisions; manpower only reinforces
 - Province selection does not persist after the state panel closes (HOI4 keeps it)
 - Only land units exist; no air or naval
-- Supply: the ratio has no effects yet (combat, organisation, attrition, reinforcement), no weather, no ports, convoys or air supply (hubs only connect by rail, overseas divisions starve), no allies' hubs, no supply map mode, rivers don't count as level-1 links, no allied rail, no trains or motorisation, no railway or hub construction, and a lost capital doesn't move (its whole network is cut)
+- Supply: no weather (supply flow or consumption), no attrition to organisation or from moving, no ports, convoys or air supply (hubs only connect by rail, overseas divisions starve), no allies' hubs, no supply map mode, rivers don't count as level-1 links, no allied rail, no trains or motorisation, no railway or hub construction, and a lost capital doesn't move (its whole network is cut)
 - Political power only counts up; nothing spends it
 - Peace conferences are one turn with Take State only: no puppets, liberation, government change, contests, compliance or war goals; war participation ignores air and naval and the attacker-and-winner bonus
 - Plan confidence indicator on army cards is always the tick

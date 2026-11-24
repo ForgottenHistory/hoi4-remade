@@ -139,7 +139,8 @@ namespace Hoi4.Units
                         if (pool <= FP.Zero) break;
                         FP manpower = FP.FromInt(d.Manpower);
                         if (d.Men >= manpower) continue;
-                        FP men = FP.Min(pool, FP.Min(manpower * ReinforceChunk, manpower - d.Men));
+                        // low supply slows the men reaching it (Hoi4Supply.ReinforceFactor)
+                        FP men = FP.Min(pool, FP.Min(manpower * ReinforceChunk * Hoi4.Supply.Hoi4Supply.ReinforceFactor(d.UnitId), manpower - d.Men));
                         d.Men += men;
                         pool -= men;
                         spent += men;

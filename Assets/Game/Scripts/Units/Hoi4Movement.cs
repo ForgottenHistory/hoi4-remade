@@ -68,6 +68,7 @@ namespace Hoi4.Units
                 if (share < LowOrgForAttack)
                     factor *= FP.Max(MinFactor, FP.One + ZeroOrgMovement * (FP.One - share / LowOrgForAttack));
             }
+            factor *= Hoi4.Supply.Hoi4Supply.SpeedFactor(unitId); // low supply: down to -80%
             factor = FP.Max(MinFactor, factor);
             FP hours = km * Hoi4CombatTerrain.MovementCost(gameState, to) / (speed * factor);
             return System.Math.Max(1, FP.Ceiling(hours).ToInt());

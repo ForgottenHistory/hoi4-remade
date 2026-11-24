@@ -95,7 +95,7 @@ Work happens in the Unity editor: open `Hoi4Test.unity` and press Play. To catch
 
 ### Checking against real HOI4
 
-Mechanics should match real HOI4 data, not only the defines. `Tools/reference/` measures the real game: `hoi4_reinforcement.py` (refill rates from the reference workspace's daily division snapshots), `save_dig_in.py` (entrenchment in battles from a plain-text save), `wiki_text.py` (text of a wiki page saved as HTML). The reference workspace (`D:\Stuff\Coding\hoi4`, read its `CLAUDE.md`) has recordings of real games: daily division snapshots, battles, country figures, production output. `Tools/manpower_pools.py` prints our starting manpower pools, `Tools/equipment_outlook.py` each country's equipment shortfall, stockpile and production.
+Mechanics should match real HOI4 data, not only the defines. `Tools/reference/` measures the real game: `hoi4_reinforcement.py` (refill rates from the reference workspace's daily division snapshots), `save_dig_in.py` (entrenchment in battles from a plain-text save), `wiki_text.py` (text of a wiki page saved as HTML), `hoi4_supply.py` (supply ratio dynamics, organisation cap and attrition from a recording's daily division blocks). The reference workspace (`D:\Stuff\Coding\hoi4`, read its `CLAUDE.md`) has recordings of real games: daily division snapshots, battles, country figures, production output. `Tools/manpower_pools.py` prints our starting manpower pools, `Tools/equipment_outlook.py` each country's equipment shortfall, stockpile and production.
 
 ### Tests
 
