@@ -16,6 +16,8 @@
     _Hoi4SnowTex:       { texture: "gfx/map/snow.png",           filter: "trilinear", wrap: "repeat", linear: true },
     _Hoi4MudDiffuse:    { texture: "gfx/map/mud_diffuse.png",    filter: "trilinear", wrap: "repeat" },
     _Hoi4MudNormal:     { texture: "gfx/map/mud_normal.png",     filter: "trilinear", wrap: "repeat", linear: true },
+    _Hoi4IceDiffuse:    { texture: "gfx/map/ice_diffuse.png",    filter: "trilinear", wrap: "repeat", linear: true },
+    _Hoi4IceNoise:      { texture: "gfx/map/ice_noise.png",      filter: "trilinear", wrap: "repeat", linear: true },
     _Hoi4WaterLean1:    { texture: "gfx/map/water/lean1.png",      filter: "trilinear", wrap: "repeat", linear: true },
     _Hoi4WaterLean2:    { texture: "gfx/map/water/lean2.png",      filter: "trilinear", wrap: "repeat", linear: true },
     _Hoi4WaterSpec:     { texture: "gfx/map/water/water_spec.png", filter: "bilinear", wrap: "clamp", linear: true },
@@ -64,6 +66,13 @@
     _Hoi4SnowColor: { value: [0.46, 0.48, 0.69, 1.0], type: "vector" }, // HOI4 SNOW_COLOR (linear, so a vector, not a color), a = strength
     // Mud on the terrain (HOI4 GetMudColor): [strength a muddy province reads as (1 = solid brown ground)]
     _Hoi4Mud:       { value: [0.75, 0, 0, 0], type: "vector" },
+    // Ice on water near snowy land (HOI4 ApplyIce): [how far out from the smooth coast it reaches, map px;
+    // map px per screen px where it fades out zoomed out (HOI4 hides it sooner, about 0.08..0.29); north of this
+    // share of the map height only (HOI4 0.74)]
+    _Hoi4Ice:       { value: [6, 0.15, 0.6, 0.74], type: "vector" },
+    // Ice look: [cover, 0 = HOI4's broken floes .. 1 = solid sheet; brightness, 1 = HOI4 ICE_COLOR;
+    // falloff power, higher = thinner toward the reach, a raggeder fringe]
+    _Hoi4IceLook:   { value: [0, 1.5, 3, 0], type: "vector" },
   },
 
   // Mesh border classes (Archon MeshGeometry borders). HOI4 border.shader: strips are
@@ -113,7 +122,8 @@
   // Rivers (map/rivers.png, width level 1..9 per pixel from HOI4 rivers.bmp). Texture baked by the
   // converter from HOI4 RiverSurface textures: water in the middle, banks at the edges.
   // Width = width + widthPerLevel * level map px; minScreenWidth floors the widest-to-narrowest set.
-  rivers: { texture: "gfx/map/rivers/river.png", width: 0.35, widthPerLevel: 0.12, minScreenWidth: 1, tile: 0.15, color: [1, 1, 1, 1], fade: [1.5, 2.5] },
+  // Shader Hoi4/RiverMesh: the engine line pass plus HOI4's frozen rivers (snow where the river runs).
+  rivers: { shader: "Hoi4/RiverMesh", texture: "gfx/map/rivers/river.png", width: 0.35, widthPerLevel: 0.12, minScreenWidth: 1, tile: 0.15, color: [1, 1, 1, 1], fade: [1.5, 2.5] },
 
   // Country name labels (Archon MapLabelRenderer). Font size in map px (maxHeight); labels below
   // minScreenHeight screen px grow up to maxScale times, smaller ones fade out. fade = [visible

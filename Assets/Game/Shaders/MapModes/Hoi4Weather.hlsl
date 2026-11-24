@@ -15,6 +15,14 @@
 //   - HOI4 GetMudColor, after the snow: mud = the province's mud (0/1) * _Hoi4Mud.x (HOI4's scale is not in its
 //     shaders; at 1 the ground turns solid brown), broken up by noise (pos * 0.01) as the camera zooms out;
 //       colour -> overlay(mud texture, colormap tint, 0.5), normal/gloss/spec -> the mud textures' (pos * 0.09)
+//   - HOI4 ApplyIce on water (pdxwater.shader): its filtered SnowMudData bleeds land snow onto the water. Ours: the
+//     snowiest land within reach (16-tap disc, max) x (1 - distance from the smooth coast / _Hoi4Ice.x) ^ _Hoi4IceLook.z.
+//     The distance is terrain index A (hoi4_convert.py coast_distance), so the ice edge follows the coastline, not
+//     province pixels. Only north of _Hoi4Ice.w of the map height (HOI4 0.74), shrinking as the camera zooms out:
+//       ice = saturate((saturate(isSnow * 8) * noise' * opacity * north - 0.3) * 10)
+//     noise' = ice noise (pos * 0.1) lifted toward 1 by _Hoi4IceLook.x (0 = HOI4, broken floes; 1 = solid sheet).
+//     Ours: the ice is not darkened like the water (_Hoi4WaterDarken) and is brightened by _Hoi4IceLook.y.
+//       colour -> ICE_COLOR (0.5, 0.6, 0.9) * ice_diffuse.a, normal -> ice_diffuse.rbg (pos * 0.1)
 
 #ifndef HOI4_WEATHER_INCLUDED
 #define HOI4_WEATHER_INCLUDED
@@ -28,6 +36,10 @@ float _Hoi4WeatherFade;      // 0 = before, 1 = now
 float4 _Hoi4Snow;            // x snow amount that reads full (40), y..z map px per screen px for the zoom fade, w edge blend spacing map px
 float4 _Hoi4SnowColor;       // HOI4 SNOW_COLOR (0.46, 0.48, 0.69), a = strength (1)
 float4 _Hoi4Mud;             // x mud strength (0.75)
+TEXTURE2D(_Hoi4IceDiffuse);  // HOI4 ice_diffuse: rbg normal, a diffuse (linear, repeat)
+TEXTURE2D(_Hoi4IceNoise);    // HOI4 ice_noise_0 (linear, repeat)
+float4 _Hoi4Ice;             // x reach map px (6), y..z map px per screen px where the ice fades out, w north limit (0.74)
+float4 _Hoi4IceLook;         // x cover (0 = HOI4 noise .. 1 solid), y brightness (1 = HOI4 ICE_COLOR), z falloff power (3)
 
 #define HOI4_SNOW_TILING 0.05
 #define HOI4_SNOW_NOISE_TILING 0.06
@@ -43,11 +55,10 @@ float2 Hoi4WeatherAt(int2 pixel, int2 maxPixel)
 }
 
 // (snow amount 0..80, mud 0..1) at uv: the provinces around it blended bilinearly on a grid of `spacing` map px
-float2 Hoi4WeatherAmount(float2 uv)
+float2 Hoi4WeatherAmount(float2 uv, float spacing)
 {
     uint w, h;
     _ProvinceIDTexture.GetDimensions(w, h);
-    float spacing = HOI4_OR(_Hoi4Snow.w, 2.0);
     float2 p = float2(uv.x, 1.0 - uv.y) * float2(w, h) / spacing - 0.5;
     float2 i0 = floor(p);
     float2 f = p - i0;
@@ -75,7 +86,7 @@ void Hoi4ApplyWeather(inout Hoi4Surface s, float2 uv, float3 tint)
     float mapPxPerScreenPx = length(fwidth(pos));
 
     if (s.land <= 0) return;
-    float2 amount = Hoi4WeatherAmount(uv);
+    float2 amount = Hoi4WeatherAmount(uv, HOI4_OR(_Hoi4Snow.w, 2.0));
     float2 zoomRange = _Hoi4Snow.z > _Hoi4Snow.y ? _Hoi4Snow.yz : float2(0.04, 0.25);
     float zoomOut = saturate((mapPxPerScreenPx - zoomRange.x) / (zoomRange.y - zoomRange.x)); // HOI4 cam_distance(50, 300)
 
@@ -118,6 +129,67 @@ void Hoi4ApplyWeather(inout Hoi4Surface s, float2 uv, float3 tint)
         s.spec = lerp(s.spec, normalSpec.a, mud);
         s.albedo = lerp(s.albedo, Hoi4Overlay(diffuse.rgb, tint, 0.5), mud);   // COLORMAP_MUD_OVERLAY_STRENGTH
     }
+}
+
+// Largest snow amount (0..80) over a disc of `radius` map px around uv (16-tap Vogel disc on province pixels)
+float Hoi4SnowNear(float2 uv, float radius)
+{
+    uint w, h;
+    _ProvinceIDTexture.GetDimensions(w, h);
+    float2 p = float2(uv.x, 1.0 - uv.y) * float2(w, h);
+    int2 maxPixel = int2(w - 1, h - 1);
+    float best = 0.0;
+    [unroll] for (int i = 0; i < 16; i++)
+    {
+        float ang = i * 2.39996;
+        float r = radius * sqrt((i + 0.5) / 16.0);
+        best = max(best, Hoi4WeatherAt(int2(floor(p + float2(cos(ang), sin(ang)) * r)), maxPixel).x);
+    }
+    return best * 80.0;
+}
+
+// Water distance from the smooth coast in map px (terrain index A / 16, bilinear)
+float Hoi4CoastDistance(float2 uv)
+{
+    uint w, h;
+    _Hoi4TerrainIndex.GetDimensions(w, h);
+    float2 p = uv * float2(w, h) - 0.5;
+    int2 i0 = (int2)floor(p);
+    float2 f = p - floor(p);
+    int2 maxI = int2(w - 1, h - 1);
+    float d[4];
+    [unroll] for (int k = 0; k < 4; k++)
+        d[k] = LOAD_TEXTURE2D(_Hoi4TerrainIndex, clamp(i0 + int2(k & 1, k >> 1), int2(0, 0), maxI)).a;
+    return lerp(lerp(d[0], d[1], f.x), lerp(d[2], d[3], f.x), f.y) * (255.0 / 16.0);
+}
+
+// HOI4 ApplyIce on the water colour (before the darkening and lighting). ice = how frozen (0..1).
+float3 Hoi4ApplyIce(float3 color, float2 uv, inout float3 normal, out float ice)
+{
+    ice = 0.0;
+    uint w, h;
+    _Hoi4TerrainIndex.GetDimensions(w, h);
+    float2 pos = uv * float2(w, h);
+    float2 iceUV = float2(pos.x, -pos.y) * 0.1;                // HOI4 uv_ice and ICE_NOISE_TILING: 0.1 per map px
+    float2 idx = ddx(iceUV), idy = ddy(iceUV);
+    float mapPxPerScreenPx = length(fwidth(pos));
+
+    float north = saturate(saturate(uv.y - HOI4_OR(_Hoi4Ice.w, 0.74)) * 800.0);
+    float2 zoomRange = _Hoi4Ice.z > _Hoi4Ice.y ? _Hoi4Ice.yz : float2(0.15, 0.6);
+    float opacity = 1.0 - saturate((mapPxPerScreenPx - zoomRange.x) / (zoomRange.y - zoomRange.x)); // HOI4 ICE_CAM_MIN/MAX
+    if (north * opacity <= 0.0) return color;
+    float reach = HOI4_OR(_Hoi4Ice.x, 6.0);
+    float falloff = saturate(1.0 - Hoi4CoastDistance(uv) / reach);
+    if (falloff <= 0.0) return color;
+    float isSnow = saturate(Hoi4SnowNear(uv, reach + 3.0) / HOI4_OR(_Hoi4Snow.x, 40.0)) * pow(falloff, HOI4_OR(_Hoi4IceLook.z, 3.0));
+    if (isSnow <= 0.0) return color;
+
+    float4 diffuse = SAMPLE_TEXTURE2D_GRAD(_Hoi4IceDiffuse, sampler_trilinear_repeat, iceUV, idx, idy);
+    float noise = SAMPLE_TEXTURE2D_GRAD(_Hoi4IceNoise, sampler_trilinear_repeat, iceUV + 0.05, idx, idy).r;
+    noise = lerp(noise, 1.0, saturate(_Hoi4IceLook.x));
+    ice = saturate((saturate(isSnow * 8.0) * noise * opacity * north - 0.3) * 10.0);
+    normal = normalize(lerp(normal, normalize(diffuse.rbg - 0.5), ice));
+    return lerp(color, float3(0.5, 0.6, 0.9) * diffuse.a * HOI4_OR(_Hoi4IceLook.y, 1.0), ice);  // ICE_COLOR
 }
 
 #endif // HOI4_WEATHER_INCLUDED

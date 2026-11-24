@@ -24,6 +24,10 @@ And HOI4's GetMudColor after it (mud: the province's mud flag, 0/1):
     mud     = saturate(mud * noise)
     colour  = lerp(colour, overlay(mud texture rgb, colormap tint, 0.5), mud)    (mud_diffuse_rgb_gloss_a at pos * 0.09)
     normal, gloss, spec -> the mud texture's (mud_normal_rgb_spec_a) by mud
+And HOI4's ApplyIce (pdxwater.shader) on water: the snow there (SnowMudData is filtered, so land snow bleeds onto
+the water; here the snowiest land within reach x (1 - distance from the smooth coast / --icereach)):
+    ice = saturate((saturate(isSnow * 8) * ice noise (pos * 0.1) * zoom-in opacity * north of 0.74 map height - 0.3) * 10)
+    colour -> ICE_COLOR (0.5, 0.6, 0.9) * ice_diffuse.a, normal -> ice_diffuse.rbg (pos * 0.1)
 Writes snow_<date>[_<tag>].png next to this script (gitignored).
 """
 import argparse
@@ -90,6 +94,13 @@ def wrap(img, u, v):
     return bilinear(np.pad(img, ((0, 1), (0, 1), (0, 0)), mode="wrap"), (u % 1) * w + 0.5, (v % 1) * h + 0.5)
 
 
+LAND = None
+
+
+def land_like(p):
+    return LAND is None or int(p) in LAND
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--hoi4", default=DEFAULT_HOI4)
@@ -102,6 +113,10 @@ def main():
     ap.add_argument("--blur", type=float, default=1.5, help="SnowMudData smoothing across province edges, map px")
     ap.add_argument("--nosnow", action="store_true")
     ap.add_argument("--nomud", action="store_true")
+    ap.add_argument("--icepow", type=float, default=3.0, help="falloff power: higher = the bled snow thins out sooner, a raggeder fringe")
+    ap.add_argument("--icebright", type=float, default=1.5, help="x ICE_COLOR")
+    ap.add_argument("--icereach", type=float, default=4.0, help="map px from the smooth coast the bled snow reaches")
+    ap.add_argument("--icezoom", type=float, default=0.0, help="ice opacity zoom 0 in .. 1 out (HOI4 hides ice zoomed out)")
     ap.add_argument("--mudstrength", type=float, default=1.0, help="mud value a muddy province reads as (HOI4's scale is not in its shaders)")
     ap.add_argument("--tag", default="")
     args = ap.parse_args()
@@ -115,7 +130,8 @@ def main():
     mz = 2048 - my  # HOI4 world z (bottom-up)
 
     # ---- terrain surface (Hoi4SampleSurface)
-    index = np.asarray(Image.open(data / "gfx" / "map" / "terrain_index.png").convert("RGB"))
+    index4 = np.asarray(Image.open(data / "gfx" / "map" / "terrain_index.png").convert("RGBA"))
+    index = index4[..., :3]
     pad = 2
     sub = index[y0 - pad:y1 + pad, x0 - pad:x1 + pad].astype(np.float32) / 255
     px, py = mx - x0 + pad - 0.5, my - y0 + pad - 0.5
@@ -157,6 +173,8 @@ def main():
     # ---- snow (ApplySnow)
     if not args.nosnow:
         state = {int(k): v for k, v in json.loads((HERE / f"state_{args.date}.json").read_text()).items()}
+        global LAND
+        LAND = set(state)  # the dump has land provinces only
         ids = province_ids(hoi4)[y0 - 8:y1 + 8, x0 - 8:x1 + 8]
         uniq, inv = np.unique(ids, return_inverse=True)
         amount = np.array([state.get(int(p), [0])[0] for p in uniq], np.float32)[inv].reshape(ids.shape)
@@ -225,6 +243,30 @@ def main():
 
     water = np.asarray(Image.open(data / "gfx" / "map" / "colormap_water.png").convert("RGB")).astype(np.float32) / 255
     sea = srgb_to_linear(bilinear(water, mx / 2, my / 2)) * 0.5 * (AMBIENT + SUN_INTENSITY * SUN[1])
+    if not args.nosnow:
+        # ---- ice (ApplyIce): HOI4's bled land snow = the snowiest land nearby x a falloff over the distance from the
+        # smooth coast (terrain index A, coast_distance in hoi4_convert.py), so the ice edge follows the coastline
+        from scipy.ndimage import maximum_filter
+        land_snow = np.array([0.0 if not land_like(p) else state.get(int(p), [0])[0] for p in uniq], np.float32)[inv].reshape(ids.shape)
+        r = int(args.icereach + 3)
+        near = maximum_filter(land_snow, footprint=np.hypot(*np.mgrid[-r:r + 1, -r:r + 1]) <= r)
+        near = bilinear(near[..., None], mx - x0 + 8, my - y0 + 8)[..., 0]
+        dist_map = index4[y0 - pad:y1 + pad, x0 - pad:x1 + pad, 3].astype(np.float32) / 16
+        dist = bilinear(dist_map[..., None], mx - x0 + pad, my - y0 + pad)[..., 0]
+        ice_snow = np.clip(near / args.full, 0, 1) * np.clip(1 - dist / args.icereach, 0, 1) ** args.icepow
+        ice_d = np.asarray(Image.open(hoi4 / "map" / "terrain" / "ice_diffuse.dds").convert("RGBA")).astype(np.float32) / 255
+        ice_n = np.asarray(Image.open(hoi4 / "map" / "terrain" / "ice_noise_0.dds").convert("RGBA")).astype(np.float32)[..., :1] / 255
+        idf = wrap(ice_d, mx * 0.1, mz * 0.1)
+        inz = wrap(ice_n, (mx + 0.5) * 0.1, (mz + 0.5) * 0.1)[..., 0]
+        limit = np.clip(np.clip(mz / 2048 - 0.74, 0, 1) * 800, 0, 1)
+        fade = np.clip(ice_snow * 8, 0, None) * inz * (1 - args.icezoom) * limit
+        fade = np.clip((fade - 0.3) * 10, 0, 1)
+        inorm = normalize(idf[..., [0, 2, 1]] - 0.5)
+        ice_col = np.array([0.5, 0.6, 0.9]) * idf[..., 3:] * args.icebright
+        ndl_i = np.clip(inorm @ SUN, 0, None)[..., None]
+        ice_lit = ice_col * (AMBIENT + SUN_INTENSITY * ndl_i)
+        sea = sea + (ice_lit - sea) * fade[..., None]
+        print(f"{args.date}: water under ice {np.mean(fade[land < 0.5] > 0.5) * 100:.0f}%")
     out = lit * land[..., None] + sea * (1 - land[..., None])
     name = f"snow_{args.date}{'_' + args.tag if args.tag else ''}.png"
     Image.fromarray((linear_to_srgb(out) * 255 + 0.5).astype(np.uint8)).save(HERE / name)

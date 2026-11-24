@@ -258,6 +258,9 @@ float3 Hoi4Light(float3 albedo, float3 normal, float3 positionWS, float gloss, f
     return albedo * (ambient + sun * ndl) + sun * specular;
 }
 
+// Snow and mud on land, ice on water
+#include "Hoi4Weather.hlsl"
+
 // ----------------------------------------------------------------------------
 // Water
 // ----------------------------------------------------------------------------
@@ -341,7 +344,7 @@ float3 Hoi4SkyReflection(float3 r)
 }
 
 // HOI4 pdxwater: refracted underwater + fresnel sky reflection, darkened, lit with the wave
-// normal, plus a LEAN sun glint. HOI4's ice (seasonal snow) is not ported.
+// normal, plus a LEAN sun glint, and HOI4's sea ice near snowy coasts (Hoi4ApplyIce).
 float3 Hoi4Water(float2 uv, float3 positionWS, float3 worldNormal)
 {
     uint w, h;
@@ -379,8 +382,12 @@ float3 Hoi4Water(float2 uv, float3 positionWS, float3 worldNormal)
     float fresnel = saturate(bias + (1.0 - bias) * pow(1.0 - cosHalf, 10.0));
     float3 color = lerp(refracted, reflected, fresnel);
 
+    // HOI4 ApplyIce: frozen water near snowy land, lit with the ice normal and without the wave glint
+    float ice;
+    color = Hoi4ApplyIce(color, uv, normal, ice);
+
     // HOI4 darkness offset, then lit with the wave normal
-    color = lerp(color, 0, _Hoi4WaterDarken);
+    color = lerp(color, 0, _Hoi4WaterDarken * (1.0 - ice));
     color = Hoi4Light(color, normal, positionWS, 0, 0);
 
     // LEAN glint: Gaussian slope distribution around the mean slope B
@@ -392,12 +399,10 @@ float3 Hoi4Water(float2 uv, float3 positionWS, float3 worldNormal)
     float spec = det <= 1e-12 ? 0.0 : exp(-0.5 * e / det) * rsqrt(det);
     float3 sun = (_Hoi4SunColor.a > 0 ? _Hoi4SunColor.rgb : float3(1, 1, 1)) * HOI4_OR(_Hoi4SunIntensity, 0.8);
     // spec peaks in the hundreds to thousands; map it to 0-1 (HOI4 tames it in its lighting model)
-    color += sun * (1.0 - exp(-spec * 0.02)) * _Hoi4WaterGlint;
+    color += sun * (1.0 - exp(-spec * 0.02)) * _Hoi4WaterGlint * (1.0 - ice);
 
     return color;
 }
-
-#include "Hoi4Weather.hlsl"
 
 // Full lit HOI4 pixel. countryColor.a = how much country color to paint over the land.
 float4 Hoi4Render(float2 uv, float3 positionWS, float4 countryColor)

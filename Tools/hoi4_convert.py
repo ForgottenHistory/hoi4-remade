@@ -562,6 +562,8 @@ GFX_TEXTURES = [
     ("snow_normal_rgb_diffuse_a.dds", "snow.png"),    # tiled snow cover: rgb normal (.rbg), a diffuse
     ("mud_diffuse_rgb_gloss_a_0.dds", "mud_diffuse.png"),  # tiled mud: rgb diffuse, a gloss
     ("mud_normal_rgb_spec_a_0.dds", "mud_normal.png"),     # tiled mud: rgb normal (.rbg), a spec
+    ("ice_diffuse.dds", "ice_diffuse.png"),          # tiled sea ice: rgb normal (.rbg), a diffuse
+    ("ice_noise_0.dds", "ice_noise.png"),            # sea ice break-up noise
 ]
 
 
@@ -845,6 +847,25 @@ def coast_channels(hoi4: Path, index):
     iy, ix = ndimage.distance_transform_edt(water, return_distances=False, return_indices=True)
     nearest = index[iy, ix]
     return nearest.astype(np.uint8), (field * 255 + 0.5).astype(np.uint8)
+
+
+COAST_DISTANCE_SCALE = 16  # terrain index A: water distance from the smooth coast, 1/16 map px per step (up to ~16 px)
+
+
+def coast_distance(coast):
+    """Distance of each water pixel from the smooth coast (the shore isoline of the coast height field, where the
+    GAME shader's land coverage crosses 0.5), in map px, measured at twice the resolution so it has no province
+    pixel steps. For effects that hug the coast (sea ice). Returns uint8: distance * COAST_DISTANCE_SCALE, land 0."""
+    from scipy import ndimage
+    field = coast.astype(np.float32) / 255
+    up = ndimage.zoom(field, 2, order=1, mode="nearest", grid_mode=True)
+    land = (((8.5 + up * 2.0) / 9.57 - 0.954) * 25.0) > 0.5   # Hoi4ShoreAlpha > 0.5
+    del up
+    dist = ndimage.distance_transform_edt(~land).astype(np.float32) / 2.0
+    del land
+    h, w = coast.shape
+    dist = dist.reshape(h, 2, w, 2).mean(axis=(1, 3))
+    return np.clip(dist * COAST_DISTANCE_SCALE + 0.5, 0, 255).astype(np.uint8)
 
 
 OOB_START = "1936"
@@ -2646,7 +2667,7 @@ def convert_gfx(hoi4: Path, out: Path, water_px):
     if index.shape == water_px.shape:
         index[water_px] = WATER_SLOT
     nearest_land, coast = coast_channels(hoi4, index)
-    Image.fromarray(np.dstack([index, nearest_land, coast]), "RGB").save(gfx / "terrain_index.png", compress_level=1)
+    Image.fromarray(np.dstack([index, nearest_land, coast, coast_distance(coast)]), "RGBA").save(gfx / "terrain_index.png", compress_level=1)
     print(f"Terrain index: {len(slots)} graphical terrains")
 
     for src, dst in GFX_TEXTURES:
