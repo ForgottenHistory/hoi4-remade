@@ -39,6 +39,7 @@ import heapq
 import math
 import re
 from collections import defaultdict
+from types import SimpleNamespace
 from pathlib import Path
 
 import numpy as np
@@ -162,23 +163,8 @@ def colour(v):
     return stops[-1][1]
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--hoi4", default=DEFAULT_HOI4)
-    ap.add_argument("--data", default="Hoi4Data")
-    ap.add_argument("--country", nargs="*", default=["GER", "SOV", "FRA", "ENG", "ITA", "POL", "USA", "JAP", "CHI"])
-    ap.add_argument("--crop", default="2560,240,3600,900", help="x0,y0,x1,y1 in provinces.bmp pixels (default Europe)")
-    ap.add_argument("--scale", type=float, default=1.0)
-    ap.add_argument("--explain", type=int, help="print the flow chain into this province")
-    ap.add_argument("--layer", choices=["total", "hub", "state"], default="total")
-    ap.add_argument("--combine", choices=["max", "sum"], default="sum",
-                    help="a province's hub supply: the best source, or the sum over sources (HOI4 lists several)")
-    ap.add_argument("--top", type=int, default=3, help="with --combine sum: sources counted per province")
-    ap.add_argument("--weather", type=float, default=1.0, help="multiplier on every step's penalty (bad weather > 1)")
-    ap.add_argument("--probe", type=int, nargs="*", default=[], help="print each source's flow into these provinces")
-    args = ap.parse_args()
-    hoi4, data = Path(args.hoi4), Path(args.data)
-
+def compute(hoi4: Path, data: Path, combine="sum", top=3, weather=1.0):
+    """Every province's hub supply (and its sources) and every state's supply pool. Returns a namespace."""
     D = read_defines(hoi4)
     terrain_pen = read_terrain_penalties(hoi4)
     info, keys = read_definitions(hoi4)
@@ -186,7 +172,6 @@ def main():
     hubs = read_hubs(hoi4)
     pairs, straits = province_adjacency(hoi4)
     local = read_local_supplies(hoi4)
-    print("terrain supply_flow_penalty_factor:", terrain_pen)
 
     regions = load_json5(data / "map" / "hoi4_regions.json5")
     sdata = load_json5(data / "map" / "hoi4_state_data.json5")["states"]
@@ -218,9 +203,10 @@ def main():
             land_adj[a].add(b)
             land_adj[b].add(a)
 
-    flow = Flow(D, terrain_pen, prov_terrain, prov_state, state_infra, rivers, args.weather)
+    flow = Flow(D, terrain_pen, prov_terrain, prov_state, state_infra, rivers, weather)
     contrib = defaultdict(list)  # prov -> [(flow, source)]
     source_kind = {}
+    capacity = {}  # source -> throughput: capital supply, or 10 + 5 * rail bottleneck
     countries = sorted(set(regions["capitals"]))
     for tag in countries:
         cap = regions["capitals"][tag]
@@ -240,6 +226,15 @@ def main():
         for h in hubs:
             if h in own and h != cap and h in reach:
                 sources.append((h, "NODE", D["NODE_INITIAL_SUPPLY_FLOW"] + D["NODE_FLOW_BONUS_PER_RAIL_LEVEL"] * reach[h]))
+        civ = mil = dock = 0
+        for sid, s in sdata.items():
+            if s.get("owner") == tag:
+                bl = s.get("buildings", {})
+                civ += bl.get("industrial_complex", 0); mil += bl.get("arms_factory", 0); dock += bl.get("dockyard", 0)
+        capacity[cap] = CAPITAL_BASE + CAP_CIV * civ + CAP_MIL * mil + CAP_DOCK * dock
+        for h in hubs:
+            if h in own and h != cap and h in reach:
+                capacity[h] = RAILWAY_BASE_FLOW + RAILWAY_FLOW_PER_LEVEL * reach[h]
         for src, kind, start in sources:
             source_kind[src] = kind
             for p, (f, d, prev) in flow.spread(kind, src, start, graph).items():
@@ -247,8 +242,33 @@ def main():
     hub_supply = {}   # prov -> (supply, main source)
     for p, cs in contrib.items():
         cs.sort(reverse=True)
-        total = cs[0][0] if args.combine == "max" else sum(f for f, _ in cs[:args.top])
+        total = cs[0][0] if combine == "max" else sum(f for f, _ in cs[:top])
         hub_supply[p] = (total, cs[0][1])
+    return SimpleNamespace(**{k: v for k, v in locals().items() if k not in ('body',)})
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--hoi4", default=DEFAULT_HOI4)
+    ap.add_argument("--data", default="Hoi4Data")
+    ap.add_argument("--country", nargs="*", default=["GER", "SOV", "FRA", "ENG", "ITA", "POL", "USA", "JAP", "CHI"])
+    ap.add_argument("--crop", default="2560,240,3600,900", help="x0,y0,x1,y1 in provinces.bmp pixels (default Europe)")
+    ap.add_argument("--scale", type=float, default=1.0)
+    ap.add_argument("--explain", type=int, help="print the flow chain into this province")
+    ap.add_argument("--layer", choices=["total", "hub", "state"], default="total")
+    ap.add_argument("--combine", choices=["max", "sum"], default="sum",
+                    help="a province's hub supply: the best source, or the sum over sources (HOI4 lists several)")
+    ap.add_argument("--top", type=int, default=3, help="with --combine sum: sources counted per province")
+    ap.add_argument("--weather", type=float, default=1.0, help="multiplier on every step's penalty (bad weather > 1)")
+    ap.add_argument("--probe", type=int, nargs="*", default=[], help="print each source's flow into these provinces")
+    args = ap.parse_args()
+    hoi4, data = Path(args.hoi4), Path(args.data)
+
+    m = compute(hoi4, data, args.combine, args.top, args.weather)
+    D, info, keys, links, hubs, regions = m.D, m.info, m.keys, m.links, m.hubs, m.regions
+    sdata, rivers, impassable, prov_state, prov_owner = m.sdata, m.rivers, m.impassable, m.prov_state, m.prov_owner
+    state_infra, prov_terrain, state_supply, land_adj = m.state_infra, m.prov_terrain, m.state_supply, m.land_adj
+    flow, contrib, source_kind, hub_supply = m.flow, m.contrib, m.source_kind, m.hub_supply
     for p in args.probe:
         cs = contrib.get(p, [])
         print(f"probe {p} ({prov_owner.get(p)}, state {prov_state.get(p)}, {prov_terrain.get(p)}): "
