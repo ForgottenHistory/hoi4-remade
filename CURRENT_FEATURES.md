@@ -28,7 +28,7 @@
 
 **War and peace:** War participation, surrender progress from victory points, capitulation, a basic peace conference (take states)
 
-**Supply (first part):** The 1936 railways and supply hubs, rail conversion after capture, each hub's rail connection to the capital and its capacity; no supply flow yet
+**Supply (first part):** The 1936 railways and supply hubs, rail conversion after capture, each hub's rail connection to the capital and its capacity, railways drawn on the map; no supply flow yet
 
 **Not Implemented:** strategic resources and trade, research, politics, supply flow to divisions, generals, air and naval, factions, conditional surrender, saving/loading of HOI4-specific state, multiplayer in practice
 
@@ -183,6 +183,7 @@ The goal is to stress-test Archon-Engine, not to ship a game. Big visual wins ar
 - **Connection to the capital** - A hub is connected when its controller holds its capital and a path of rail it controls and has converted joins them. The connection's level is the path's weakest link, taking the best path (Germany 1936: 26 of 29 hubs connected, 14 at level 1, 6 at 2, 6 at 3; East Prussia is cut off by the Polish corridor)
 - **Capacity** - A connected hub: 10 + 5 per connection level (`RAILWAY_BASE_FLOW`, `RAILWAY_FLOW_PER_LEVEL`). The capital: 5 + 0.3 per civilian factory + 0.6 per military factory + 0.4 per dockyard of the states working for the country
 - **When** - Daily, first in the day, only when control, ownership, buildings or a finishing conversion changed something (`railways` column in perf.tsv)
+- **On the map** - `Hoi4RailRenderer`: every rail link as HOI4's track texture for its level (`gfx/models/supply/railroad.dds`, one tile per level, rusty to steel), 0.7 map px wide, through each province's `supply_node` spot as a centripetal Catmull-Rom curve, chained through plain pass-through provinces. Shown from the zoom where unit counters appear (fade 3 to 5 screen px per map px). Rail still converting gets a grey strip on top. Drawn with the engine's `MapLineLayer`; prototype `Tools/prototypes/supply/render_rails.py`, scale checked against an HOI4 screenshot. No bridges, hub icons or supply map mode yet
 - **Recording** - `hubs.tsv`: every hub at the start, then a row when its controller, connection, level, distance (rail links from the capital) or capacity changes
 
 ## AI
@@ -234,7 +235,7 @@ All panels follow one pattern: structure in `.uxml`, look in `*Style.uss` + `Hoi
 - **States and strategic regions** - `map/hoi4_regions.json5` (states, regions, impassable states, capitals, water)
 - **Combat terrain** - Combat width, support width and attack penalty per terrain in `map/terrain.json5`; river crossings between provinces in `map/hoi4_river_crossings.json5`
 - **State details** - `map/hoi4_state_data.json5`
-- **Railways and supply hubs** - `map/hoi4_railways.json5`: rail links `[a, b, level]` and hubs, from `map/railways.txt` and `map/supply_nodes.txt`
+- **Railways and supply hubs** - `map/hoi4_railways.json5`: rail links `[a, b, level]`, hubs and each province's rail point (its `supply_node` spot in `map/buildings.txt`), from `map/railways.txt` and `map/supply_nodes.txt`; the track tiles as `gfx/map/rails/rail_<level>.png`
 - **Countries** - Colors, ideologies, stats (`common/hoi4_country_stats.json5`: stability, war support, core and non-core population, mobilisation law), history
 - **Localisation** - Names for provinces, states, countries
 - **Order of battle** - 1936 divisions
@@ -247,7 +248,7 @@ All panels follow one pattern: structure in `.uxml`, look in `*Style.uss` + `Hoi
 
 ## Prototypes
 
-Tricky map algorithms are prototyped in Python under `Tools/prototypes/<topic>/` and checked as preview PNGs before porting to C# or HLSL: borders, rivers, river crossings, labels, highlight outline, move arrows, counters, country fill, top bar, units, battle plans (front line, offensive arrow, drag), peace conference (costs and score checked against a live HOI4 conference, map stripes), production screen, recruit and deploy screen, division designer (stats checked against HOI4's), AI division templates and production plan, railways and supply hubs (`supply/rail_network.py`: link check, hub connections and capacity per country).
+Tricky map algorithms are prototyped in Python under `Tools/prototypes/<topic>/` and checked as preview PNGs before porting to C# or HLSL: borders, rivers, river crossings, labels, highlight outline, move arrows, counters, country fill, top bar, units, battle plans (front line, offensive arrow, drag), peace conference (costs and score checked against a live HOI4 conference, map stripes), production screen, recruit and deploy screen, division designer (stats checked against HOI4's), AI division templates and production plan, railways and supply hubs (`supply/rail_network.py`: link check, hub connections and capacity per country; `supply/render_rails.py`: track on the map).
 
 ## Analysis and Reference Tools
 

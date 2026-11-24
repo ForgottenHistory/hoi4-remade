@@ -82,6 +82,9 @@ namespace Hoi4.Supply
         static bool[] converted = System.Array.Empty<bool>();
         static int converting;
 
+        // where rail runs through each province, map px (y down): presentation only, never read by the simulation
+        static readonly Dictionary<ushort, UnityEngine.Vector2> points = new Dictionary<ushort, UnityEngine.Vector2>();
+
         // results
         static readonly Dictionary<ushort, int> hubSlot = new Dictionary<ushort, int>(); // province -> index in hubs
         static Hub[] hubs = System.Array.Empty<Hub>();
@@ -96,6 +99,9 @@ namespace Hoi4.Supply
         /// <summary>Raised by every recompute that changed a hub.</summary>
         public static int Version { get; private set; }
 
+        /// <summary>Raised whenever a rail province starts or finishes converting (for drawing).</summary>
+        public static int ConversionVersion { get; private set; }
+
         [UnityEngine.RuntimeInitializeOnLoadMethod(UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]
         static void Reset()
         {
@@ -104,6 +110,8 @@ namespace Hoi4.Supply
             listedHub = System.Array.Empty<bool>();
             converted = System.Array.Empty<bool>();
             converting = 0;
+            points.Clear();
+            ConversionVersion = 0;
             hubSlot.Clear(); hubs = System.Array.Empty<Hub>();
             capitalSupply.Clear(); hubsByCountry.Clear();
             loaded = available = started = false;
@@ -148,6 +156,16 @@ namespace Hoi4.Supply
         /// <summary>The country's capital supply (0 when it doesn't hold its capital).</summary>
         public static FP CapitalSupply(ushort country) => capitalSupply.TryGetValue(country, out FP v) ? v : FP.Zero;
 
+        /// <summary>Where rail runs through the province, map px (y down): its HOI4 supply_node spot. Presentation only.</summary>
+        public static bool TryGetRailPoint(ushort province, out UnityEngine.Vector2 point)
+        {
+            point = default;
+            return EnsureLoaded() && points.TryGetValue(province, out point);
+        }
+
+        /// <summary>The province's controller can't use its rail yet (as of the last daily check).</summary>
+        public static bool IsConverting(ushort province) => province < converted.Length && !converted[province];
+
         /// <summary>Rail provinces still converting for their controller, as of the last daily check.</summary>
         public static int Converting => converting;
 
@@ -180,6 +198,7 @@ namespace Hoi4.Supply
             lastNetwork = network.Version;
 
             converting = 0;
+            bool conversionChanged = false;
             for (int i = 0; i < railProvinces.Length; i++)
             {
                 ushort p = railProvinces[i];
@@ -188,7 +207,9 @@ namespace Hoi4.Supply
                 if (ok == converted[p]) continue;
                 converted[p] = ok;
                 dirty = true;
+                conversionChanged = true;
             }
+            if (conversionChanged) ConversionVersion++;
 
             int users = Hoi4Buildings.UsersVersion(gameState);
             if (Hoi4Buildings.Version != lastBuildings || users != lastUsers) dirty = true; // factories move the capital's supply
@@ -337,6 +358,11 @@ namespace Hoi4.Supply
                     listedHub[i] = listed.Contains(hubProvinces[i]);
                     size = System.Math.Max(size, hubProvinces[i] + 1);
                 }
+
+                if (root["points"] is JObject pts)
+                    foreach (var pt in pts.Properties())
+                        if (pt.Value is JArray xy && xy.Count == 2)
+                            points[ushort.Parse(pt.Name)] = new UnityEngine.Vector2((float)xy[0], (float)xy[1]);
 
                 var rail = new SortedSet<ushort>(hubProvinces);
                 foreach (ushort p in network.Provinces()) rail.Add(p);

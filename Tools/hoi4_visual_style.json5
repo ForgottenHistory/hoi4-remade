@@ -76,6 +76,18 @@
     // blend: "lighten" = Max blend, overlaps never add up (wide soft strips fold at tight corners).
     highlight_glow: { visible: true, width: 6.0, minScreenWidth: 16, softness: 1.0, blend: "lighten", color: [1, 1, 1, 0.45] },
     highlight:      { texture: "gfx/map/borders/province.png", alphaOnly: true, width: 1.5, minScreenWidth: 8, tile: 0.4, color: [1, 1, 1, 1] },
+    // Railways (GAME Hoi4RailRenderer through Archon MapLineLayer, its own layer between rivers and
+    // borders). Track from HOI4 gfx/models/supply/railroad.dds, one tile per level (rusty 1 .. steel 5).
+    // Prototype Tools/prototypes/supply/render_rails.py, scale checked against an HOI4 screenshot:
+    // 0.7 map px wide (the prototype matched an HOI4 screenshot at 0.4; wider reads better here), one tile per 0.7 map px (tile 1.43 repeats per map px, square tiles). fade = the unit counters'
+    // (Hoi4UnitCounters fadeHiddenZoom 3, fadeVisibleZoom 5). rail_converting: a grey strip over captured
+    // rail its new controller can't use yet (HOI4 greys it out), drawn by a second layer on top.
+    rail_1: { texture: "gfx/map/rails/rail_1.png", width: 0.7, minScreenWidth: 1.5, tile: 1.43, color: [1, 1, 1, 1], fade: [3.0, 5.0], order: 1 },
+    rail_2: { texture: "gfx/map/rails/rail_2.png", width: 0.7, minScreenWidth: 1.5, tile: 1.43, color: [1, 1, 1, 1], fade: [3.0, 5.0], order: 2 },
+    rail_3: { texture: "gfx/map/rails/rail_3.png", width: 0.7, minScreenWidth: 1.5, tile: 1.43, color: [1, 1, 1, 1], fade: [3.0, 5.0], order: 3 },
+    rail_4: { texture: "gfx/map/rails/rail_4.png", width: 0.7, minScreenWidth: 1.5, tile: 1.43, color: [1, 1, 1, 1], fade: [3.0, 5.0], order: 4 },
+    rail_5: { texture: "gfx/map/rails/rail_5.png", width: 0.7, minScreenWidth: 1.5, tile: 1.43, color: [1, 1, 1, 1], fade: [3.0, 5.0], order: 5 },
+    rail_converting: { width: 0.7, minScreenWidth: 1, softness: 0.3, color: [0.3, 0.3, 0.3, 0.6], fade: [3.0, 5.0], order: 0 },
   },
 
   // Rivers (map/rivers.png, width level 1..9 per pixel from HOI4 rivers.bmp). Texture baked by the
