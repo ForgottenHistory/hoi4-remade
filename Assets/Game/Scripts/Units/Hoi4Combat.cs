@@ -325,6 +325,8 @@ namespace Hoi4.Units
             System.Func<Hoi4Division, FP> aFactor = d => AttackerFactor(gameState, d, units.GetUnit(d.UnitId).provinceID, target);
             Sums(aFront, aFactor, true, out FP aSoft, out FP aHard, out FP aDef, out FP aBrk, out FP aHardness, out FP aArmor, out FP aPierce);
             Sums(dFront, d => DefenderFactor(gameState, d, target, river > 0), false, out FP dSoft, out FP dHard, out FP dDef, out FP dBrk, out FP dHardness, out FP dArmor, out FP dPierce);
+            FP weather = Hoi4.Weather.Hoi4Weather.AttackFactor(target); // mud, snow and cold where the battle is: both sides attack less
+            aSoft *= weather; aHard *= weather; dSoft *= weather; dHard *= weather;
             FP aPierceFactor = PierceFactor(aPierce, dArmor), dPierceFactor = PierceFactor(dPierce, aArmor);
             FP aDie = aArmor > dPierce ? ArmouredDie : Die, dDie = dArmor > aPierce ? ArmouredDie : Die;
 
@@ -445,6 +447,8 @@ namespace Hoi4.Units
                 ? AttackerFactor(gs, d, gs.Units.GetUnit(d.UnitId).provinceID, target) : FP.One + d.Planning;
             Sums(attackers, aFactor, true, out FP aSoft, out FP aHard, out _, out FP aBrk, out _, out _, out _);
             Sums(defenders, d => gs != null ? DefenderFactor(gs, d, target, riverAttack) : FP.One + DigInFactor * d.Entrenchment, false, out FP dSoft, out FP dHard, out FP dDef, out _, out _, out _, out _);
+            FP weather = Hoi4.Weather.Hoi4Weather.AttackFactor(target);
+            aSoft *= weather; aHard *= weather; dSoft *= weather; dHard *= weather;
             FP aRate = Hits(aSoft + aHard, dDef) / FP.Max(dOrg, FP.One);  // share of the defenders' org lost per hour
             FP dRate = Hits(dSoft + dHard, aBrk) / FP.Max(aOrg, FP.One);  // share of the attackers' org lost per hour
             return aRate / FP.Max(dRate, MinRate);

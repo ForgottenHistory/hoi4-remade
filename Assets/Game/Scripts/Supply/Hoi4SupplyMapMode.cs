@@ -158,8 +158,18 @@ namespace Hoi4.Supply
         {
             var gs = Engine.ArchonEngine.Instance?.GameState;
             if (gs == null) return "";
-            return $"Supply {Supply(gs, provinceId).ToFloat():0.0} (hubs {Hoi4Supply.HubSupply(provinceId).ToFloat():0.0}, " +
-                   $"state {Hoi4Supply.StateSupply(gs, provinceId).ToFloat():0.0})";
+            string text = $"Supply {Supply(gs, provinceId).ToFloat():0.0} (hubs {Hoi4Supply.HubSupply(provinceId).ToFloat():0.0}, " +
+                          $"state {Hoi4Supply.StateSupply(gs, provinceId).ToFloat():0.0})";
+            if (!Hoi4.Weather.Hoi4Weather.Available) return text;
+            var parts = new List<string> { $"{Hoi4.Weather.Hoi4Weather.Temperature(provinceId).ToFloat():0} C" };
+            var kind = Hoi4.Weather.Hoi4Weather.KindAt(provinceId);
+            if (kind != Hoi4.Weather.Hoi4Weather.Kind.None) parts.Add(kind.ToString().ToLowerInvariant());
+            int snowLevel = Hoi4.Weather.Hoi4Weather.GroundSnow(provinceId);
+            if (snowLevel > 0) parts.Add(snowLevel == 2 ? "deep snow" : "snow");
+            if (Hoi4.Weather.Hoi4Weather.IsMud(provinceId)) parts.Add("mud");
+            int cut = Mathf.RoundToInt((1f - Hoi4.Weather.Hoi4Weather.SupplyFactor(provinceId).ToFloat()) * 100f);
+            if (cut > 0) parts.Add($"hub supply -{cut}%");
+            return text + "\n" + string.Join(", ", parts);
         }
     }
 }

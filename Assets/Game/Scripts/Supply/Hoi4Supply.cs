@@ -78,6 +78,7 @@ namespace Hoi4.Supply
         // equipment lost per day at no supply after the 30-day ramp: measured in a real HOI4 game (meme_ger: -0.12% a
         // day at 0-9% supply with no reinforcement), not ATTRITION_EQUIPMENT_LOSS_CHANCE read literally (20x more)
         static readonly FP AttritionLossPerDay = FP.FromFraction(15, 10000);
+        static readonly FP OutOfSupplyAttrition = FP.FromFraction(2, 10);           // OUT_OF_SUPPLY_ATTRITION
         // organisation is only capped below half supply: measured in meme_ger (after 20+ days, 10-19% supply holds
         // at most 0.60 of max org, 20-29% 0.68, 40-49% about all of it)
         static readonly FP OrgCapStart = FP.Half;
@@ -167,6 +168,10 @@ namespace Hoi4.Supply
 
         /// <summary>Hub supply in the province (sum of its best three sources), as of the last recompute.</summary>
         public static FP HubSupply(ushort province) =>
+            hubSupply != null && province < hubSupply.Length ? hubSupply[province] * Hoi4.Weather.Hoi4Weather.SupplyFactor(province) : FP.Zero;
+
+        /// <summary>Hub supply before the weather (Hoi4Weather.SupplyFactor cuts what flows in).</summary>
+        public static FP HubSupplyClear(ushort province) =>
             hubSupply != null && province < hubSupply.Length ? hubSupply[province] : FP.Zero;
 
         /// <summary>The k-th best hub source of the province (0: the best) and its flow there; false past the last.</summary>
@@ -523,7 +528,7 @@ namespace Hoi4.Supply
                 ushort p = u.provinceID;
                 if (p >= size || Hoi4Regions.IsWater(p) || ctrl[p] != u.countryID) continue; // at sea / not its ground: keeps its ratio
                 var s = new Slot { Unit = id, Country = u.countryID, Province = p, State = Hoi4Regions.State(p),
-                                   Need = FP.Max(MinNeed, d.SupplyUse) };
+                                   Need = FP.Max(MinNeed, d.SupplyUse) * Hoi4.Weather.Hoi4Weather.ConsumptionFactor(p) };
                 slots.Add(s);
                 long key = PoolKey(s.State, s.Country);
                 if (!byPool.TryGetValue(key, out var list)) byPool[key] = list = new List<Slot>();
@@ -567,7 +572,7 @@ namespace Hoi4.Supply
             {
                 FP want = FP.Zero;
                 foreach (var s in byProvince[p]) want += s.Need - s.FromState;
-                FP avail = hubSupply[p];
+                FP raw = hubSupply[p], avail = raw * Hoi4.Weather.Hoi4Weather.SupplyFactor(p); // weather cuts what flows in
                 if (want <= FP.Zero || avail <= FP.Zero) continue;
                 FP t = FP.Min(want, avail);
                 take[p] = t;
@@ -576,18 +581,18 @@ namespace Hoi4.Supply
                     ushort src = topSource[p * Sources + k];
                     if (src == 0) break;
                     sourceDraw.TryGetValue(src, out FP have);
-                    sourceDraw[src] = have + t * topFlow[p * Sources + k] / avail;
+                    sourceDraw[src] = have + t * topFlow[p * Sources + k] / raw;
                 }
             }
             foreach (ushort p in provKeys)
             {
                 if (!take.TryGetValue(p, out FP t)) continue;
-                FP avail = hubSupply[p], got = FP.Zero;
+                FP raw = hubSupply[p], got = FP.Zero;
                 for (int k = 0; k < Sources; k++)
                 {
                     ushort src = topSource[p * Sources + k];
                     if (src == 0) break;
-                    FP part = t * topFlow[p * Sources + k] / avail;
+                    FP part = t * topFlow[p * Sources + k] / raw;
                     FP drawn = sourceDraw[src];
                     FP cap = capacity.TryGetValue(src, out FP c) ? c : FP.Zero;
                     got += drawn > cap && drawn > FP.Zero ? part * cap / drawn : part;
@@ -600,6 +605,7 @@ namespace Hoi4.Supply
             // 3. ratios
             byCountry.Clear();
             AttritionLosses = 0;
+            var atWar = new Dictionary<ushort, bool>();
             foreach (var s in slots)
             {
                 FP got = s.FromState + s.FromHubs;
@@ -611,7 +617,9 @@ namespace Hoi4.Supply
                 ratio[s.Unit] = now;
                 lowDays.TryGetValue(s.Unit, out int low);
                 lowDays[s.Unit] = now < LowSupply ? System.Math.Min(MaxOutOfSupplyDays, low + 1) : System.Math.Max(0, low - 1);
-                Attrition(divisions.All[s.Unit], now);
+                if (!atWar.TryGetValue(s.Country, out bool war))
+                    atWar[s.Country] = war = gameState.Diplomacy != null && gameState.Diplomacy.GetEnemies(s.Country).Count > 0;
+                Attrition(divisions.All[s.Unit], now, war ? Hoi4.Weather.Hoi4Weather.Attrition(s.Province) : FP.Zero);
                 byCountry.TryGetValue(s.Country, out var cs);
                 cs.Divisions++;
                 cs.Need += s.Need;
@@ -634,13 +642,21 @@ namespace Hoi4.Supply
         /// <summary>Below SUPPLY_THRESHOLD_FOR_ARMY_ATTRITION (35%) a division loses equipment every day: attrition
         /// grows to AttritionLossPerDay (0.15%, measured) at no supply, scaled by 1 - reliability against an average
         /// division's 0.8.
-        /// Weighted by the 30-day ramp like the other effects. Strength falls to what the equipment left allows.</summary>
-        static void Attrition(Hoi4Division d, FP now)
+        /// Weighted by the 30-day ramp like the other effects. Weather attrition (Hoi4Weather.Attrition, at war only:
+        /// mud 0.7, cold, heat) adds to it on the same scale: low supply's full attrition is OUT_OF_SUPPLY_ATTRITION
+        /// (0.2). Strength falls to what the equipment left allows.</summary>
+        static void Attrition(Hoi4Division d, FP now, FP weather)
         {
-            if (now >= AttritionThreshold || d.Need == null || d.Have == null) return;
-            FP ramp = lowDays.TryGetValue(d.UnitId, out int days)
-                ? FP.FromInt(System.Math.Min(days, MaxOutOfSupplyDays)) / MaxOutOfSupplyDays : FP.Zero;
-            FP severity = (AttritionThreshold - now) / AttritionThreshold * ramp; // 0..1 of the max attrition
+            if (d.Need == null || d.Have == null) return;
+            FP severity = FP.Zero;
+            if (now < AttritionThreshold)
+            {
+                FP ramp = lowDays.TryGetValue(d.UnitId, out int days)
+                    ? FP.FromInt(System.Math.Min(days, MaxOutOfSupplyDays)) / MaxOutOfSupplyDays : FP.Zero;
+                severity = (AttritionThreshold - now) / AttritionThreshold * ramp; // 0..1 of the max attrition
+            }
+            severity += weather / OutOfSupplyAttrition; // the same scale: 0.2 attrition = 1
+            if (severity <= FP.Zero) return;
             // reliability scales it around an average division's (0.8): HOI4 scales attrition down by reliability
             FP loss = AttritionLossPerDay * severity * FP.Clamp(FP.One - d.Reliability, FP.Zero, FP.One) * 5;
             if (loss <= FP.Zero) return;

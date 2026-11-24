@@ -129,6 +129,7 @@ namespace Hoi4.Units
             session.Add(new PlansSource());
             session.Add(new HubsSource());
             session.Add(new SupplySource());
+            session.Add(new WeatherSource());
             session.Add(new ProvinceControlSource(p => !Hoi4Regions.IsWater(p)));
             session.Flush();
         }
@@ -341,6 +342,45 @@ namespace Hoi4.Units
                     ushort p = u.provinceID;
                     divisions.Row($"{id}	{r.Tag(u.countryID)}	{p}	{ratio.ToString("0.00", inv)}	{Hoi4.Supply.Hoi4Supply.TargetRatio(id).ToDouble().ToString("0.00", inv)}	{Hoi4.Supply.Hoi4Supply.Lack(id).ToDouble().ToString("0.00", inv)}	"
                                   + $"{Hoi4.Supply.Hoi4Supply.HubSupply(p).ToDouble().ToString("0.00", inv)}	{Hoi4.Supply.Hoi4Supply.StateSupply(r.GameState, p).ToDouble().ToString("0.0", inv)}");
+                }
+            }
+        }
+
+        /// <summary>weather.tsv, weekly per strategic region: its weather event, mean temperature, and the share of
+        /// its land provinces under ground snow, deep snow and (unfrozen) mud.</summary>
+        sealed class WeatherSource : IRecordingSource
+        {
+            RecordingTable table;
+            long lastWeek = -1;
+
+            public void Begin(SessionRecorder r) =>
+                table = r.Table("weather", "region\tweather\ttemp\tsnow\tdeep_snow\tmud\tprovinces");
+
+            public void Record(SessionRecorder r)
+            {
+                if (r.GameState == null || !Hoi4.Weather.Hoi4Weather.Available) return;
+                long week = (long)(r.GameState.Time.CurrentTick / (24 * 7));
+                if (week == lastWeek) return;
+                lastWeek = week;
+                var inv = System.Globalization.CultureInfo.InvariantCulture;
+                var byRegion = new SortedDictionary<int, (double temp, int snow, int deep, int mud, int n, Hoi4.Weather.Hoi4Weather.Kind kind)>();
+                foreach (int state in Hoi4.Map.Hoi4Regions.States)
+                    foreach (ushort p in Hoi4.Map.Hoi4Regions.ProvincesOf(state))
+                    {
+                        int region = Hoi4.Map.Hoi4Regions.Region(p);
+                        if (region < 0 || Hoi4.Map.Hoi4Regions.IsWater(p)) continue;
+                        byRegion.TryGetValue(region, out var a);
+                        int g = Hoi4.Weather.Hoi4Weather.GroundSnow(p);
+                        byRegion[region] = (a.temp + Hoi4.Weather.Hoi4Weather.Temperature(p).ToDouble(), a.snow + (g == 1 ? 1 : 0),
+                                            a.deep + (g == 2 ? 1 : 0), a.mud + (Hoi4.Weather.Hoi4Weather.IsMud(p) ? 1 : 0), a.n + 1,
+                                            Hoi4.Weather.Hoi4Weather.KindAt(p));
+                    }
+                foreach (var kv in byRegion)
+                {
+                    var a = kv.Value;
+                    if (a.n == 0) continue;
+                    table.Row($"{kv.Key}\t{a.kind}\t{(a.temp / a.n).ToString("0.0", inv)}\t{(a.snow / (double)a.n).ToString("0.00", inv)}\t"
+                              + $"{(a.deep / (double)a.n).ToString("0.00", inv)}\t{(a.mud / (double)a.n).ToString("0.00", inv)}\t{a.n}");
                 }
             }
         }

@@ -69,6 +69,7 @@ namespace Hoi4.Units
                     factor *= FP.Max(MinFactor, FP.One + ZeroOrgMovement * (FP.One - share / LowOrgForAttack));
             }
             factor *= Hoi4.Supply.Hoi4Supply.SpeedFactor(unitId); // low supply: down to -80%
+            factor *= Hoi4.Weather.Hoi4Weather.SpeedFactor(to);   // into mud or snow: down to -70%
             factor = FP.Max(MinFactor, factor);
             FP hours = km * Hoi4CombatTerrain.MovementCost(gameState, to) / (speed * factor);
             return System.Math.Max(1, FP.Ceiling(hours).ToInt());

@@ -30,6 +30,8 @@
 
 **Supply:** The 1936 railways and supply hubs, rail conversion after capture, each hub's rail connection to the capital and its capacity, railways drawn on the map; hub and state supply in every province and each division's supply ratio, and what low supply does to a division (combat, organisation, speed, reinforcement, attrition); the supply map mode (F4) and low supply crates on the counters
 
+**Weather:** HOI4's weather per strategic region (rain, snow, blizzard, sandstorm), province temperatures, ground snow and mud, cutting supply and speed and attack and adding attrition
+
 **Not Implemented:** strategic resources and trade, research, politics, generals, air and naval, factions, conditional surrender, saving/loading of HOI4-specific state, multiplayer in practice
 
 The goal is to stress-test Archon-Engine, not to ship a game. Big visual wins are preferred over exact HOI4 fidelity.
@@ -193,6 +195,17 @@ The goal is to stress-test Archon-Engine, not to ship a game. Big visual wins ar
 - **Low supply crates** - The player's counters show HOI4's supply crate (`supply_strip.dds`, mapicons.gui `low_supply`: over the top edge, 0.75 scale) for the lowest-supplied division in the stack: yellow under 99%, orange under 50%, red under 20% (`LOW_SUPPLY`, `ALERT_LOW_SUPPLY_LEVEL`, `ALERT_VERY_LOW_SUPPLY_LEVEL`)
 - **Supply recording** - `supply.tsv`: per country weekly, divisions, need, supply from states and hubs, divisions full and under half, mean ratio. `division_supply.tsv`: a division's ratio, target and the province's supply whenever the ratio enters another 10% band. `supply` column in perf.tsv
 
+## Weather
+
+`Hoi4Weather` (`Assets/Game/Scripts/Weather/`), daily before supply. Data: each strategic region's weather periods (`map/hoi4_weather.json5`, from `map/strategicregions`); rules: `common/weather.txt` and the wiki's Weather page. Prototype `Tools/prototypes/weather/weather.py` (its 1936: Pomerania snowed in by February, mud after the thaw, Ukraine's spring and autumn mud, northern France's wet winters).
+
+- **Weather events** - One per strategic region (none, light rain, heavy rain, snow, blizzard, sandstorm), picked by the month's weights and lasting `weather.txt`'s durations (the smaller of two rolls). Ours: one roll per region; HOI4 drifts weather systems across regions
+- **Temperature** - Per province, inside the month's range plus the terrain's bias (mountain -7, hills -3, forest -1, urban +3, jungle +5): up to 2 degrees of noise a day and half the way to the region's drifting target, at most 6, then 30% toward its neighbours. Bands: extremely cold (-12 and under), very cold (to -4), very hot (20 to 28), extremely hot (28+)
+- **Snow** - Snowing at 1 degree or colder, full from -4: +1 a day (blizzard +5), mountains +80%, cities -40%, deserts none, up to 80. 20-40 ground snow, 40+ deep snow. Melts from 0 degrees (0.1% to 90% a day at 12) into collected water
+- **Mud** - Rain collects water (light 0.5, heavy 1.8 a day, times the month's mud factor, plains +50%, marsh +90%, mountains -30%, -80% at infrastructure 5), drying from 2 degrees (0.05% to 40% a day at 38; a quarter of that on rainy days, ours: else cool wet summers stayed mud). Mud from 15 water until under 13.5 (ours, from `chance_increase`), frozen at -1 or colder
+- **Effects** (`00_static_modifiers.txt`) - Hub supply into a province: snow -10%, blizzard -25%, heavy rain -5%, sandstorm -15%, ground snow -20%, deep -40%, mud -15%, extremely cold -15%, very hot -5% (state supply untouched). Supply use: heavy rain +10%, blizzard +15%, extremely hot +50%. Speed into a province: ground snow -30%, deep -70%, mud -50%. Attack in a battle there (both sides): ground snow -20%, deep -40%, mud -40%, extremely cold -20%, very cold -10%, extremely hot -10%. Attrition at war: mud 0.7, winter 0.4 / 0.25, heat 0.1 / 0.2, on low supply's scale (0.2 = its full attrition)
+- **Shown** - The supply map mode's tooltip: temperature, weather, snow, mud and the hub supply cut. `weather.tsv`: weekly per strategic region, the event, mean temperature and the share under snow, deep snow and mud; `weather` column in perf.tsv
+
 ## AI
 
 - **War declarations (stress test)** - Off by default, F8 toggles it. Every 3 days each AI country with at least 2 divisions and fewer than 2 wars it can reach (an enemy whose land doesn't touch its own, straits included, doesn't count, so one left on an island doesn't block it) declares war on its weakest land neighbour, if that neighbour has at most 110% of its division strength (not allies, not the player unless set in the inspector). At most 5 new wars per check. Settings on the Hoi4AiWars object
@@ -278,7 +291,8 @@ Tricky map algorithms are prototyped in Python under `Tools/prototypes/<topic>/`
 - No recruiting new divisions; manpower only reinforces
 - Province selection does not persist after the state panel closes (HOI4 keeps it)
 - Only land units exist; no air or naval
-- Supply: no weather (supply flow or consumption), no attrition to organisation or from moving, no ports, convoys or air supply (hubs only connect by rail, overseas divisions starve), no allies' hubs, no supply map hover (hub routes, tooltips beyond the province's numbers), rivers don't count as level-1 links, no allied rail, no trains or motorisation, no railway or hub construction, and a lost capital doesn't move (its whole network is cut)
+- Weather: no weather on the map (snow, rain, mud), no acclimatisation, no organisation effects (regain, loss when moving), no breakthrough or dig-in effects, no flooding or arctic water, not saved (rebuilt from the start)
+- Supply: no attrition to organisation or from moving, no ports, convoys or air supply (hubs only connect by rail, overseas divisions starve), no allies' hubs, no supply map hover (hub routes, tooltips beyond the province's numbers), rivers don't count as level-1 links, no allied rail, no trains or motorisation, no railway or hub construction, and a lost capital doesn't move (its whole network is cut)
 - Political power only counts up; nothing spends it
 - Peace conferences are one turn with Take State only: no puppets, liberation, government change, contests, compliance or war goals; war participation ignores air and naval and the attacker-and-winner bonus
 - Plan confidence indicator on army cards is always the tick
