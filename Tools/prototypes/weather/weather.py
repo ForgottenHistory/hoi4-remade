@@ -99,7 +99,7 @@ def main():
     ap.add_argument("--mud", type=float, default=15.0, help="water at which mud forms")
     ap.add_argument("--dry", choices=["share", "amount"], default="share", help="water_dryout_multiplier: a share or an amount a day")
     ap.add_argument("--melt", choices=["share", "amount"], default="share", help="snow_melt_multiplier: a share or an amount a day")
-    ap.add_argument("--dump", action="store_true", help="also write state_<date>.json (snow, water, mud, temperature per province) for snow_render.py")
+    ap.add_argument("--dump", action="store_true", help="also write state_<date>.json (snow, water, mud, temperature, weather, region per province) for snow_render.py")
     ap.add_argument("--norender", action="store_true", help="skip the preview maps")
     args = ap.parse_args()
     hoi4 = Path(args.hoi4)
@@ -224,7 +224,11 @@ def main():
         if day in want and args.dump:
             import json
             (Path(__file__).parent / f"state_{day.isoformat()}.json").write_text(json.dumps(
-                {p: [round(snow[p], 2), round(water[p], 2), int(p in mud), round(temp.get(p, 0.0), 1)] for p in provs}))
+                {p: [round(snow[p], 2), round(water[p], 2), int(p in mud), round(temp.get(p, 0.0), 1),
+                 # the region's weather, warm snowfall as rain (as the simulation treats it)
+                 (lambda k: "rain_light" if k == "snow" and temp.get(p, 0.0) > 1.0 else
+                  "rain_heavy" if k == "blizzard" and temp.get(p, 0.0) > 1.0 else k)(phen.get(region_of[p], "no_phenomenon")),
+                 region_of[p]] for p in provs}))
         if day in want and not args.norender:
             render(hoi4, Path(args.data), ids, args.crop, day, temp, snow, mud, phen, region_of)
 

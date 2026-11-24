@@ -73,6 +73,9 @@
     // Ice look: [cover, 0 = HOI4's broken floes .. 1 = solid sheet; brightness, 1 = HOI4 ICE_COLOR;
     // falloff power, higher = thinner toward the reach, a raggeder fringe]
     _Hoi4IceLook:   { value: [0, 1.5, 3, 0], type: "vector" },
+    // Falling weather when zoomed in (Hoi4/Precipitation, Hoi4WeatherSky): [opacity, screen px per map px where it
+    // starts showing, where it is full, density]. Rain streaks, snowflakes, lightning over thunderstorms
+    _Hoi4Precip:    { value: [0.6, 1.0, 2.0, 1.0], type: "vector" },
   },
 
   // Mesh border classes (Archon MeshGeometry borders). HOI4 border.shader: strips are
@@ -171,6 +174,15 @@
     cloudHeight: 60,         // parallax height above the map
     shadowStrength: 0.35,
     shadowOffset: [-40, 30],
+    // Weather clouds (GAME Hoi4WeatherSky paints the mask: dark over thunderstorms, white over blizzards,
+    // grey over rain and snow). maskZoom: gone by unit level (the counters fade in at 3..5); closer in, the falling
+    // weather (_Hoi4Precip) takes over. Prototype weather/weather_clouds.py
+    maskOpacity: 0.75,
+    maskScale: 260,          // noise tile size, map px
+    maskShadow: 0.5,         // ground shadow (more under dark clouds)
+    maskZoom: [2, 3],
+    maskSoftness: 0.45,      // wispy edges (the cloud banks use cloudSoftness)
+    maskWarp: 60,            // map px: billowy outlines instead of the weather regions' shapes
   },
 
   // Day/night from game time. Toggle in game with toggleKey (Unity KeyCode name, "none" to disable).
