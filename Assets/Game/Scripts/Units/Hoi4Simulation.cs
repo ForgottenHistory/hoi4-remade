@@ -21,9 +21,9 @@ namespace Hoi4.Units
 
         // Timing, per day: [0] combat hourly, [1] plans hourly, [2] AI hourly (break-offs and that hour's
         // countries' attacks), [3] recorder, [4] combat daily, [5] equipment, [6] manpower, [7] plans daily,
-        // [8] war, [9] AI wars, [10] production, [11] AI production, [12] construction, [13] AI construction, [14] deployment, [15] AI deployment, [16] AI army, [17] railways; then the worst single hour of [0], [1], [2], and the plans' daily line refresh
+        // [8] war, [9] AI wars, [10] production, [11] AI production, [12] construction, [13] AI construction, [14] deployment, [15] AI deployment, [16] AI army, [17] railways, [18] supply; then the worst single hour of [0], [1], [2], and the plans' daily line refresh
         static readonly string[] PerfNames =
-            { "combat_h", "plans_h", "ai_h", "recorder", "combat_d", "equipment", "manpower", "plans_d", "war", "ai_wars", "production", "ai_production", "construction", "ai_construction", "deployment", "ai_deployment", "ai_army", "railways" };
+            { "combat_h", "plans_h", "ai_h", "recorder", "combat_d", "equipment", "manpower", "plans_d", "war", "ai_wars", "production", "ai_production", "construction", "ai_construction", "deployment", "ai_deployment", "ai_army", "railways", "supply" };
         static readonly string[] MaxNames = { "combat_h_max", "plans_h_max", "ai_h_max", "plans_refresh", "plans_distribute", "plans_ai" };
         readonly double[] perf = new double[PerfNames.Length];
         // One profiler marker per step, named like the perf.tsv columns: they show in a normal (not deep) capture
@@ -125,6 +125,7 @@ namespace Hoi4.Units
         void OnDay(int day)
         {
             Measure(17, () => Hoi4.Supply.Hoi4Railways.SimulateDay(Engine.ArchonEngine.Instance.GameState)); // rail conversion, hub connections to the capital
+            Measure(18, () => Hoi4.Supply.Hoi4Supply.SimulateDay(Engine.ArchonEngine.Instance.GameState, Hoi4Divisions.Instance)); // province supply, division supply ratios
             Measure(4, () => Hoi4Combat.Instance?.SimulateDay()); // entrenchment
             Measure(12, () => Hoi4.Construction.Hoi4Construction.Instance?.SimulateDay()); // civilian factories build; new factories count from here
             Measure(10, () => Hoi4.Production.Hoi4Production.Instance?.SimulateDay()); // factories to lines, output into the stockpiles

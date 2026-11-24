@@ -128,6 +128,7 @@ namespace Hoi4.Units
             session.Add(new DivisionsSource(snapshotDays));
             session.Add(new PlansSource());
             session.Add(new HubsSource());
+            session.Add(new SupplySource());
             session.Add(new ProvinceControlSource(p => !Hoi4Regions.IsWater(p)));
             session.Flush();
         }
@@ -290,6 +291,56 @@ namespace Hoi4.Units
                     if (last.TryGetValue(p, out string before) && before == key) continue;
                     last[p] = key;
                     table.Row($"{p}	{Hoi4Regions.State(p)}	{key}");
+                }
+            }
+        }
+
+        /// <summary>supply.tsv: each country's divisions against their supply, weekly. division_supply.tsv: a division's
+        /// supply ratio and target whenever the ratio moves into another 10% band.</summary>
+        sealed class SupplySource : IRecordingSource
+        {
+            RecordingTable countries, divisions;
+            readonly Dictionary<ushort, int> band = new Dictionary<ushort, int>();
+            long lastWeek = -1;
+
+            public void Begin(SessionRecorder r)
+            {
+                countries = r.Table("supply", "tag	divisions	need	from_state	from_hubs	full	under_half	mean_ratio");
+                divisions = r.Table("division_supply", "unit	tag	province	ratio	target	hub_supply	state_supply");
+            }
+
+            public void Record(SessionRecorder r)
+            {
+                if (Hoi4Divisions.Instance == null || r.GameState == null) return;
+                var inv = System.Globalization.CultureInfo.InvariantCulture;
+                long week = (long)(r.GameState.Time.CurrentTick / (24 * 7));
+                if (week != lastWeek)
+                {
+                    lastWeek = week;
+                    var tags = new List<ushort>();
+                    foreach (var kv in Hoi4.Supply.Hoi4Supply.Countries) tags.Add(kv.Key);
+                    tags.Sort();
+                    foreach (ushort c in tags)
+                    {
+                        Hoi4.Supply.Hoi4Supply.TryGetCountry(c, out var s);
+                        if (s.Divisions == 0) continue;
+                        countries.Row($"{r.Tag(c)}	{s.Divisions}	{s.Need.ToDouble().ToString("0.00", inv)}	{s.FromState.ToDouble().ToString("0.00", inv)}	"
+                                      + $"{s.FromHubs.ToDouble().ToString("0.00", inv)}	{s.Full}	{s.UnderHalf}	{(s.RatioSum.ToDouble() / s.Divisions).ToString("0.00", inv)}");
+                    }
+                }
+                var ids = new List<ushort>(Hoi4Divisions.Instance.All.Keys);
+                ids.Sort();
+                foreach (ushort id in ids)
+                {
+                    if (!r.GameState.Units.HasUnit(id)) continue;
+                    double ratio = Hoi4.Supply.Hoi4Supply.Ratio(id).ToDouble();
+                    int b = (int)System.Math.Floor(ratio * 10 + 1e-9);
+                    if (band.TryGetValue(id, out int before) ? before == b : b >= 10) { band[id] = b; continue; } // full from the start: no row
+                    band[id] = b;
+                    var u = r.GameState.Units.GetUnit(id);
+                    ushort p = u.provinceID;
+                    divisions.Row($"{id}	{r.Tag(u.countryID)}	{p}	{ratio.ToString("0.00", inv)}	{Hoi4.Supply.Hoi4Supply.TargetRatio(id).ToDouble().ToString("0.00", inv)}	"
+                                  + $"{Hoi4.Supply.Hoi4Supply.HubSupply(p).ToDouble().ToString("0.00", inv)}	{Hoi4.Supply.Hoi4Supply.StateSupply(r.GameState, p).ToDouble().ToString("0.0", inv)}");
                 }
             }
         }

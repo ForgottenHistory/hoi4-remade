@@ -35,6 +35,7 @@ namespace Hoi4.Map
             public List<string> Cores = new List<string>();
             public Dictionary<string, int> Resources = new Dictionary<string, int>();
             public Dictionary<int, int> VictoryPoints = new Dictionary<int, int>();
+            public double LocalSupplies;   // HOI4 local_supplies: base supply in the state's supply pool (x SUPPLY_BASE_MULT)
             public Dictionary<string, int> Buildings = new Dictionary<string, int>();
             public Dictionary<int, Dictionary<string, int>> Provincial = new Dictionary<int, Dictionary<string, int>>();
             public double Value;           // HOI4 state value at the start (peace conference costs and score)
@@ -120,6 +121,7 @@ namespace Hoi4.Map
                     {
                         Category = (string)j["category"] ?? "",
                         Manpower = (int?)j["manpower"] ?? 0,
+                        LocalSupplies = (double?)j["local_supplies"] ?? 0,
                         Owner = (string)j["owner"] ?? "",
                         Value = (double?)j["value"] ?? 0.0,
                         ExtraSlots = (int?)j["extra_slots"] ?? 0,

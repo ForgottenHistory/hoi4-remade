@@ -89,6 +89,7 @@ namespace Hoi4.Units
         }
 
         public static readonly FP EquipmentLossFactor = FP.FromFraction(7, 10); // HOI4 EQUIPMENT_COMBAT_LOSS_FACTOR
+        public FP SupplyUse;           // supply it needs per day: sum of sub-unit supply_consumption (Hoi4Supply)
         public FP MaxOrganisation;     // average of sub-unit max_organisation
         public FP Organisation;
         public FP CombatWidth;         // sum over regiments
@@ -644,6 +645,7 @@ namespace Hoi4.Units
             division.Need = st.Need;
             division.Parts = st.Parts;
             division.MaxOrganisation = st.MaxOrganisation;
+            division.SupplyUse = st.SupplyUse;
             division.CombatWidth = st.CombatWidth;
             division.SpeedKmh = st.SpeedKmh;
             division.Manpower = st.Manpower;

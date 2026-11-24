@@ -28,9 +28,9 @@
 
 **War and peace:** War participation, surrender progress from victory points, capitulation, a basic peace conference (take states)
 
-**Supply (first part):** The 1936 railways and supply hubs, rail conversion after capture, each hub's rail connection to the capital and its capacity, railways drawn on the map; no supply flow yet
+**Supply:** The 1936 railways and supply hubs, rail conversion after capture, each hub's rail connection to the capital and its capacity, railways drawn on the map; hub and state supply in every province and each division's supply ratio (no effects from it yet)
 
-**Not Implemented:** strategic resources and trade, research, politics, supply flow to divisions, generals, air and naval, factions, conditional surrender, saving/loading of HOI4-specific state, multiplayer in practice
+**Not Implemented:** strategic resources and trade, research, politics, effects of low supply, generals, air and naval, factions, conditional surrender, saving/loading of HOI4-specific state, multiplayer in practice
 
 The goal is to stress-test Archon-Engine, not to ship a game. Big visual wins are preferred over exact HOI4 fidelity.
 
@@ -185,6 +185,10 @@ The goal is to stress-test Archon-Engine, not to ship a game. Big visual wins ar
 - **When** - Daily, first in the day, only when control, ownership, buildings or a finishing conversion changed something (`railways` column in perf.tsv)
 - **On the map** - `Hoi4RailRenderer`: every rail link as HOI4's track texture for its level (`gfx/models/supply/railroad.dds`, one tile per level, rusty to steel), 0.7 map px wide, through each province's `supply_node` spot as a centripetal Catmull-Rom curve, chained through plain pass-through provinces. Shown from the zoom where unit counters appear (fade 3 to 5 screen px per map px). Rail still converting gets a grey strip on top. Drawn with the engine's `MapLineLayer`; prototype `Tools/prototypes/supply/render_rails.py`, scale checked against an HOI4 screenshot. No bridges, hub icons or supply map mode yet
 - **Recording** - `hubs.tsv`: every hub at the start, then a row when its controller, connection, level, distance (rail links from the capital) or capacity changes
+- **Hub supply** - `Hoi4Supply`: every connected hub sends supply over the land provinces its controller controls, starting at 5 for the capital and 2.8 for a hub (+0.34 per rail level) and losing on each step 0.5 + 1.2 (capital) or 0.7 (hub) times the defines' logistics curve, plus the terrain's `supply_flow_penalty_factor` (forest 0.08 to marsh 0.16, urban -0.2), cut by up to 30% by the infrastructure of the state it leaves, +0.2 over a river. A province's hub supply is the sum of its best three sources. Our reading of the defines, fitted in `Tools/prototypes/supply/supply_flow.py` to HOI4 tooltips in the Ruhr (Dortmund hub 7.06 against 7.46; light rain in the game, none here)
+- **State supply** - A pool per state: 0.3 per infrastructure level, 0.18 per million people, 0.2 + 0.05 x value per victory point, `local_supplies` x 0.2, rounded to 0.1 (matches HOI4's tooltips exactly: Westfalen 2.60, Rhineland 3.50). A state split between controllers splits all but the VPs by provinces held
+- **Division supply** - Each division needs its template's supply use (sum of its sub-units' `supply_consumption`; HOI4's designer shows about 14% more, a modifier not found yet). Daily: the state pool is shared evenly by the controller's divisions in the state, then each province's remaining need draws on its hub supply, split over its sources by flow; a hub asked for more than its capacity scales everyone down. A division's ratio climbs toward what it gets by at most 3 points a day and drops to it at once. Prototype `supply/supply_demand.py`: peacetime 1936 armies fully supplied, 33 divisions stacked in Berlin get 61%. Nothing reads the ratio yet
+- **Supply recording** - `supply.tsv`: per country weekly, divisions, need, supply from states and hubs, divisions full and under half, mean ratio. `division_supply.tsv`: a division's ratio, target and the province's supply whenever the ratio enters another 10% band. `supply` column in perf.tsv
 
 ## AI
 
@@ -248,7 +252,7 @@ All panels follow one pattern: structure in `.uxml`, look in `*Style.uss` + `Hoi
 
 ## Prototypes
 
-Tricky map algorithms are prototyped in Python under `Tools/prototypes/<topic>/` and checked as preview PNGs before porting to C# or HLSL: borders, rivers, river crossings, labels, highlight outline, move arrows, counters, country fill, top bar, units, battle plans (front line, offensive arrow, drag), peace conference (costs and score checked against a live HOI4 conference, map stripes), production screen, recruit and deploy screen, division designer (stats checked against HOI4's), AI division templates and production plan, railways and supply hubs (`supply/rail_network.py`: link check, hub connections and capacity per country; `supply/render_rails.py`: track on the map).
+Tricky map algorithms are prototyped in Python under `Tools/prototypes/<topic>/` and checked as preview PNGs before porting to C# or HLSL: borders, rivers, river crossings, labels, highlight outline, move arrows, counters, country fill, top bar, units, battle plans (front line, offensive arrow, drag), peace conference (costs and score checked against a live HOI4 conference, map stripes), production screen, recruit and deploy screen, division designer (stats checked against HOI4's), AI division templates and production plan, railways and supply hubs (`supply/rail_network.py`: link check, hub connections and capacity per country; `supply/render_rails.py`: track on the map), supply (`supply/supply_flow.py`: province supply, checked against HOI4 tooltips; `supply/supply_demand.py`: division supply ratios).
 
 ## Analysis and Reference Tools
 
@@ -271,7 +275,7 @@ Tricky map algorithms are prototyped in Python under `Tools/prototypes/<topic>/`
 - No recruiting new divisions; manpower only reinforces
 - Province selection does not persist after the state panel closes (HOI4 keeps it)
 - Only land units exist; no air or naval
-- Supply: no supply flow to provinces or divisions yet, no state supply, no ports or convoys (hubs only connect by rail), rivers don't count as level-1 links, no allied rail, no trains or motorisation, no railway or hub construction, and a lost capital doesn't move (its whole network is cut)
+- Supply: the ratio has no effects yet (combat, organisation, attrition, reinforcement), no weather, no ports, convoys or air supply (hubs only connect by rail, overseas divisions starve), no allies' hubs, no supply map mode, rivers don't count as level-1 links, no allied rail, no trains or motorisation, no railway or hub construction, and a lost capital doesn't move (its whole network is cut)
 - Political power only counts up; nothing spends it
 - Peace conferences are one turn with Take State only: no puppets, liberation, government change, contests, compliance or war goals; war participation ignores air and naval and the attacker-and-winner bonus
 - Plan confidence indicator on army cards is always the tick

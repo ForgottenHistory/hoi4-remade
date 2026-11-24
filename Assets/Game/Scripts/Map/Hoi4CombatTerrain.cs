@@ -28,9 +28,9 @@ namespace Hoi4.Map
         public static readonly FP SmallRiverPenalty = FP.FromFraction(-3, 10);
         public static readonly FP LargeRiverPenalty = FP.FromFraction(-6, 10);
 
-        sealed class Terrain { public FP Width, SupportWidth, Attack, MovementCost; public string Key; }
+        sealed class Terrain { public FP Width, SupportWidth, Attack, MovementCost, SupplyFlowPenalty; public string Key; }
 
-        static readonly Terrain Fallback = new Terrain { Width = FP.FromInt(70), SupportWidth = FP.FromInt(35), Attack = FP.Zero, MovementCost = FP.One, Key = "plains" };
+        static readonly Terrain Fallback = new Terrain { Width = FP.FromInt(70), SupportWidth = FP.FromInt(35), Attack = FP.Zero, MovementCost = FP.One, SupplyFlowPenalty = FP.Zero, Key = "plains" };
         static readonly Dictionary<ushort, Terrain> byTerrainId = new Dictionary<ushort, Terrain>();
         static readonly Dictionary<uint, byte> rivers = new Dictionary<uint, byte>();
         static bool loaded;
@@ -54,6 +54,10 @@ namespace Hoi4.Map
 
         /// <summary>HOI4 terrain movement_cost: how much longer crossing the province takes (forest 1.5, mountain 2).</summary>
         public static FP MovementCost(GameState gameState, ushort province) => Get(gameState, province).MovementCost;
+
+        /// <summary>HOI4 terrain supply_flow_penalty_factor: added to the hub supply lost on a step into the province
+        /// (forest 0.08, mountain 0.12, marsh 0.16; urban -0.2). Zero for plains.</summary>
+        public static FP SupplyFlowPenalty(GameState gameState, ushort province) => Get(gameState, province).SupplyFlowPenalty;
 
         /// <summary>The province's terrain key (plains, forest...), for notes and the recorder.</summary>
         public static string TerrainKey(GameState gameState, ushort province) => Get(gameState, province).Key;
@@ -119,6 +123,7 @@ namespace Hoi4.Map
                         SupportWidth = Num(o?["combat_support_width"], Fallback.SupportWidth),
                         Attack = Num(o?["attack"], FP.Zero),
                         MovementCost = Num(o?["movement_cost"], FP.One),
+                        SupplyFlowPenalty = Num(o?["supply_flow_penalty_factor"], FP.Zero),
                     };
                 }
 

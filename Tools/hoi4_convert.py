@@ -436,7 +436,8 @@ def convert(hoi4: Path, out: Path):
     # --- terrain.json5 -------------------------------------------------------
     tj = ["// Generated from HOI4 province terrain types (definition.csv column 7).",
           "// combat_width, combat_support_width (per extra attack direction) and attack (the attacker's",
-          "// attack and breakthrough modifier) are GAME fields from common/terrain/00_terrain.txt.",
+          "// attack and breakthrough modifier) and supply_flow_penalty_factor (added to the hub supply lost per",
+          "// province step) are GAME fields from common/terrain/00_terrain.txt.",
           "{", "  categories: {"]
     combat = load_terrain_combat(hoi4)
     entries = []
@@ -2358,6 +2359,9 @@ def convert_state_view(hoi4: Path, out: Path, state_centers=None):
                 vps[int(vals[0])] = int(float(vals[1]))
         if vps:
             e["vps"] = vps
+        local = float(get(st, "local_supplies", 0) or 0)
+        if local:
+            e["local_supplies"] = local  # HOI4 state base supply (x SUPPLY_BASE_MULT in the state's supply pool)
         extra = 0
         for v in get_all(hist, "add_extra_state_shared_building_slots"):
             try:
@@ -2493,6 +2497,9 @@ def load_terrain_combat(hoi4: Path):
             units = get(entry, "units")
             if isinstance(units, list) and get(units, "attack") is not None:
                 fields["attack"] = float(get(units, "attack"))
+            # added to the hub supply lost per province step into this terrain (urban: negative, it loses less)
+            if get(entry, "supply_flow_penalty_factor") is not None:
+                fields["supply_flow_penalty_factor"] = float(get(entry, "supply_flow_penalty_factor"))
             result[key] = fields
     print("Terrain combat: " + ", ".join(f"{k} {v}" for k, v in result.items()))
     return result
