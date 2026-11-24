@@ -13,8 +13,8 @@
 #include "Assets/Archon-Engine/Shaders/Includes/DayNight.hlsl"
 #include "Hoi4Terrain.hlsl"
 
-// City lights at night (HOI4: citylights texture tiled over the map, masked by colormap alpha)
-TEXTURE2D(_Hoi4CityLights);
+// City lights at night (HOI4: citylights texture tiled over the map, masked by colormap alpha).
+// _Hoi4CityLights is declared in Hoi4Weather.hlsl (its alpha is HOI4's snow noise).
 float _Hoi4CityLightsIntensity;  // HOI4 CITY_LIGHTS_INTENSITY 5.5
 float _Hoi4CityLightsTiling;     // repeats per map pixel, HOI4 CITY_LIGHTS_TILING 0.09103
 

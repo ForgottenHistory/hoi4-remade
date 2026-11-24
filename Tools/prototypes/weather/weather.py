@@ -99,6 +99,8 @@ def main():
     ap.add_argument("--mud", type=float, default=15.0, help="water at which mud forms")
     ap.add_argument("--dry", choices=["share", "amount"], default="share", help="water_dryout_multiplier: a share or an amount a day")
     ap.add_argument("--melt", choices=["share", "amount"], default="share", help="snow_melt_multiplier: a share or an amount a day")
+    ap.add_argument("--dump", action="store_true", help="also write state_<date>.json (snow, water, mud, temperature per province) for snow_render.py")
+    ap.add_argument("--norender", action="store_true", help="skip the preview maps")
     args = ap.parse_args()
     hoi4 = Path(args.hoi4)
     rng = random.Random(args.seed)
@@ -215,11 +217,15 @@ def main():
     for k in range(args.warmup):
         step(date(1935, 12, 1) + timedelta(days=k), False)
     want = {date.fromisoformat(d) for d in args.dates}
-    ids = province_ids(hoi4) if want else None
+    ids = province_ids(hoi4) if want and not args.norender else None
     for k in range(args.days):
         day = start + timedelta(days=k)
         step(day, True)
-        if day in want:
+        if day in want and args.dump:
+            import json
+            (Path(__file__).parent / f"state_{day.isoformat()}.json").write_text(json.dumps(
+                {p: [round(snow[p], 2), round(water[p], 2), int(p in mud), round(temp.get(p, 0.0), 1)] for p in provs}))
+        if day in want and not args.norender:
             render(hoi4, Path(args.data), ids, args.crop, day, temp, snow, mud, phen, region_of)
 
     names = {8: "Eastern Germany", 1: "Southern England", 155: "Manchuria"}

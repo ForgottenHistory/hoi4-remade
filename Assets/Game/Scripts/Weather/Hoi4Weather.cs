@@ -74,6 +74,8 @@ namespace Hoi4.Weather
         public static bool Available => loaded && available;
         /// <summary>Bumps every simulated day (presentation redraws when it changes).</summary>
         public static int Version { get; private set; }
+        /// <summary>One past the highest province id with weather data (0 before loading).</summary>
+        public static int ProvinceRange => available ? size : 0;
 
         [UnityEngine.RuntimeInitializeOnLoadMethod(UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]
         static void Reset()

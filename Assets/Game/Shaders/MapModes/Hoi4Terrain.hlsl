@@ -395,10 +395,13 @@ float3 Hoi4Water(float2 uv, float3 positionWS, float3 worldNormal)
     return color;
 }
 
+#include "Hoi4Weather.hlsl"
+
 // Full lit HOI4 pixel. countryColor.a = how much country color to paint over the land.
 float4 Hoi4Render(float2 uv, float3 positionWS, float4 countryColor)
 {
     Hoi4Surface s = Hoi4SampleSurface(uv);
+    Hoi4ApplySnow(s, uv);
 
     // Water uses derivative-based samples, so it is not branched on s.land
     float3 water = Hoi4Water(uv, positionWS, s.normal);

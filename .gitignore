@@ -130,6 +130,7 @@ Packages/packages-lock.json
 # Prototype previews and caches (often rendered from HOI4 screenshots or textures: never commit)
 Tools/prototypes/**/*.png
 Tools/prototypes/**/*.pkl
+Tools/prototypes/weather/state_*.json
 
 # Profiler Captures
 /ProfilerCaptures/

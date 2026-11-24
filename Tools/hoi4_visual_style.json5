@@ -13,6 +13,7 @@
     _Hoi4Underwater:    { texture: "gfx/map/underwater.png",     filter: "trilinear", wrap: "repeat" },
     _Hoi4WorldNormal:   { texture: "gfx/map/world_normal.png",   filter: "bilinear", wrap: "clamp", linear: true, mipmaps: false },
     _Hoi4CityLights:    { texture: "gfx/map/citylights.png",     filter: "trilinear", wrap: "repeat" },
+    _Hoi4SnowTex:       { texture: "gfx/map/snow.png",           filter: "trilinear", wrap: "repeat", linear: true },
     _Hoi4WaterLean1:    { texture: "gfx/map/water/lean1.png",      filter: "trilinear", wrap: "repeat", linear: true },
     _Hoi4WaterLean2:    { texture: "gfx/map/water/lean2.png",      filter: "trilinear", wrap: "repeat", linear: true },
     _Hoi4WaterSpec:     { texture: "gfx/map/water/water_spec.png", filter: "bilinear", wrap: "clamp", linear: true },
@@ -54,6 +55,11 @@
     _Hoi4CountryEdgeSoftness: { value: 1.0, type: "float" }, // 1 = gradient between country colors, 0 = near-sharp line
     // Supply map mode (F4): [smoothing radius map px, opacity over terrain]. Prototype supply_mapmode.py
     _Hoi4SupplyMap: { value: [5, 0.8, 0, 0], type: "vector" },
+    // Snow on the terrain (HOI4 ApplySnow, Hoi4Weather.hlsl): [snow amount that reads as full snow (of 80),
+    // map px per screen px where it goes from zoomed in (opacity 0.95) to zoomed out (0.2), edge blend map px].
+    // Prototype weather/snow_render.py
+    _Hoi4Snow:      { value: [40, 0.04, 0.25, 2], type: "vector" },
+    _Hoi4SnowColor: { value: [0.46, 0.48, 0.69, 1.0], type: "vector" }, // HOI4 SNOW_COLOR (linear, so a vector, not a color), a = strength
   },
 
   // Mesh border classes (Archon MeshGeometry borders). HOI4 border.shader: strips are
