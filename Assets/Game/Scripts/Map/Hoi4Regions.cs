@@ -61,6 +61,18 @@ namespace Hoi4.Map
         public static ushort Capital(string tag) =>
             EnsureLoaded() && tag != null && capitals.TryGetValue(tag, out ushort p) ? p : (ushort)0;
 
+        /// <summary>Every country capital (tag and province, HOI4 history), in tag order.</summary>
+        public static IEnumerable<KeyValuePair<string, ushort>> Capitals
+        {
+            get
+            {
+                if (!EnsureLoaded()) yield break;
+                var tags = new List<string>(capitals.Keys);
+                tags.Sort(System.StringComparer.Ordinal);
+                foreach (string t in tags) yield return new KeyValuePair<string, ushort>(t, capitals[t]);
+            }
+        }
+
         [UnityEngine.RuntimeInitializeOnLoadMethod(UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void Reset()
         {

@@ -22,6 +22,8 @@ namespace Hoi4.Units
     ///                    (idle but not on its slot: should not last), unslotted; "removed" at the end
     ///   plan_fronts.tsv  the provinces of each front of a plan, in line order, whenever they change
     ///   battles.tsv      every battle every hour: who fights, who is within the width, the bar, organisation
+    ///   hubs.tsv         supply hubs (Hoi4Railways): every hub at the start, then a row whenever one's controller,
+    ///                    connection, rail level, distance (rail links from the capital) or capacity changes; ready_day = the day its own province's rail is converted (0: is)
     /// Records after everything else in the hour (Hoi4Simulation) and only reads.
     /// </summary>
     public sealed class Hoi4Recorder : MonoBehaviour
@@ -125,6 +127,7 @@ namespace Hoi4.Units
             session.Add(new BattlesSource());
             session.Add(new DivisionsSource(snapshotDays));
             session.Add(new PlansSource());
+            session.Add(new HubsSource());
             session.Add(new ProvinceControlSource(p => !Hoi4Regions.IsWater(p)));
             session.Flush();
         }
@@ -256,6 +259,37 @@ namespace Hoi4.Units
                     table.Row($"gone\t{id}\t{last[id]}\t\t");
                     last.Remove(id);
                     lastValues.Remove(id);
+                }
+            }
+        }
+
+        sealed class HubsSource : IRecordingSource
+        {
+            RecordingTable table;
+            readonly Dictionary<ushort, string> last = new Dictionary<ushort, string>();
+            int version = -1;
+
+            public void Begin(SessionRecorder r)
+            {
+                table = r.Table("hubs", "hub	state	tag	capital	connected	level	distance	capacity	ready_day");
+                Record(r);
+            }
+
+            public void Record(SessionRecorder r)
+            {
+                if (!Hoi4.Supply.Hoi4Railways.Available || Hoi4.Supply.Hoi4Railways.Version == version) return;
+                version = Hoi4.Supply.Hoi4Railways.Version;
+                var inv = System.Globalization.CultureInfo.InvariantCulture;
+                foreach (ushort p in Hoi4.Supply.Hoi4Railways.HubProvinces)
+                {
+                    string key;
+                    if (Hoi4.Supply.Hoi4Railways.TryGetHub(p, out var h))
+                        key = $"{r.Tag(h.Country)}	{(h.IsCapital ? 1 : 0)}	{(h.Connected ? 1 : 0)}	{h.Level}	{h.Distance}	{h.Capacity.ToDouble().ToString("0.0", inv)}	{Hoi4.Supply.Hoi4Railways.ReadyDay(r.GameState, p)}";
+                    else if (last.ContainsKey(p)) key = "	0	0	0	0	0	0"; // a capital-only hub no longer a capital
+                    else continue;
+                    if (last.TryGetValue(p, out string before) && before == key) continue;
+                    last[p] = key;
+                    table.Row($"{p}	{Hoi4Regions.State(p)}	{key}");
                 }
             }
         }

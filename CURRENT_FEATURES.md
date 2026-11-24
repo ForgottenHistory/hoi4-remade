@@ -28,7 +28,9 @@
 
 **War and peace:** War participation, surrender progress from victory points, capitulation, a basic peace conference (take states)
 
-**Not Implemented:** strategic resources and trade, research, politics, supply, generals, air and naval, factions, conditional surrender, saving/loading of HOI4-specific state, multiplayer in practice
+**Supply (first part):** The 1936 railways and supply hubs, rail conversion after capture, each hub's rail connection to the capital and its capacity; no supply flow yet
+
+**Not Implemented:** strategic resources and trade, research, politics, supply flow to divisions, generals, air and naval, factions, conditional surrender, saving/loading of HOI4-specific state, multiplayer in practice
 
 The goal is to stress-test Archon-Engine, not to ship a game. Big visual wins are preferred over exact HOI4 fidelity.
 
@@ -171,6 +173,18 @@ The goal is to stress-test Archon-Engine, not to ship a game. Big visual wins ar
 - **Peace conference** - Basic HOI4 version, checked against a live conference (`Tools/prototypes/peace/`): score = 1.35 x the value of the loser's states the winners control, shared by participation. Take State only, one turn, no contests. Cost = state value (10 + population / 100,000 + resources + 4 x category slots + building values) x ideology (democratic 1.3, fascist 0.9) x 0.8 when the taker controls it (x 10 when no winner does) x influence (0.7 to 1.0 by distance to the taker's capital, cores and controlled states, cheaper next to states already demanded). With the player among the winners the game pauses on the conference screen (HOI4 peaceconferencewindow.gui layout and art): Make Demands on the left (Select All, Reset), the victors on the right, cost cards on the map (click a state to demand it), the loser's states in its own colour (occupation hidden) with HOI4's broad green stripes, blue once demanded, Confirm and Exit. The AI winners then take the states they control, best value for the cost first. Taken states change owner, the rest of the occupation ends, the wars end
 - **Command** - `PeaceDealCommand` carries the player's demands
 
+## Supply
+
+`Hoi4Railways` (`Assets/Game/Scripts/Supply/`), checked first in `Tools/prototypes/supply/rail_network.py`. No graphics yet. Built on two engine mechanisms: `ProvinceLinkNetwork` (the rail links and the widest path) and `ProvinceSystem.TryGetControlChangeTick` (conversion time).
+
+- **Railways** - HOI4's 3,322 rail links between bordering provinces (`map/railways.txt`; a link on several railways takes the highest level), levels 1 to 5 (1,544 at level 1, 1,658 at 2, 89 at 3, 31 at 4 in 1936)
+- **Supply hubs** - The 727 hubs of `map/supply_nodes.txt`, plus every country's capital (a capital is always a hub; 152 capitals aren't in the file, mostly tags that don't exist in 1936)
+- **Conversion** - Rail in a province that changes controller can't be used by the new controller for 10 days, 5 when the state is its core (`RAILWAY_CONVERSION_COOLDOWN`, `_CORE`). The hub itself needs none, but its province's rail does
+- **Connection to the capital** - A hub is connected when its controller holds its capital and a path of rail it controls and has converted joins them. The connection's level is the path's weakest link, taking the best path (Germany 1936: 26 of 29 hubs connected, 14 at level 1, 6 at 2, 6 at 3; East Prussia is cut off by the Polish corridor)
+- **Capacity** - A connected hub: 10 + 5 per connection level (`RAILWAY_BASE_FLOW`, `RAILWAY_FLOW_PER_LEVEL`). The capital: 5 + 0.3 per civilian factory + 0.6 per military factory + 0.4 per dockyard of the states working for the country
+- **When** - Daily, first in the day, only when control, ownership, buildings or a finishing conversion changed something (`railways` column in perf.tsv)
+- **Recording** - `hubs.tsv`: every hub at the start, then a row when its controller, connection, level, distance (rail links from the capital) or capacity changes
+
 ## AI
 
 - **War declarations (stress test)** - Off by default, F8 toggles it. Every 3 days each AI country with at least 2 divisions and fewer than 2 wars it can reach (an enemy whose land doesn't touch its own, straits included, doesn't count, so one left on an island doesn't block it) declares war on its weakest land neighbour, if that neighbour has at most 110% of its division strength (not allies, not the player unless set in the inspector). At most 5 new wars per check. Settings on the Hoi4AiWars object
@@ -220,6 +234,7 @@ All panels follow one pattern: structure in `.uxml`, look in `*Style.uss` + `Hoi
 - **States and strategic regions** - `map/hoi4_regions.json5` (states, regions, impassable states, capitals, water)
 - **Combat terrain** - Combat width, support width and attack penalty per terrain in `map/terrain.json5`; river crossings between provinces in `map/hoi4_river_crossings.json5`
 - **State details** - `map/hoi4_state_data.json5`
+- **Railways and supply hubs** - `map/hoi4_railways.json5`: rail links `[a, b, level]` and hubs, from `map/railways.txt` and `map/supply_nodes.txt`
 - **Countries** - Colors, ideologies, stats (`common/hoi4_country_stats.json5`: stability, war support, core and non-core population, mobilisation law), history
 - **Localisation** - Names for provinces, states, countries
 - **Order of battle** - 1936 divisions
@@ -232,7 +247,7 @@ All panels follow one pattern: structure in `.uxml`, look in `*Style.uss` + `Hoi
 
 ## Prototypes
 
-Tricky map algorithms are prototyped in Python under `Tools/prototypes/<topic>/` and checked as preview PNGs before porting to C# or HLSL: borders, rivers, river crossings, labels, highlight outline, move arrows, counters, country fill, top bar, units, battle plans (front line, offensive arrow, drag), peace conference (costs and score checked against a live HOI4 conference, map stripes), production screen, recruit and deploy screen, division designer (stats checked against HOI4's), AI division templates and production plan.
+Tricky map algorithms are prototyped in Python under `Tools/prototypes/<topic>/` and checked as preview PNGs before porting to C# or HLSL: borders, rivers, river crossings, labels, highlight outline, move arrows, counters, country fill, top bar, units, battle plans (front line, offensive arrow, drag), peace conference (costs and score checked against a live HOI4 conference, map stripes), production screen, recruit and deploy screen, division designer (stats checked against HOI4's), AI division templates and production plan, railways and supply hubs (`supply/rail_network.py`: link check, hub connections and capacity per country).
 
 ## Analysis and Reference Tools
 
@@ -255,6 +270,7 @@ Tricky map algorithms are prototyped in Python under `Tools/prototypes/<topic>/`
 - No recruiting new divisions; manpower only reinforces
 - Province selection does not persist after the state panel closes (HOI4 keeps it)
 - Only land units exist; no air or naval
+- Supply: no supply flow to provinces or divisions yet, no state supply, no ports or convoys (hubs only connect by rail), rivers don't count as level-1 links, no allied rail, no trains or motorisation, no railway or hub construction, and a lost capital doesn't move (its whole network is cut)
 - Political power only counts up; nothing spends it
 - Peace conferences are one turn with Take State only: no puppets, liberation, government change, contests, compliance or war goals; war participation ignores air and naval and the attacker-and-winner bonus
 - Plan confidence indicator on army cards is always the tick
