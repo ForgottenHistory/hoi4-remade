@@ -133,6 +133,9 @@ namespace Hoi4.Supply
         /// <summary>Raised whenever province supply was recomputed.</summary>
         public static int FlowVersion { get; private set; }
 
+        /// <summary>Counts finished daily allocations (presentation redraws when it changes).</summary>
+        public static int DayVersion { get; private set; }
+
         /// <summary>One country's divisions after the last daily allocation.</summary>
         public struct CountrySupply
         {
@@ -243,6 +246,7 @@ namespace Hoi4.Supply
         public static void SimulateDay(GameState gameState, Hoi4Divisions divisions)
         {
             if (gameState == null || divisions == null || !EnsureLoaded(gameState) || !Hoi4Railways.Available) return;
+            DayVersion++;
             Hoi4Occupation.Snapshot(gameState, size, out var ctrl, out _);
             var provinces = gameState.Provinces;
             if (!flowsReady || lastState != gameState || lastControl != provinces.ControlVersion

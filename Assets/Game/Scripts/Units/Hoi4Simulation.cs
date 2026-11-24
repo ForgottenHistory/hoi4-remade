@@ -128,6 +128,8 @@ namespace Hoi4.Units
             Hoi4Occupation.SettleStanding(Engine.ArchonEngine.Instance.GameState); // a division left standing on enemy land takes it
             Hoi4ReturnHome.SimulateDay(Engine.ArchonEngine.Instance.GameState); // divisions on a non-enemy's land go home (cheap: no column)
             Measure(18, () => Hoi4.Supply.Hoi4Supply.SimulateDay(Engine.ArchonEngine.Instance.GameState, Hoi4Divisions.Instance)); // province supply, division supply ratios
+            Hoi4UnitCounters.Instance?.MarkDirty(); // the low supply crates follow the day's ratios
+            Hoi4.Supply.Hoi4SupplyMapMode.Refresh(); // and the supply map mode, at once
             Measure(4, () => Hoi4Combat.Instance?.SimulateDay()); // entrenchment
             Measure(12, () => Hoi4.Construction.Hoi4Construction.Instance?.SimulateDay()); // civilian factories build; new factories count from here
             Measure(10, () => Hoi4.Production.Hoi4Production.Instance?.SimulateDay()); // factories to lines, output into the stockpiles

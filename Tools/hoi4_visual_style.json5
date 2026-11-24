@@ -52,6 +52,8 @@
     // Map px per screen px where the color goes from border band only (zoomed in) to full fill (zoomed out)
     _Hoi4GradientFillZoom: { value: [0.5, 1.5, 0, 0], type: "vector" },
     _Hoi4CountryEdgeSoftness: { value: 1.0, type: "float" }, // 1 = gradient between country colors, 0 = near-sharp line
+    // Supply map mode (F4): [smoothing radius map px, opacity over terrain]. Prototype supply_mapmode.py
+    _Hoi4SupplyMap: { value: [5, 0.8, 0, 0], type: "vector" },
   },
 
   // Mesh border classes (Archon MeshGeometry borders). HOI4 border.shader: strips are
@@ -87,6 +89,14 @@
     rail_3: { texture: "gfx/map/rails/rail_3.png", width: 0.7, minScreenWidth: 1.5, tile: 1.43, color: [1, 1, 1, 1], fade: [3.0, 5.0], order: 3 },
     rail_4: { texture: "gfx/map/rails/rail_4.png", width: 0.7, minScreenWidth: 1.5, tile: 1.43, color: [1, 1, 1, 1], fade: [3.0, 5.0], order: 4 },
     rail_5: { texture: "gfx/map/rails/rail_5.png", width: 0.7, minScreenWidth: 1.5, tile: 1.43, color: [1, 1, 1, 1], fade: [3.0, 5.0], order: 5 },
+    // Supply map mode (F4): HOI4's railway_map_arrow instead of the track, white and wider with each level (thin
+    // texture for level 1, medium 2-3, thick 4-5: RAILWAY_MAP_ARROW_*_LEVEL_THRESHOLD), shown at every zoom.
+    // Prototype Tools/prototypes/supply/supply_mapmode.py (scale checked against an HOI4 screenshot of Pomerania).
+    rail_supply_1: { texture: "gfx/map/rails/supply_thin.png",   width: 0.9,  minScreenWidth: 3, tile: 1.25, color: [1, 1, 1, 1], order: 1 },
+    rail_supply_2: { texture: "gfx/map/rails/supply_medium.png", width: 1.05, minScreenWidth: 4, tile: 1.25, color: [1, 1, 1, 1], order: 2 },
+    rail_supply_3: { texture: "gfx/map/rails/supply_medium.png", width: 1.2,  minScreenWidth: 5, tile: 1.25, color: [1, 1, 1, 1], order: 3 },
+    rail_supply_4: { texture: "gfx/map/rails/supply_thick.png",  width: 1.35, minScreenWidth: 6, tile: 1.25, color: [1, 1, 1, 1], order: 4 },
+    rail_supply_5: { texture: "gfx/map/rails/supply_thick.png",  width: 1.5,  minScreenWidth: 7, tile: 1.25, color: [1, 1, 1, 1], order: 5 },
     rail_converting: { width: 0.7, minScreenWidth: 1, softness: 0.3, color: [0.3, 0.3, 0.3, 0.6], fade: [3.0, 5.0], order: 0 },
   },
 

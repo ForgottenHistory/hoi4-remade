@@ -15,6 +15,9 @@ namespace Hoi4.Supply
     ///     junctions, line ends and level changes.
     ///   - Converting: a grey strip (rail_converting) over the links whose provinces their controller can't use yet,
     ///     on a second layer above the track.
+    ///   - Supply map mode (Hoi4SupplyMapMode.Active): the same chains as HOI4's white railway map arrows
+    ///     (rail_supply_LEVEL: wider with each level, shown at every zoom) on a third layer, the track hidden
+    ///     meanwhile. A layer draws only while its component is enabled.
     ///
     /// Path: through each province's rail point (Hoi4Railways.TryGetRailPoint: HOI4's supply_node spot), as a centripetal
     /// Catmull-Rom curve. Each link gets its own piece of the curve, so the converting overlay follows the track exactly.
@@ -28,7 +31,7 @@ namespace Hoi4.Supply
         const int OverlayQueue = MapLineLayer.DefaultQueue + 6; // above the five track levels, below borders (2900)
         const float SamplesPerMapPx = 1.5f;
 
-        MapLineLayer track, overlay;
+        MapLineLayer track, overlay, supplyTrack;
         int builtNetwork = -1, builtConversion = -1;
         // each link's piece of the curve, from LinkFrom to LinkTo
         readonly Dictionary<int, Vector2[]> linkCurves = new Dictionary<int, Vector2[]>();
@@ -50,8 +53,11 @@ namespace Hoi4.Supply
             var engine = Engine.ArchonEngine.Instance;
             track = gameObject.AddComponent<MapLineLayer>();
             overlay = gameObject.AddComponent<MapLineLayer>();
+            supplyTrack = gameObject.AddComponent<MapLineLayer>();
+            supplyTrack.enabled = false;
             if (!track.Initialize(engine.TextureManager, engine.MapMeshRenderer.transform)
-                || !overlay.Initialize(engine.TextureManager, engine.MapMeshRenderer.transform, OverlayQueue))
+                || !overlay.Initialize(engine.TextureManager, engine.MapMeshRenderer.transform, OverlayQueue)
+                || !supplyTrack.Initialize(engine.TextureManager, engine.MapMeshRenderer.transform))
             {
                 ArchonLogger.LogWarning("Hoi4RailRenderer: could not set up the line layers", "game_units");
                 enabled = false;
@@ -76,12 +82,19 @@ namespace Hoi4.Supply
                 BuildOverlay(network);
                 builtConversion = Hoi4Railways.ConversionVersion;
             }
+            bool supplyMode = Hoi4SupplyMapMode.Active;
+            if (supplyTrack.enabled != supplyMode)
+            {
+                supplyTrack.enabled = supplyMode;
+                track.enabled = !supplyMode;
+            }
         }
 
         void BuildTrack(ProvinceLinkNetwork network)
         {
             linkCurves.Clear();
             var lines = new List<MapLine>();
+            var supplyLines = new List<MapLine>();
             var used = new bool[network.LinkCount];
             var chainProvinces = new List<ushort>();
             var chainLinks = new List<int>();
@@ -114,9 +127,13 @@ namespace Hoi4.Supply
                     }
                     var curve = Curve(network, chainProvinces, chainLinks);
                     if (curve != null)
+                    {
                         lines.Add(new MapLine { Points = curve, ClassName = "rail_" + network.Level(link) });
+                        supplyLines.Add(new MapLine { Points = curve, ClassName = "rail_supply_" + Mathf.Clamp(network.Level(link), 1, 5) });
+                    }
                 }
             track.SetLines(lines);
+            supplyTrack.SetLines(supplyLines);
         }
 
         /// <summary>The province has exactly two links (counting live ones), of the same level as this one.</summary>

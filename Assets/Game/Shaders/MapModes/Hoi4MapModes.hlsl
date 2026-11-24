@@ -3,6 +3,7 @@
 //   0  political  - country color painted over terrain (unowned land/sea show terrain/water)
 //   1  terrain    - plain terrain
 //   2+ custom     - province palette color painted over terrain (alpha 0 = terrain only)
+//   6  supply     - the palette smoothed across provinces like HOI4's supply heatmap (Hoi4SupplyMapMode)
 // Lighting is done inside Hoi4Render, so the engine lighting stage is disabled here.
 
 #ifndef HOI4_MAP_MODES_INCLUDED
@@ -172,6 +173,39 @@ TEXTURE2D(_Hoi4ConstructionTex);
 float _Hoi4ConstructionActive;
 float _Hoi4ConstructionHover; // 1 while a state is hovered (skips the 6x6 glow window otherwise)
 
+// Supply map mode (Hoi4SupplyMapMode, shader mode 6): the province palette colours averaged over a disc of
+// _Hoi4SupplyMap.x map px (32 taps, weighted by alpha so uncoloured land doesn't fade them), shown with the coverage
+// of the pixel's own surroundings over ~1 map px, so the colour flows across provinces but stops at the country's
+// edge. _Hoi4SupplyMap.y = opacity over the terrain. Prototype: Tools/prototypes/supply/supply_mapmode.py
+float4 _Hoi4SupplyMap;
+
+float4 Hoi4SupplyColor(float2 uv)
+{
+    uint w, h;
+    _ProvinceOwnerTexture.GetDimensions(w, h);
+    float2 texel = 1.0 / float2(w, h);
+    float radius = HOI4_OR(_Hoi4SupplyMap.x, 5.0);
+    float3 sum = 0.0;
+    float weight = 0.0;
+    [loop] for (int i = 0; i < 32; i++)
+    {
+        float ang = i * 2.39996;
+        float r = radius * sqrt((i + 0.5) / 32.0);
+        float4 c = Hoi4PaletteColor(SampleProvinceID(uv + float2(cos(ang), -sin(ang)) * r * texel));
+        sum += c.rgb * c.a;
+        weight += c.a;
+    }
+    if (weight < 1e-3) return 0;
+    float cover = 0.0;
+    [unroll] for (int k = 0; k < 7; k++)
+    {
+        float ang = k * 2.39996;
+        float r = k == 0 ? 0.0 : sqrt(k / 6.0);
+        cover += Hoi4PaletteColor(SampleProvinceID(uv + float2(cos(ang), -sin(ang)) * r * texel)).a > 0.01 ? 1.0 : 0.0;
+    }
+    return float4(sum / weight, cover / 7.0);
+}
+
 float4 RenderMapMode(int mapMode, uint provinceID, float2 uv, float3 positionWS)
 {
     float blend = HOI4_OR(_Hoi4PoliticalBlend, 0.65);
@@ -179,6 +213,11 @@ float4 RenderMapMode(int mapMode, uint provinceID, float2 uv, float3 positionWS)
     if (mapMode == 1)
     {
         return Hoi4Render(uv, positionWS, 0);
+    }
+    if (mapMode == 6)
+    {
+        float4 supply = Hoi4SupplyColor(uv);
+        return Hoi4Render(uv, positionWS, float4(supply.rgb, supply.a * HOI4_OR(_Hoi4SupplyMap.y, 0.8)));
     }
     if (mapMode >= 2 && mapMode < 100 && mapMode != 5)
     {

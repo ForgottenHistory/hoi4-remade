@@ -28,8 +28,10 @@ namespace Hoi4.Units
     public sealed class Hoi4UnitCounters : MonoBehaviour
     {
         // Counter canvas: HOI4 plate is 66x27; slots get a transparent margin against bilinear bleed
-        // Each slot has a strip on the left for the no-orders mark (mapicons.gui no_orders sits at x -10)
-        const int CounterW = 66, CounterH = 27, BodyW = 68, LeftMargin = 12, SlotW = BodyW + LeftMargin, SlotH = 29;
+        // Each slot has a strip on the left for the no-orders mark (mapicons.gui no_orders sits at x -10) and one on top
+        // for the low supply crate (mapicons.gui low_supply sits at y -4)
+        const int CounterW = 66, CounterH = 27, BodyW = 68, LeftMargin = 12, TopMargin = 4, SlotW = BodyW + LeftMargin,
+                  SlotH = 29 + TopMargin;
         const int AtlasWidth = 2048;
         const float StackSpacingPx = 70f;
         const float BaseYPx = -CounterH * 1.5f; // the lowest counter is centred on the province, not standing on it
@@ -85,6 +87,8 @@ namespace Hoi4.Units
             public Color32 Color; // the country's map colour, the counter's background
             public int Row; // templates of one country stack upwards
             public bool IsBattle; // a battle marker on a border, not a division counter (Count = attacker %)
+            public float LowestSupply = 1f; // the player's divisions: the lowest supply ratio among them
+            public int Supply; // the low supply crate: 0 none, 1 yellow, 2 orange, 3 red
         }
 
         GameState gameState;
@@ -104,30 +108,31 @@ namespace Hoi4.Units
         {
             readonly bool battle, selected, noOrders;
             readonly string tag, type;
-            readonly int rgb, action, army, count, org, str;
+            readonly int rgb, action, army, count, org, str, supply;
 
             public CounterKey(bool battle, string tag, int rgb, string type, int action, int army, int count,
-                              int org, int str, bool selected, bool noOrders)
+                              int org, int str, bool selected, bool noOrders, int supply)
             {
                 this.battle = battle; this.tag = tag; this.rgb = rgb; this.type = type; this.action = action;
                 this.army = army; this.count = count; this.org = org; this.str = str;
-                this.selected = selected; this.noOrders = noOrders;
+                this.selected = selected; this.noOrders = noOrders; this.supply = supply;
             }
 
             public bool Equals(CounterKey o) =>
                 battle == o.battle && selected == o.selected && noOrders == o.noOrders && rgb == o.rgb &&
-                action == o.action && army == o.army && count == o.count && org == o.org && str == o.str &&
+                action == o.action && army == o.army && count == o.count && org == o.org && str == o.str && supply == o.supply &&
                 string.Equals(tag, o.tag) && string.Equals(type, o.type);
 
             public override bool Equals(object obj) => obj is CounterKey k && Equals(k);
 
             public override int GetHashCode() =>
                 HashCode.Combine(HashCode.Combine(battle, selected, noOrders, rgb, action, army, count),
-                                 org, str, tag, type);
+                                 org, str, supply, tag, type);
         }
 
         Sprite actionMove, actionDefend, actionAttack; // optional: the arrow, shield and double chevron on a counter's right edge
         Sprite noOrders; // optional: GFX_mapicon_unit_no_orders
+        readonly Sprite[] supplyCrates = new Sprite[3]; // optional: GFX_unitcounter_supply_status_strip (yellow, orange, red)
         Sprite plate, selectedFrame, ideologyStrip, barOrg, barStr, digits;
         List<Stack> stacks = new List<Stack>();
         Texture2D heightmap;
@@ -351,7 +356,7 @@ namespace Hoi4.Units
             float zoom = worldPerMapPixel / worldPerScreenPx;
             if (zoom < fadeHiddenZoom) return false; // counters are hidden at this zoom
             float scale = pixelScale * Mathf.Clamp(zoom / Mathf.Max(fullSizeZoom, 0.01f), Mathf.Clamp01(minSizeFraction), 1f);
-            rect = new Rect(anchorScreen.x + s.X0 * scale, anchorScreen.y + (BaseYPx + s.Row * RowSpacingPx + SlotH - CounterH - 1) * scale,
+            rect = new Rect(anchorScreen.x + s.X0 * scale, anchorScreen.y + (BaseYPx + s.Row * RowSpacingPx + SlotH - TopMargin - CounterH - 1) * scale,
                 CounterW * scale, (CounterH + 1) * scale);
             return true;
         }
@@ -370,6 +375,7 @@ namespace Hoi4.Units
             actionDefend = LoadSprite("gfx/counters/action_defend.png");
             actionAttack = LoadSprite("gfx/counters/action_attack.png");
             noOrders = LoadSprite("gfx/counters/no_orders.png");
+            for (int i = 0; i < supplyCrates.Length; i++) supplyCrates[i] = LoadSprite($"gfx/counters/supply_{i + 1}.png");
             if (plate == null || ideologyStrip == null || barOrg == null || barStr == null || digits == null)
             {
                 ArchonLogger.LogWarning("Hoi4UnitCounters: counter sprites missing under gfx/counters (rerun Tools/hoi4_convert.py)", "game_units");
@@ -441,6 +447,8 @@ namespace Hoi4.Units
             var defended = new HashSet<ushort>();
             foreach (var battle in Hoi4Combat.Battles) defended.Add(battle.To);
             var queue = units.MovementQueue;
+            var viewerState = StarterKit.Initializer.Instance?.PlayerState;
+            ushort viewer = viewerState != null && viewerState.HasPlayerCountry ? viewerState.PlayerCountryId : (ushort)0;
             var groupSize = new Dictionary<(uint, string), int>();
             var groupSelected = new HashSet<(uint, string)>();
             foreach (ushort id in units.GetAllUnits())
@@ -479,6 +487,7 @@ namespace Hoi4.Units
                 var armyOf = Hoi4Armies.Instance?.ArmyOf(id);
                 if (armyOf != null && armyOf.Owner != Hoi4Armies.Player && !Hoi4BattlePlans.ShowAIPlans) armyOf = null; // the AI's armies: not shown
                 if (s.ArmyId == 0) s.ArmyId = armyOf?.Id ?? 0;
+                if (u.countryID == viewer) s.LowestSupply = Mathf.Min(s.LowestSupply, Hoi4.Supply.Hoi4Supply.Ratio(id).ToFloat());
                 // Like HOI4: in an army but on no battle plan, and not following a manual order
                 var plans = Hoi4BattlePlans.Instance;
                 if (plans != null && armyOf != null && plans.PlanOf(id) == null && !plans.HasManualOrder(id))
@@ -498,6 +507,9 @@ namespace Hoi4.Units
             var perProvince = new Dictionary<ushort, List<Stack>>();
             foreach (var s in byKey.Values)
             {
+                // HOI4's low supply crate on the player's counters: from LOW_SUPPLY (0.99) yellow, under
+                // ALERT_LOW_SUPPLY_LEVEL (0.5) orange, under ALERT_VERY_LOW_SUPPLY_LEVEL (0.2) red
+                s.Supply = s.LowestSupply >= 0.99f ? 0 : s.LowestSupply >= 0.5f ? 1 : s.LowestSupply >= 0.2f ? 2 : 3;
                 if (!centers.TryGetProvinceCenter(s.Province, out s.Anchor)) continue;
                 if (!perProvince.TryGetValue(s.Province, out var list))
                     perProvince[s.Province] = list = new List<Stack>();
@@ -612,7 +624,7 @@ namespace Hoi4.Units
 
         CounterKey Signature(Stack s)
         {
-            if (s.IsBattle) return new CounterKey(true, null, 0, null, s.Battle, 0, s.Count, 0, 0, false, false);
+            if (s.IsBattle) return new CounterKey(true, null, 0, null, s.Battle, 0, s.Count, 0, 0, false, false, 0);
             string type = "infantry";
             int best = -1;
             foreach (var kv in s.Types)
@@ -620,7 +632,7 @@ namespace Hoi4.Units
             int org = Mathf.RoundToInt(barOrg.Width * Mathf.Clamp01(s.MaxOrg > 0 ? s.Org / s.MaxOrg : 1f));
             int str = Mathf.RoundToInt(barStr.Width * Mathf.Clamp01(s.MaxStr > 0 ? s.Str / s.MaxStr : 1f));
             return new CounterKey(false, s.Tag, s.Color.r << 16 | s.Color.g << 8 | s.Color.b, type, s.Action, s.ArmyId,
-                                  s.Count, org, str, s.Selected, s.NoOrders);
+                                  s.Count, org, str, s.Selected, s.NoOrders, s.Supply);
         }
 
         void ComposeCached(Stack s, int ox, int oy)
@@ -633,8 +645,8 @@ namespace Hoi4.Units
                     Array.Copy(block, y * SlotW, atlasPixels, (h - 1 - (oy + y)) * AtlasWidth + ox, SlotW);
                 return;
             }
-            if (s.IsBattle) ComposeBattle(s, ox + LeftMargin, oy);
-            else ComposeCounter(s, ox + LeftMargin, oy);
+            if (s.IsBattle) ComposeBattle(s, ox + LeftMargin, oy + TopMargin);
+            else ComposeCounter(s, ox + LeftMargin, oy + TopMargin);
             if (composed.Count > 5000) composed.Clear();
             block = new Color32[SlotW * SlotH];
             for (int y = 0; y < SlotH; y++)
@@ -682,6 +694,9 @@ namespace Hoi4.Units
             var action = s.Action == 3 ? actionAttack : s.Action == 2 ? actionDefend : s.Action == 1 ? actionMove : null;
             if (action != null) BlitScaled(action, 9, ox + 57, oy + 9); // fits the strip right of the count box
 
+            // mapicons.gui low_supply: a crate over the top edge (x 24, y -4, scale 0.75), into the slot's top strip
+            var crate = s.Supply > 0 ? supplyCrates[s.Supply - 1] : null;
+
             Bar(barOrg, s.MaxOrg > 0 ? s.Org / s.MaxOrg : 1f, ox + 16, oy + 16);
             Bar(barStr, s.MaxStr > 0 ? s.Str / s.MaxStr : 1f, ox + 16, oy + 19);
 
@@ -696,6 +711,7 @@ namespace Hoi4.Units
                 Blit(digits, (c - '0') * digitW, 0, digitW, digitH, x, y, tint);
                 x += advance;
             }
+            if (crate != null) BlitScaled(crate, Mathf.RoundToInt(crate.Width * 0.75f), ox + 24, oy - 4);
         }
 
         // HOI4's battle burst: a red disc with the attackers' chance in it, standing on the border
