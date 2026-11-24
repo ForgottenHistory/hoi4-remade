@@ -102,6 +102,7 @@ Measured: a section's centre moves a mean 47–64 km per step when carried, agai
 5. [x] **Debug drawing toggle.**
 6. [ ] **Report and docs.**
 7. Later: feedback upward (stalled offensives and front pressure change budgets), a fast-army breakthrough role, strategic redeployment by rail for long transfers, and moving the cadence scheduler to the engine.
+8. [x] **Supply awareness** (2026-11-24): theatre budgets capped by what the front's supply feeds (hub supply plus state pools over the average division need; HOI4's AI_FRONT_DIVISIONS_PER_SUPPLY_POINT 1.0, at least one per province), the excess to theatres with room, then reserve; starving reserve divisions walk daily to fed provinces off the front (`RestReserves`). Found in `Recordings/20261124_163531_CUB`: the Soviets put 33 divisions in Qandahar (0.3 supply) with no cap. hoi4-custom-ai learned each area's limit from its divisions' supply; here the game knows the supply, so the cap is computed.
 
 ## Invariants to keep
 

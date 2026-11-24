@@ -199,6 +199,54 @@ namespace Hoi4.Units
             }
         }
 
+        bool EnemyStands(ushort country, ushort province, ushort except)
+        {
+            var units = gameState.Units;
+            foreach (ushort other in units.GetUnitsInProvince(province))
+            {
+                if (other == except || !units.HasUnit(other)) continue;
+                ushort c = units.GetUnit(other).countryID;
+                if (c != country && gameState.Diplomacy.IsAtWar(country, c)) return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Daily repair, from Hoi4Simulation: a division standing still, out of battle, in a province held by a
+        /// country it is at war with, where no division of a country at war with it stands, takes the province as if
+        /// it had just walked in (OnArrived's rules: liberation included, no organisation cost). Occupation happens
+        /// on arrival only, so anything that changed control under a division (a retreat into it, as above) left
+        /// it standing on the enemy's land for good. Units in id order.
+        /// </summary>
+        public static void SettleStanding(GameState gameState)
+        {
+            if (gameState?.Units == null || gameState.Diplomacy == null) return;
+            var units = gameState.Units;
+            var diplomacy = gameState.Diplomacy;
+            var all = units.GetAllUnits();
+            all.Sort();
+            foreach (ushort u in all)
+            {
+                if (!units.HasUnit(u) || units.MovementQueue.IsUnitMoving(u) || Hoi4Combat.IsFighting(u) || Hoi4Combat.IsRetreating(u)) continue;
+                var unit = units.GetUnit(u);
+                ushort country = unit.countryID, p = unit.provinceID;
+                if (country == 0 || Hoi4Regions.IsWater(p)) continue;
+                ushort owner = gameState.Provinces.GetProvinceOwner(p), controller = ControllerOf(gameState, p);
+                if (owner == 0 || controller == country || controller == 0 || !diplomacy.IsAtWar(country, controller)) continue;
+                bool enemy = false;
+                foreach (ushort other in units.GetUnitsInProvince(p))
+                {
+                    if (other == u || !units.HasUnit(other)) continue;
+                    ushort c = units.GetUnit(other).countryID;
+                    if (c != country && diplomacy.IsAtWar(country, c)) { enemy = true; break; }
+                }
+                if (enemy) continue;
+                bool liberates = owner != country && !diplomacy.IsAtWar(owner, country);
+                gameState.Provinces.SetProvinceController(p, liberates ? owner : country);
+                Core.Recording.SessionRecorder.Note("occupation", "settle", country, u, p, controller, "stood on the enemy's land without holding it");
+            }
+        }
+
         void OnArrived(ushort unitId, ushort province)
         {
             var units = gameState.Units;
@@ -208,6 +256,11 @@ namespace Hoi4.Units
             ushort owner = gameState.Provinces.GetProvinceOwner(province);
             ushort controller = ControllerOf(gameState, province);
             if (owner == 0 || controller == country || !diplomacy.IsAtWar(country, controller)) return;
+            // An enemy division standing there holds it: only a retreat arrives like that (moves are held back by
+            // the ArrivalBlocker), and the retreating division is overrun (Hoi4Combat), so it takes nothing. Both
+            // handlers listen to the same arrival and this one ran first: a Chinese division retreating into a
+            // province Japan had just taken handed it back to China, under Japan's cavalry
+            if (EnemyStands(country, province, unitId)) return;
 
             // Land of a country it isn't at war with (an enemy held it: an ally's, or a third country's the enemy
             // occupied) goes back to its owner rather than being kept (HOI4 liberation)

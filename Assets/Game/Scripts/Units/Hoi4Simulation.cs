@@ -125,6 +125,8 @@ namespace Hoi4.Units
         void OnDay(int day)
         {
             Measure(17, () => Hoi4.Supply.Hoi4Railways.SimulateDay(Engine.ArchonEngine.Instance.GameState)); // rail conversion, hub connections to the capital
+            Hoi4Occupation.SettleStanding(Engine.ArchonEngine.Instance.GameState); // a division left standing on enemy land takes it
+            Hoi4ReturnHome.SimulateDay(Engine.ArchonEngine.Instance.GameState); // divisions on a non-enemy's land go home (cheap: no column)
             Measure(18, () => Hoi4.Supply.Hoi4Supply.SimulateDay(Engine.ArchonEngine.Instance.GameState, Hoi4Divisions.Instance)); // province supply, division supply ratios
             Measure(4, () => Hoi4Combat.Instance?.SimulateDay()); // entrenchment
             Measure(12, () => Hoi4.Construction.Hoi4Construction.Instance?.SimulateDay()); // civilian factories build; new factories count from here

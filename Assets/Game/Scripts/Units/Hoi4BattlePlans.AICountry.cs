@@ -18,7 +18,11 @@ namespace Hoi4.Units
     ///   (0.25 + surrender progress) x 10 / (1 + cost); no route: 0, the theatre only holds). The main effort is
     ///   the best score, kept CommitDays unless another scores ScoreToSwitch times better (it follows its armies).
     /// - Budget: each theatre its need, the spare shared in proportion to the needs; short of divisions, each the
-    ///   same fraction of its need. No cap, no reserve on purpose (reserve: divisions between armies).
+    ///   same fraction of its need. Capped by supply (SupplyCap: what the theatre's front provinces can feed, as
+    ///   HOI4's AI_FRONT_DIVISIONS_PER_SUPPLY_POINT, at least one per province); what a capped theatre can't take
+    ///   goes to the others on the landmass with room, the rest is reserve.
+    /// - Reserve: daily, reserve divisions starving where they stand walk to the nearest of our provinces whose hub
+    ///   supply has room for them, off the front (RestReserves).
     /// - Posture: the main effort attacks while its armies have AttackRatio times the enemy facing it; the rest hold.
     /// - Armies: ceil(budget / ArmySize) per theatre, each holding a contiguous section of its front. Sections
     ///   carry over from the day before by nearness (each front province takes the army of the nearest earlier
@@ -62,6 +66,13 @@ namespace Hoi4.Units
         static readonly FP AttackRatio = FP.FromFraction(3, 2); // the main effort wants this many per enemy division facing it, and attacks only with them
         static readonly FP ScoreToSwitch = FP.FromFraction(3, 2);
         static readonly FP ProgressBase = FP.FromFraction(1, 4);
+        // supply: a theatre takes at most what its front provinces feed (HOI4 AI_FRONT_DIVISIONS_PER_SUPPLY_POINT 1.0,
+        // AI_FRONT_MINIMUM_UNITS_PER_PROVINCE_FOR_SUPPLY_CALCULATIONS 1), counting each division's own need
+        static readonly FP DivisionsPerSupplyPoint = FP.One;
+        const int MinPerProvinceForSupply = 1;
+        static readonly FP RestBelow = FP.FromFraction(6, 10); // a reserve division getting less than this of its need moves
+        const int RestHops = 30;                              // ... to a fed province this close (own land)
+        const int RestPerDay = 24;                            // ... at most this many orders a country a day
 
         sealed class Theatre
         {
@@ -69,7 +80,8 @@ namespace Hoi4.Units
             public List<ushort> Order;                        // along the front, from one end
             public Dictionary<ushort, List<ushort>> Links;    // neighbours along the front (sorted)
             public SortedSet<ushort> Enemies = new SortedSet<ushort>();
-            public int Facing, Need, Budget, Label;
+            public int Facing, Need, Budget, Label, SupplyCap;
+            public FP Supply;                                  // hub supply of its front provinces plus their states' pools
             public FP HomeCost = FP.MaxValue, Danger;          // the enemy's cheapest route from here to our core VPs; HomeScale / (HomeScale + it)
             public FP Cost = FP.MaxValue, Score;
             public ushort BestEnemy;
@@ -242,6 +254,82 @@ namespace Hoi4.Units
             }
             if (reason != null) PlanCountry(country, reason);
             else FollowCountry(country, st, front, near);
+            RestReserves(country);
+        }
+
+        /// <summary>
+        /// Reserve divisions (no army) getting less than RestBelow of their supply need, standing still and not
+        /// fighting, walk to the nearest of our provinces (by land hops through our own land, within RestHops) that
+        /// isn't on the front and whose hub supply has room for one more: hub supply minus the need of our divisions
+        /// there or marching there. At most RestPerDay orders a day. Deterministic: units and rings in id order.
+        /// </summary>
+        void RestReserves(ushort country)
+        {
+            var armies = Hoi4Armies.Instance;
+            var divs = Hoi4Divisions.Instance;
+            if (armies == null || divs == null) return;
+            var units = gameState.Units;
+            var queue = units.MovementQueue;
+            var diplomacy = gameState.Diplomacy;
+            var own = units.GetCountryUnits(country);
+            own.Sort();
+            // load: the need of our divisions in each province or marching to it
+            var load = new Dictionary<ushort, FP>();
+            var hungry = new List<ushort>();
+            foreach (ushort u in own)
+            {
+                if (!units.HasUnit(u)) continue;
+                var dv = divs.Get(u);
+                if (dv == null) continue;
+                ushort at = queue.IsUnitMoving(u) ? HeadingTo(u) : units.GetUnit(u).provinceID;
+                load[at] = (load.TryGetValue(at, out FP l) ? l : FP.Zero) + dv.SupplyUse;
+                if (armies.ArmyOf(u) != null || queue.IsUnitMoving(u) || Hoi4Combat.IsFighting(u) || Hoi4Combat.IsRetreating(u)
+                    || borrowed.Contains(u) || Hoi4Regions.IsWater(units.GetUnit(u).provinceID)) continue;
+                if (Hoi4.Supply.Hoi4Supply.TargetRatio(u) < RestBelow) hungry.Add(u);
+            }
+            if (hungry.Count == 0) return;
+            bool Front(ushort p)
+            {
+                foreach (ushort n in Neighbours(p))
+                {
+                    ushort c = hourCtrl[n];
+                    if (c != 0 && c != country && !Hoi4Regions.IsImpassable(n) && diplomacy.IsAtWar(country, c)) return true;
+                }
+                return false;
+            }
+            int orders = 0;
+            var moved = new List<string>();
+            foreach (ushort u in hungry)
+            {
+                if (orders >= RestPerDay) break;
+                var unit = units.GetUnit(u);
+                FP need = divs.Get(u).SupplyUse;
+                ushort start = unit.provinceID, dest = 0;
+                var seen = new HashSet<ushort> { start };
+                var ring = new List<ushort> { start };
+                for (int hop = 0; hop < RestHops && ring.Count > 0 && dest == 0; hop++)
+                {
+                    var next = new List<ushort>();
+                    foreach (ushort p in ring)
+                        foreach (ushort n in Neighbours(p))
+                            if (hourCtrl[n] == country && !Hoi4Regions.IsImpassable(n) && seen.Add(n)) next.Add(n);
+                    next.Sort();
+                    foreach (ushort p in next)
+                    {
+                        FP room = Hoi4.Supply.Hoi4Supply.HubSupply(p) - (load.TryGetValue(p, out FP l) ? l : FP.Zero);
+                        if (room >= need && !Front(p)) { dest = p; break; }
+                    }
+                    ring = next;
+                }
+                if (dest == 0 || !OrderMove(u, unit, dest, log: false)) continue;
+                load[start] = (load.TryGetValue(start, out FP ls) ? ls : FP.Zero) - need;
+                load[dest] = (load.TryGetValue(dest, out FP ld) ? ld : FP.Zero) + need;
+                orders++;
+                moved.Add($"{u} {start}->{dest}");
+            }
+            if (moved.Count > 0)
+                Core.Recording.SessionRecorder.Note("ai_country", "rest", country, 0, 0, 0,
+                    $"{moved.Count} reserve divisions short of supply to fed provinces: {string.Join(", ", moved)}");
         }
 
         /// <summary>Each province within reach land hops of the last sections -> the army of the nearest
@@ -427,6 +515,18 @@ namespace Hoi4.Units
                 divisionsByLabel[l] = divisionsByLabel.TryGetValue(l, out int n) ? n + 1 : 1;
             }
 
+            FP needSum = FP.Zero;
+            int needCount = 0;
+            var divs = Hoi4Divisions.Instance;
+            foreach (ushort u in own)
+            {
+                var dv = divs?.Get(u);
+                if (dv == null) continue;
+                needSum += FP.Max(FP.FromFraction(5, 100), dv.SupplyUse);
+                needCount++;
+            }
+            FP avgNeed = needCount > 0 ? needSum / needCount : FP.FromFraction(7, 10);
+
             var war = Hoi4.War.Hoi4War.Instance;
             var theatres = new List<Theatre>();
             foreach (var g in groups.Values)
@@ -474,6 +574,16 @@ namespace Hoi4.Units
                 FP progress = war != null ? war.SurrenderProgress(t.BestEnemy) : FP.Zero;
                 // a front near home is the better place to attack too: it pushes the enemy away from our cores
                 t.Score = t.Cost == FP.MaxValue ? FP.Zero : (ProgressBase + progress) * ScoreScale / (FP.One + t.Cost) * (FP.One + t.Danger);
+                // Supply: the hub supply of its front provinces and the pools of their states (each once), fed to
+                // divisions of the country's average need (Hoi4Supply); never under one per front province
+                var poolStates = new HashSet<int>();
+                t.Supply = FP.Zero;
+                foreach (ushort p in g)
+                {
+                    t.Supply += Hoi4.Supply.Hoi4Supply.HubSupply(p);
+                    if (poolStates.Add(Hoi4Regions.State(p))) t.Supply += Hoi4.Supply.Hoi4Supply.StateSupply(gameState, p);
+                }
+                t.SupplyCap = Math.Max(g.Count * MinPerProvinceForSupply, (t.Supply * DivisionsPerSupplyPoint / avgNeed).ToInt());
                 theatres.Add(t);
             }
 
@@ -561,6 +671,34 @@ namespace Hoi4.Units
                 }
                 rem.Sort((x, y) => x.r != y.r ? y.r.CompareTo(x.r) : (x.i == main ? -1 : y.i == main ? 1 : x.i.CompareTo(y.i)));
                 for (int k = 0; k < total - given && k < rem.Count; k++) theatres[rem[k].i].Budget++;
+
+                // Supply caps: a theatre over what its front feeds gives the rest to the others with room (in
+                // proportion to their needs, the main effort first on ties); what nobody can feed is reserve
+                for (int round = 0; round < open.Count; round++)
+                {
+                    int spare = 0;
+                    long roomNeed = 0;
+                    foreach (int i in open)
+                    {
+                        if (theatres[i].Budget > theatres[i].SupplyCap) { spare += theatres[i].Budget - theatres[i].SupplyCap; theatres[i].Budget = theatres[i].SupplyCap; }
+                        else if (theatres[i].Budget < theatres[i].SupplyCap) roomNeed += theatres[i].Need;
+                    }
+                    if (spare == 0) break;
+                    if (roomNeed == 0) { reserve += spare; break; }
+                    int handed = 0;
+                    var rem2 = new List<(long r, int i)>();
+                    foreach (int i in open)
+                    {
+                        if (theatres[i].Budget >= theatres[i].SupplyCap) continue;
+                        long share = (long)theatres[i].Need * spare;
+                        int add = (int)(share / roomNeed);
+                        theatres[i].Budget += add;
+                        handed += add;
+                        rem2.Add((share % roomNeed, i));
+                    }
+                    rem2.Sort((x, y) => x.r != y.r ? y.r.CompareTo(x.r) : (x.i == main ? -1 : y.i == main ? 1 : x.i.CompareTo(y.i)));
+                    for (int k = 0; k < spare - handed && k < rem2.Count; k++) theatres[rem2[k].i].Budget++;
+                }
             }
             st.MainEnemy = homeMain != 0 ? homeMain : biggestMain;
 
@@ -723,7 +861,7 @@ namespace Hoi4.Units
                     foreach (var kv in t.ArmyOf) if (kv.Value == a) n++;
                     parts.Add($"{army?.Name ?? a.ToString()} {army?.Units.Count ?? 0}/{st.Budget[a]} on {n}p");
                 }
-                summary.Add($"{TheatreName(t)}{(t.Main ? " MAIN" : "")}{(t.Attacking ? " ATTACK" : "")}{(t.Overseas ? " OVERSEAS" : "")} {t.Provinces.Count}p danger {t.Danger.ToFloat():0.00} need {t.Need} budget {t.Budget}: {string.Join(", ", parts)}");
+                summary.Add($"{TheatreName(t)}{(t.Main ? " MAIN" : "")}{(t.Attacking ? " ATTACK" : "")}{(t.Overseas ? " OVERSEAS" : "")} {t.Provinces.Count}p danger {t.Danger.ToFloat():0.00} need {t.Need} supply {t.Supply.ToFloat():0.0} (cap {t.SupplyCap}) budget {t.Budget}: {string.Join(", ", parts)}");
             }
             Core.Recording.SessionRecorder.Note("ai_country", "theatres", country, 0, 0, st.MainEnemy,
                 $"plan ({reason}): {own.Count} divisions, reserve target {reserve}; {string.Join(" | ", summary)}");
