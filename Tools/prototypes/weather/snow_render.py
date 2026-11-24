@@ -19,6 +19,11 @@ HOI4's ApplySnow, per pixel (positions in map pixels, height in HOI4 units = hei
     colour     = lerp(colour, snowTex.a * (0.46, 0.48, 0.69), (1 - spec) * saturate(alpha + 0.4 * smoothstep(0, 1, isSnow)))
     normal     = lerp(normal, snow normal (snowTex.rbg) bent onto it, alpha)
 How the engine turns a province's snow amount into isSnow is not in the shaders: --full sets the amount that reads 1.
+And HOI4's GetMudColor after it (mud: the province's mud flag, 0/1):
+    noise   = lerp(1, (0.5 + noise alpha at pos * 0.01) * 0.5, zoom out 0..1)   (zoomed out, mud breaks up)
+    mud     = saturate(mud * noise)
+    colour  = lerp(colour, overlay(mud texture rgb, colormap tint, 0.5), mud)    (mud_diffuse_rgb_gloss_a at pos * 0.09)
+    normal, gloss, spec -> the mud texture's (mud_normal_rgb_spec_a) by mud
 Writes snow_<date>[_<tag>].png next to this script (gitignored).
 """
 import argparse
@@ -96,6 +101,8 @@ def main():
     ap.add_argument("--full", type=float, default=40.0, help="snow amount that reads as full snow (isSnow 1)")
     ap.add_argument("--blur", type=float, default=1.5, help="SnowMudData smoothing across province edges, map px")
     ap.add_argument("--nosnow", action="store_true")
+    ap.add_argument("--nomud", action="store_true")
+    ap.add_argument("--mudstrength", type=float, default=1.0, help="mud value a muddy province reads as (HOI4's scale is not in its shaders)")
     ap.add_argument("--tag", default="")
     args = ap.parse_args()
     hoi4, data = Path(args.hoi4), Path(args.data)
@@ -179,6 +186,35 @@ def main():
         normal = normalize(normal + (sn - normal) * alpha[..., None])
         gloss = gloss + st[..., 3] * alpha * 0.2
         print(f"{args.date}: land isSnow mean {is_snow[land > 0.5].mean():.2f}, cover (alpha>0.5) {np.mean(alpha[land > 0.5] > 0.5) * 100:.0f}%")
+
+    # ---- mud (GetMudColor)
+    if not args.nomud:
+        state = {int(k): v for k, v in json.loads((HERE / f"state_{args.date}.json").read_text()).items()}
+        ids = province_ids(hoi4)[y0 - 8:y1 + 8, x0 - 8:x1 + 8]
+        uniq, inv = np.unique(ids, return_inverse=True)
+        # frozen mud does not count (Hoi4Weather.IsMud: temperature above -1)
+        flag = np.array([float(state.get(int(p), [0, 0, 0, 0])[2] and state[int(p)][3] > -1) for p in uniq], np.float32)
+        mud_map = flag[inv].reshape(ids.shape)
+        if args.blur > 0:
+            mud_map = gaussian_filter(mud_map, args.blur)
+        mud_v = bilinear(mud_map[..., None], mx - x0 + 8, my - y0 + 8)[..., 0]
+        noise_tex = np.asarray(Image.open(hoi4 / "map" / "terrain" / "citylights_rgb_snowmask_a_0.dds").convert("RGBA")).astype(np.float32)[..., 3:] / 255
+        mnoise = wrap(noise_tex, mx * 0.01, mz * 0.01)[..., 0]
+        mud = np.clip(mud_v * args.mudstrength * (1 + ((0.5 + mnoise) * 0.5 - 1) * args.cam), 0, 1)
+        md = np.asarray(Image.open(hoi4 / "map" / "terrain" / "mud_diffuse_rgb_gloss_a_0.dds").convert("RGBA")).astype(np.float32) / 255
+        mn = np.asarray(Image.open(hoi4 / "map" / "terrain" / "mud_normal_rgb_spec_a_0.dds").convert("RGBA")).astype(np.float32) / 255
+        if S < 8:
+            k = int(8 / S)
+            md = np.asarray(Image.fromarray((md * 255).astype(np.uint8)).resize((1024 // k,) * 2, Image.LANCZOS)).astype(np.float32) / 255
+            mn = np.asarray(Image.fromarray((mn * 255).astype(np.uint8)).resize((1024 // k,) * 2, Image.LANCZOS)).astype(np.float32) / 255
+        mds, mns = wrap(md, mx * 0.09, mz * 0.09), wrap(mn, mx * 0.09, mz * 0.09)
+        mnorm = normalize(rotate(normal, normalize(mns[..., [0, 2, 1]] - 0.5)))
+        normal = normalize(normal + (mnorm - normal) * mud[..., None])
+        gloss = gloss + (mds[..., 3] - gloss) * mud
+        spec = spec + (mns[..., 3] - spec) * mud
+        mix = overlay(srgb_to_linear(mds[..., :3]), tint, 0.5)
+        albedo = albedo + (mix - albedo) * mud[..., None]
+        print(f"{args.date}: land in mud {np.mean(mud_v[land > 0.5] > 0.5) * 100:.0f}%")
 
     # ---- light (Hoi4Light, camera straight above)
     ndl = np.clip(normal @ SUN, 0, None)[..., None]

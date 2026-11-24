@@ -67,6 +67,7 @@ struct Hoi4Surface
     float gloss;
     float spec;
     float land;        // 0 = water, 1 = land (bilinear coverage, gives soft 1px coasts)
+    float3 tint;       // colormap tint (the mud overlays it too)
 };
 
 // ----------------------------------------------------------------------------
@@ -227,6 +228,7 @@ Hoi4Surface Hoi4SampleSurface(float2 uv)
         s.spec = 0;
     }
     s.land = land;
+    s.tint = tint;
     return s;
 }
 
@@ -401,7 +403,7 @@ float3 Hoi4Water(float2 uv, float3 positionWS, float3 worldNormal)
 float4 Hoi4Render(float2 uv, float3 positionWS, float4 countryColor)
 {
     Hoi4Surface s = Hoi4SampleSurface(uv);
-    Hoi4ApplySnow(s, uv);
+    Hoi4ApplyWeather(s, uv, s.tint);
 
     // Water uses derivative-based samples, so it is not branched on s.land
     float3 water = Hoi4Water(uv, positionWS, s.normal);

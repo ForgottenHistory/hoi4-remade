@@ -560,6 +560,8 @@ GFX_TEXTURES = [
     ("underwater_terrain_0.dds", "underwater.png"),  # tiled sea floor
     ("citylights_rgb_snowmask_a_0.dds", "citylights.png"),  # tiled city lights (rgb), a snow mask
     ("snow_normal_rgb_diffuse_a.dds", "snow.png"),    # tiled snow cover: rgb normal (.rbg), a diffuse
+    ("mud_diffuse_rgb_gloss_a_0.dds", "mud_diffuse.png"),  # tiled mud: rgb diffuse, a gloss
+    ("mud_normal_rgb_spec_a_0.dds", "mud_normal.png"),     # tiled mud: rgb normal (.rbg), a spec
 ]
 
 
