@@ -48,6 +48,7 @@ namespace Hoi4.UI
         UIDocument document;
         VisualElement bar, flag, pill, productionButton, constructionButton, deploymentButton, researchButton;
         Label politicalPower, stability, warSupport, manpower, date;
+        int shownStability = -1;
         readonly VisualElement[] steps = new VisualElement[5];
         readonly Dictionary<string, JObject> stats = new Dictionary<string, JObject>();
         IDisposable[] subscriptions;
@@ -200,6 +201,12 @@ namespace Hoi4.UI
                 long men = pools.Available(shownCountry).ToInt();
                 if (men != shownManpower) { shownManpower = men; manpower.text = FormatManpower(men); }
             }
+            if (Hoi4.Modifiers.Hoi4Stability.IsReady)
+            {
+                // live stability: history + ideas and landmarks (Hoi4Stability)
+                int st = Mathf.RoundToInt(Hoi4.Modifiers.Hoi4Stability.Stability(shownCountry).ToFloat() * 100f);
+                if (st != shownStability) { shownStability = st; stability.text = $"{st}%"; }
+            }
 
             var t = time.GetCurrentGameTime();
             string d = $"{t.Hour}:00, {t.Day} {MonthNames[Mathf.Clamp(t.Month - 1, 0, 11)]} {t.Year}";
@@ -223,6 +230,7 @@ namespace Hoi4.UI
         {
             shownCountry = country;
             shownManpower = -1;
+            shownStability = -1;
             pp = 0f;
             string tag = gameState.Countries.GetCountryTag(country);
             Hoi4Sprites.Apply(flag, string.IsNullOrEmpty(tag) ? null : $"{FlagDir}{tag}.png");

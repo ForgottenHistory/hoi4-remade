@@ -164,6 +164,8 @@ namespace Hoi4.Research
                 }
             else
                 ArchonLogger.LogWarning($"Hoi4Research: no {EconomyFile} (run Tools/hoi4_convert.py); no country researches", "game_research");
+            // with ideas and technologies in: stability (from their stability_factor) and landmarks
+            Hoi4.Modifiers.Hoi4Stability.Initialize(gameState);
             IsReady = true;
             ArchonLogger.Log($"Hoi4Research: {techs.Count} technologies, {countries.Count} countries", "game_research");
         }

@@ -20,7 +20,8 @@ namespace Hoi4.Modifiers
     ///   index, added by Hoi4Research at the start and as each one finishes).
     /// - Values: HOI4 sums a key's values across its sources, so each is stored additive and read as the sum
     ///   (Sum). consumer_goods_factor stacks multiplicatively, product of (1 + value) (Product).
-    /// Changed fires with the country when its modifiers change (a tech, later a law).
+    /// - Other sources: stability's scaled static modifier and landmarks (Hoi4Stability, through SetSource).
+    /// Changed fires with the country when its modifiers change (a tech, its stability, a landmark).
     /// </summary>
     public static class Hoi4Modifiers
     {
@@ -37,8 +38,9 @@ namespace Hoi4.Modifiers
         public const string MaxEfficiency = "production_factory_max_efficiency_factor";       // + points on the cap
         public const string StartEfficiency = "production_factory_start_efficiency_factor";   // + points on the start
         public const string EfficiencyGain = "production_factory_efficiency_gain_factor";     // x (1 + value) growth
+        public const string StabilityFactor = "stability_factor";                             // + stability (Hoi4Stability)
         static readonly string[] Keys = { ConsumerGoods, ConsumerGoodsFactor, ConstructionSpeed, ResearchSpeed,
-                                          FactoryOutput, MaxEfficiency, StartEfficiency, EfficiencyGain };
+                                          FactoryOutput, MaxEfficiency, StartEfficiency, EfficiencyGain, StabilityFactor };
 
         static readonly Dictionary<string, ushort> ids = new Dictionary<string, ushort>();
         static readonly List<string> ideaNames = new List<string>();
@@ -172,6 +174,29 @@ namespace Hoi4.Modifiers
             }
             if (any) Touch(country, quiet);
         }
+
+        /// <summary>Replace one source's modifiers on a country (key -> value; null or empty: just remove it).
+        /// Keys the game doesn't read are skipped. Returns whether anything changed; the caller fires Changed
+        /// (NotifyChanged) once it has set all its sources.</summary>
+        public static bool SetSource(ushort country, ModifierSource.SourceType type, uint id,
+                                     IEnumerable<KeyValuePair<string, FP>> modifiers)
+        {
+            if (system == null || country == 0) return false;
+            bool any = system.RemoveCountryModifiersBySource(country, type, id) > 0;
+            if (modifiers != null)
+                foreach (var kv in modifiers)
+                {
+                    ushort mid = Id(kv.Key);
+                    if (mid == 0 || kv.Value == FP.Zero) continue;
+                    system.AddCountryModifier(country, ModifierSource.CreatePermanent(type, id, mid, kv.Value, isMultiplicative: false));
+                    any = true;
+                }
+            if (any) Touch(country, quiet: true);
+            return any;
+        }
+
+        /// <summary>Fire Changed for a country after SetSource.</summary>
+        public static void NotifyChanged(ushort country) => Changed?.Invoke(country);
 
         static void Touch(ushort country, bool quiet)
         {

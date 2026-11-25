@@ -77,7 +77,8 @@ namespace Hoi4.Production
     ///   points; 500 days from 0 to the cap). A slot above the cap stays there.
     /// - Modifiers: the country's ideas and researched technologies (Hoi4Modifiers, ProductionRates), updated when they
     ///   change. Rules measured on a real game (Tools/reference/hoi4_production_modifiers.py).
-    /// - Not modelled: strategic resources and trade, stability's factory output (+-), MIO bonuses, equipment variants
+    /// - Stability's factory output comes in as a modifier too (Hoi4Stability).
+    /// - Not modelled: strategic resources and trade, MIO bonuses, equipment variants
     ///   and switching a line's equipment (retention), licences, naval and air production.
     /// Changes come only through the commands (Hoi4ProductionCommands); the AI (Hoi4ProductionAI) uses the same ones.
     /// Countries, lines and states go in id or list order: the same on every machine.

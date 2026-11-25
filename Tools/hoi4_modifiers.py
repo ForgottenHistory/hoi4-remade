@@ -41,4 +41,17 @@ def country_modifiers(tag):
     sources = [(i, ideas[i]["modifiers"]) for i in e.get("ideas", []) if i in ideas]
     sources += [(t, tdoc["technologies"][t].get("modifiers", {})) for t in tdoc["countries"].get(tag, [])
                 if t in tdoc["technologies"]]
-    return CountryModifiers(sources)
+    # landmarks the country is allowed to hold (at the start it controls its own, as in the game's Hoi4Stability)
+    if (DATA / "hoi4_landmarks.json5").exists():
+        sources += [(l["building"], l["modifiers"]) for l in _load("hoi4_landmarks.json5") if tag in l["controllers"]]
+    m = CountryModifiers(sources)
+    # stability: set_stability + stability_factor, then the scaled good (above 50%) or bad (below) static modifier
+    stats = _load("hoi4_country_stats.json5").get(tag, {})
+    m.stability = min(1.0, max(0.0, stats.get("stability", 0.5) + m.sum("stability_factor")))
+    if (DATA / "hoi4_static_modifiers.json5").exists():
+        static = _load("hoi4_static_modifiers.json5")
+        k = (m.stability - 0.5) / 0.5
+        if k:
+            name = "stability_good_modifier" if k > 0 else "stability_bad_modifier"
+            sources.append((name, {key: v * abs(k) for key, v in static[name].items()}))
+    return m
