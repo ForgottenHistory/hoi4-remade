@@ -971,6 +971,9 @@ def load_equipment_combat(hoi4: Path, year=1936, every=False):
     return {arch: resolve(name) for arch, name in best.items()}
 
 
+EQUIPMENT_FACTOR_STATS = ("soft_attack", "hard_attack", "defense", "breakthrough", "air_attack")
+
+
 def load_sub_units(hoi4: Path):
     """common/units sub_units, with speed (km/h) from their equipment: per archetype the slowest
     variant (the oldest design, fitting 1936; tank chassis archetypes only carry a base 4) or the
@@ -1035,6 +1038,10 @@ def load_sub_units(hoi4: Path):
                     "armor": round(max((e.get("armor_value", 0.0) for e in eq), default=0.0), 1),
                     "piercing": round(max((e.get("ap_attack", 0.0) for e in eq), default=0.0), 1),
                     "air_attack": round(stat("air_attack"), 2),
+                    # its own factors on its equipment's attack and defence (the stats above are equipment x (1 +
+                    # factor) for the 1936 designs; the game recomputes them from the equipment versions a division
+                    # holds)
+                    "factors": {k: num(k) for k in EQUIPMENT_FACTOR_STATS if num(k)},
                     # division designer: base stats of the sub-unit itself
                     "recovery": num("default_morale"),        # HOI4 recovery rate
                     "recon": num("recon"),
@@ -1572,6 +1579,10 @@ def convert_oob(hoi4: Path, out: Path, existing_tags, ruling_party):
     # sub-unit groups (the division designer's battalion categories): group -> name (group_<g>_title)
     groups = sorted({subs[n]["group"] for n in used_subs | designer_subs})
     lines.append(f"  sub_unit_groups: {j({g: loc.get(f'group_{g}_title') or g.replace('_', ' ').title() for g in groups})},")
+    # per land archetype the stats of its newest 1936 design: a division's equipment stats when it holds no version
+    # the equipment catalogue knows (special project equipment)
+    combat = load_equipment_combat(hoi4)
+    lines.append(f"  archetype_stats: {j({a: combat[a] for a in sorted(land_archetypes) if a in combat})},")
     lines += ["  countries: {"]
     for tag, c in sorted(countries.items()):
         lines.append(f"    {tag}: {{")

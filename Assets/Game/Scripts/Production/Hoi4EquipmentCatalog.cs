@@ -27,6 +27,28 @@ namespace Hoi4.Production
             public FP Cost;                // build_cost_ic
             public string General, ArchetypeName, Sprite;
             public readonly Dictionary<string, FP> Stats = new Dictionary<string, FP>();
+            // the combat stats a division takes from it (Hoi4Divisions.ApplyEquipmentStats)
+            public FP SoftAttack, HardAttack, Defense, Breakthrough, Hardness, ArmorValue, ApAttack, Reliability;
+            public bool HasReliability;
+
+            /// <summary>Fill the combat fields from Stats.</summary>
+            public Entry Resolve()
+            {
+                FP S(string k) => Stats.TryGetValue(k, out var v) ? v : FP.Zero;
+                SoftAttack = S("soft_attack"); HardAttack = S("hard_attack"); Defense = S("defense");
+                Breakthrough = S("breakthrough"); Hardness = S("hardness"); ArmorValue = S("armor_value");
+                ApAttack = S("ap_attack"); Reliability = S("reliability");
+                HasReliability = Stats.ContainsKey("reliability");
+                return this;
+            }
+
+            /// <summary>An entry of the stats in a JSON object ({"soft_attack": 3, ...}).</summary>
+            public static Entry FromStats(string name, string archetype, JObject stats)
+            {
+                var e = new Entry { Name = name, Archetype = archetype, General = name };
+                if (stats != null) foreach (var s in stats.Properties()) e.Stats[s.Name] = FP.FromDouble((double)s.Value);
+                return e.Resolve();
+            }
         }
 
         static readonly Dictionary<string, Entry> entries = new Dictionary<string, Entry>();
@@ -41,6 +63,12 @@ namespace Hoi4.Production
         {
             entries.Clear(); unlocks.Clear(); names.Clear(); sprites.Clear();
             IsLoaded = false;
+        }
+
+        /// <summary>Load once (divisions and production both need it).</summary>
+        public static void EnsureLoaded()
+        {
+            if (!IsLoaded) Load();
         }
 
         public static void Load()
@@ -66,7 +94,7 @@ namespace Hoi4.Production
                         Sprite = (string)o["sprite"],
                     };
                     if (o["stats"] is JObject st) foreach (var s in st.Properties()) e.Stats[s.Name] = FP.FromDouble((double)s.Value);
-                    entries[p.Name] = e;
+                    entries[p.Name] = e.Resolve();
                 }
             if (doc["unlocks"] is JObject un)
                 foreach (var p in un.Properties())
@@ -92,6 +120,17 @@ namespace Hoi4.Production
         }
 
         public static Entry Get(string equipment) => equipment != null && entries.TryGetValue(equipment, out var e) ? e : null;
+
+        /// <summary>The archetype's oldest design (earliest year, then cheapest), null when it has none.</summary>
+        public static Entry Oldest(string archetype)
+        {
+            Entry best = null;
+            foreach (var e in entries.Values)
+                if (e.Archetype == archetype && (best == null || e.Year < best.Year || (e.Year == best.Year
+                        && (e.Cost < best.Cost || (e.Cost == best.Cost && string.CompareOrdinal(e.Name, best.Name) < 0)))))
+                    best = e;
+            return best;
+        }
 
         /// <summary>The equipment a technology makes buildable (empty: none).</summary>
         public static IReadOnlyList<string> Unlocks(string technology) =>

@@ -310,7 +310,7 @@ namespace Hoi4.Production
                    || Hoi4.Research.Hoi4Research.Instance == null || !Hoi4.Research.Hoi4Research.Instance.IsReady)
                 yield return null;
             gameState = Engine.ArchonEngine.Instance.GameState;
-            Hoi4EquipmentCatalog.Load();
+            Hoi4EquipmentCatalog.EnsureLoaded();
             outputId = Hoi4.Modifiers.Hoi4Modifiers.Id(Hoi4.Modifiers.Hoi4Modifiers.FactoryOutput);
             lineChangeId = Hoi4.Modifiers.Hoi4Modifiers.Id(Hoi4.Modifiers.Hoi4Modifiers.LineChange);
             maxId = Hoi4.Modifiers.Hoi4Modifiers.Id(Hoi4.Modifiers.Hoi4Modifiers.MaxEfficiency);
@@ -475,7 +475,8 @@ namespace Hoi4.Production
                         l.Progress -= l.Cost * units;
                         l.MadeToday = units;
                         FP made = FP.FromInt(units);
-                        resources.AddResource(kv.Key, (ushort)(Hoi4Equipment.StockResourceBase + l.Archetype), made);
+                        if (equipment != null) equipment.AddStock(kv.Key, l.Archetype, l.Equipment, made); // with its version
+                        else resources.AddResource(kv.Key, (ushort)(Hoi4Equipment.StockResourceBase + l.Archetype), made);
                         equipment?.CountMade(kv.Key, l.Archetype, made);
                     }
                     var r = l.Rates;

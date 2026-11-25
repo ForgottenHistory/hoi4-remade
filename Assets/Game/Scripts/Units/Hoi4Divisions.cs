@@ -32,6 +32,18 @@ namespace Hoi4.Units
         // 1936 divisions start with Need x start_equipment_factor. Battle losses take 70% of the strength lost
         // (EQUIPMENT_COMBAT_LOSS_FACTOR); Hoi4Equipment refills from the country's stockpile.
         public FP[] Need, Have;
+        // Which equipment versions its Have is made of, per archetype (null or empty: none known; HOI4 keeps every
+        // version apart). Hoi4Equipment delivers the newest first and upgrades full divisions; its attack, defence,
+        // armour and reliability are the held versions' stats weighted by amount (Hoi4Divisions.ApplyEquipmentStats).
+        public Hoi4EquipmentMix[] Versions;
+        internal bool VersionsChanged; // its stats need recomputing (Hoi4Equipment, end of the day)
+
+        /// <summary>The version mix of an archetype, made on first use.</summary>
+        public Hoi4EquipmentMix Mix(int a)
+        {
+            if (Versions == null || Versions.Length != Need.Length) System.Array.Resize(ref Versions, Need.Length);
+            return Versions[a] ?? (Versions[a] = new Hoi4EquipmentMix());
+        }
         public Part[] Parts;           // sub-units: their strength share and the archetypes they need
         public FP Men;                 // manpower it has, of Manpower (casualties take it, Hoi4Manpower refills it)
         // Terrain modifiers (forest, urban..., river, amphibious): its battalions' averaged, plus its support
@@ -44,7 +56,12 @@ namespace Hoi4.Units
         public Hoi4TerrainModifier TerrainModifier(string terrain) =>
             terrain != null && (Terrain ?? NoTerrain).TryGetValue(terrain, out var m) ? m : default;
 
-        public struct Part { public FP Weight; public int[] Archetypes; }
+        public struct Part
+        {
+            public FP Weight; public int[] Archetypes;
+            // its own factors on its equipment's soft attack, hard attack, defence, breakthrough (HOI4 sub-unit stats)
+            public FP SoftFactor, HardFactor, DefenseFactor, BreakthroughFactor;
+        }
 
         /// <summary>
         /// Share of its strength the equipment allows (HOI4: a sub-unit is as strong as its equipment): per sub-unit
@@ -128,7 +145,7 @@ namespace Hoi4.Units
         }
         public FP Planning;            // planning bonus, 0..0.3 (Hoi4BattlePlans: builds on the front line with an offensive)
         public FP Entrenchment;        // dug in, 0..5 (Hoi4Combat: +1 a day standing still out of battle, lost on moving)
-        public FP SoftAttack, HardAttack, Defense, Breakthrough; // sums over sub-units (1936 equipment)
+        public FP SoftAttack, HardAttack, Defense, Breakthrough; // sums over sub-units (of the equipment it holds)
         public FP Hardness, Armor, Piercing;
     }
 
@@ -380,12 +397,10 @@ namespace Hoi4.Units
                 FP had = a < oldHave.Length ? oldHave[a] : FP.Zero;
                 d.Have[a] = FP.Min(had, d.Need[a]);
                 FP surplus = had - d.Have[a];
-                if (surplus > FP.Zero)
-                {
-                    ushort id = (ushort)(Hoi4Equipment.StockResourceBase + a);
-                    resources.SetResource(country, id, resources.GetResource(country, id) + surplus);
-                }
+                if (surplus > FP.Zero) Hoi4Equipment.Return(gameState, country, d, a, surplus); // the same mix of versions
+                if (d.Have[a] <= FP.Zero) d.Versions?[a]?.Clear();
             }
+            ApplyEquipmentStats(d);
             FP men = FP.FromInt(d.Manpower);
             if (d.Men > men)
             {
@@ -546,6 +561,23 @@ namespace Hoi4.Units
             archetypeIndex = new Dictionary<string, int>();
             for (int i = 0; i < Archetypes.Length; i++) archetypeIndex[Archetypes[i]] = i;
 
+            Hoi4.Production.Hoi4EquipmentCatalog.EnsureLoaded();
+            fallbackEquipment = new Hoi4.Production.Hoi4EquipmentCatalog.Entry[Archetypes.Length];
+            if (root["archetype_stats"] is JObject archStats)
+                for (int i = 0; i < Archetypes.Length; i++)
+                    if (archStats[Archetypes[i]] is JObject st)
+                        fallbackEquipment[i] = Hoi4.Production.Hoi4EquipmentCatalog.Entry.FromStats(Archetypes[i], Archetypes[i], st);
+            startVersions.Clear();
+            foreach (var country in countries.Properties())
+            {
+                var start = new Hoi4.Production.Hoi4EquipmentCatalog.Entry[Archetypes.Length];
+                var eq = country.Value["equipment"] as JObject;
+                for (int i = 0; i < Archetypes.Length; i++)
+                    start[i] = Hoi4.Production.Hoi4EquipmentCatalog.Get((string)eq?[Archetypes[i]]?["equipment"])
+                               ?? Hoi4.Production.Hoi4EquipmentCatalog.Oldest(Archetypes[i]); // none buildable (Finland's light tanks): the oldest design
+                startVersions[country.Name] = start;
+            }
+
             int created = 0, skipped = 0;
             var missingTags = new List<string>();
             foreach (var country in countries.Properties())
@@ -610,6 +642,82 @@ namespace Hoi4.Units
         static readonly FP P3 = FP.FromFraction(3, 10), P4 = FP.FromFraction(4, 10), P6 = FP.FromFraction(6, 10), P7 = FP.FromFraction(7, 10);
 
         static Dictionary<string, int> archetypeIndex = new Dictionary<string, int>();
+        // per country the version of each archetype its 1936 divisions and stockpile hold (its newest buildable)
+        static readonly Dictionary<string, Hoi4.Production.Hoi4EquipmentCatalog.Entry[]> startVersions = new Dictionary<string, Hoi4.Production.Hoi4EquipmentCatalog.Entry[]>();
+        // per archetype its newest 1936 design's stats: for archetypes no catalogue version covers (special projects)
+        static Hoi4.Production.Hoi4EquipmentCatalog.Entry[] fallbackEquipment = new Hoi4.Production.Hoi4EquipmentCatalog.Entry[0];
+
+        /// <summary>The version of an archetype the country started with (its newest buildable in 1936), null when
+        /// none is known.</summary>
+        public static Hoi4.Production.Hoi4EquipmentCatalog.Entry StartVersion(string tag, int archetype) =>
+            tag != null && startVersions.TryGetValue(tag, out var v) && archetype >= 0 && archetype < v.Length ? v[archetype] : null;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetStatics()
+        {
+            startVersions.Clear();
+            fallbackEquipment = new Hoi4.Production.Hoi4EquipmentCatalog.Entry[0];
+        }
+
+        /// <summary>
+        /// A division's attack, defence, breakthrough, hardness, armour, piercing and reliability from the equipment
+        /// versions it holds: per archetype the versions' stats weighted by amount (no version held: its country's
+        /// start version, else the archetype's 1936 design), per sub-unit its equipment's sum x (1 + its own factor)
+        /// for attack and defence, the highest hardness, armour and piercing, the average reliability; per division
+        /// the sub-units' sums, hardness and reliability averaged, armour 30% best + 70% average, piercing 40% best +
+        /// 60% average (Sum's rules for the template's 1936 numbers, which this replaces).
+        /// </summary>
+        public static void ApplyEquipmentStats(Hoi4Division d)
+        {
+            if (d?.Parts == null || d.Parts.Length == 0) return;
+            FP soft = FP.Zero, hard = FP.Zero, def = FP.Zero, bt = FP.Zero, hardness = FP.Zero, rel = FP.Zero;
+            FP armorMax = FP.Zero, armorSum = FP.Zero, pierceMax = FP.Zero, pierceSum = FP.Zero;
+            foreach (var p in d.Parts)
+            {
+                FP s = FP.Zero, h = FP.Zero, df = FP.Zero, b = FP.Zero, hd = FP.Zero, ar = FP.Zero, ap = FP.Zero, r = FP.Zero;
+                int relN = 0;
+                foreach (int a in p.Archetypes)
+                {
+                    var mix = d.Versions != null && a < d.Versions.Length ? d.Versions[a] : null;
+                    FP es = FP.Zero, eh = FP.Zero, ed = FP.Zero, eb = FP.Zero, ehd = FP.Zero, ear = FP.Zero, eap = FP.Zero, er = FP.Zero;
+                    bool hasRel = false;
+                    if (mix != null && mix.Count > 0)
+                        for (int i = 0; i < mix.Count; i++)
+                        {
+                            var e = mix.Entry(i);
+                            FP w = mix.Share(i);
+                            es += e.SoftAttack * w; eh += e.HardAttack * w; ed += e.Defense * w; eb += e.Breakthrough * w;
+                            ehd += e.Hardness * w; ear += e.ArmorValue * w; eap += e.ApAttack * w; er += e.Reliability * w;
+                            hasRel |= e.HasReliability;
+                        }
+                    else
+                    {
+                        var e = StartVersion(d.Tag, a) ?? (a < fallbackEquipment.Length ? fallbackEquipment[a] : null);
+                        if (e == null) continue;
+                        es = e.SoftAttack; eh = e.HardAttack; ed = e.Defense; eb = e.Breakthrough;
+                        ehd = e.Hardness; ear = e.ArmorValue; eap = e.ApAttack; er = e.Reliability; hasRel = e.HasReliability;
+                    }
+                    s += es; h += eh; df += ed; b += eb;
+                    hd = FP.Max(hd, ehd); ar = FP.Max(ar, ear); ap = FP.Max(ap, eap);
+                    if (hasRel) { r += er; relN++; }
+                }
+                soft += s * (FP.One + p.SoftFactor);
+                hard += h * (FP.One + p.HardFactor);
+                def += df * (FP.One + p.DefenseFactor);
+                bt += b * (FP.One + p.BreakthroughFactor);
+                hardness += hd;
+                armorMax = FP.Max(armorMax, ar); armorSum += ar;
+                pierceMax = FP.Max(pierceMax, ap); pierceSum += ap;
+                if (relN > 0) rel += r / relN;
+            }
+            FP n = FP.FromInt(d.Parts.Length);
+            d.SoftAttack = soft; d.HardAttack = hard; d.Defense = def; d.Breakthrough = bt;
+            d.Hardness = hardness / n;
+            d.Armor = P3 * armorMax + P7 * armorSum / n;
+            d.Piercing = P4 * pierceMax + P6 * pierceSum / n;
+            d.Reliability = rel / n;
+            d.VersionsChanged = false;
+        }
 
         static Hoi4Division Build(ushort unitId, string tag, JToken d, string templateName, JObject template, JObject subUnits)
         {
@@ -624,7 +732,15 @@ namespace Hoi4.Units
             ApplyStructure(division, template, subUnits);
             FP equipment = FP.Clamp(d["equipment"] != null ? Num(d["equipment"]) : FP.One, FP.Zero, FP.One);
             division.Have = new FP[division.Need.Length];
-            for (int i = 0; i < division.Need.Length; i++) division.Have[i] = division.Need[i] * equipment; // HOI4 start_equipment_factor
+            for (int i = 0; i < division.Need.Length; i++)
+            {
+                division.Have[i] = division.Need[i] * equipment; // HOI4 start_equipment_factor
+                // of its country's newest version (a real 1936 German division holds infantry equipment I, artillery
+                // I, support equipment I: what its technologies unlock)
+                var v = StartVersion(tag, i);
+                if (division.Have[i] > FP.Zero && v != null) division.Mix(i).Set(v);
+            }
+            ApplyEquipmentStats(division);
             division.Men = FP.FromInt(division.Manpower); // HOI4 1936 divisions have their full manpower; equipment is what they lack
             division.Organisation = division.MaxOrganisation;
             division.Strength = division.FullStrength; // = max strength x start_equipment_factor
@@ -699,7 +815,13 @@ namespace Hoi4.Units
                             st.Need[i] += Num(a.Value);
                             uses.Add(i);
                         }
-                parts.Add(new Hoi4Division.Part { Weight = Val(s, "max_strength"), Archetypes = uses.ToArray() });
+                var f = s["factors"] as JObject;
+                parts.Add(new Hoi4Division.Part
+                {
+                    Weight = Val(s, "max_strength"), Archetypes = uses.ToArray(),
+                    SoftFactor = f != null ? Val(f, "soft_attack") : FP.Zero, HardFactor = f != null ? Val(f, "hard_attack") : FP.Zero,
+                    DefenseFactor = f != null ? Val(f, "defense") : FP.Zero, BreakthroughFactor = f != null ? Val(f, "breakthrough") : FP.Zero,
+                });
                 st.MaxStrength += Val(s, "max_strength");
                 st.MaxOrganisation += Val(s, "max_organisation");
                 st.Recovery += Val(s, "recovery");

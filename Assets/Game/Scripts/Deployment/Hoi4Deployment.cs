@@ -368,11 +368,7 @@ namespace Hoi4.Deployment
             if (d.Men > FP.Zero)
                 resources.SetResource(country, Hoi4Manpower.ResourceId, resources.GetResource(country, Hoi4Manpower.ResourceId) + d.Men);
             for (int a = 0; a < d.Have.Length; a++)
-                if (d.Have[a] > FP.Zero)
-                {
-                    ushort id = (ushort)(Hoi4Equipment.StockResourceBase + a);
-                    resources.SetResource(country, id, resources.GetResource(country, id) + d.Have[a]);
-                }
+                if (d.Have[a] > FP.Zero) Hoi4Equipment.Return(gameState, country, d, a, d.Have[a]); // with its versions
             d.Men = FP.Zero;
             System.Array.Clear(d.Have, 0, d.Have.Length);
         }

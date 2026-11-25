@@ -326,6 +326,24 @@ def main():
                           f"{eq_made[c][x]:,}/{eq_given[c][x]:,}/{eq_stock.get(c, {}).get(x, 0):,}" for x in arch)
         print(f"{c:8} {cells}")
 
+    # --- equipment versions: weekly notes (Hoi4Equipment), "upgraded A=n ... | field A: v=n v=n; A: ..." -------
+    ups, field = defaultdict(Counter), {}
+    for r in notes:
+        if r["system"] != "equipment" or r["kind"] != "versions":
+            continue
+        up, _, f = r["text"].partition(" | field")
+        ups[r["country"]].update({k: int(v) for k, v in re.findall(r"(\w+)=(-?\d+)", up)})
+        field[r["country"]] = f.strip()
+    if ups or field:
+        print("\n## Equipment versions (upgraded in the field over the recording; what the field held last)")
+        shown = [player] if player in field else []
+        shown += [c for c, _ in Counter({c: sum(v.values()) for c, v in ups.items()}).most_common(a.top) if c != player]
+        for c in shown[: a.top]:
+            got = ", ".join(f"{k} {v:,}" for k, v in ups[c].most_common()) or "none"
+            print(f"{c:8} upgraded {got}")
+            if field.get(c):
+                print(f"{'':8} field {field[c]}")
+
     # --- production: weekly notes (Hoi4Production), "factories F free N | archetype active/requested eff% ic" ---
     print("\n## Production (last week's factories and lines; AI assignments over the recording)")
     prod_last, ai_assign = {}, Counter()
