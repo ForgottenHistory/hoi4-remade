@@ -518,6 +518,64 @@ namespace Hoi4.Units
             if (Hoi4.Research.Hoi4Research.Instance != null) Hoi4.Research.Hoi4Research.Instance.Researched -= OnResearched;
         }
 
+        // per country the sub-units a technology unlocked that still lack their equipment
+        readonly Dictionary<string, List<string>> waitingSubUnits = new Dictionary<string, List<string>>();
+
+        /// <summary>
+        /// A researched technology's enable_subunits join the country's division designer (and the army AI's choice,
+        /// which reads the same list), as its 1936 ones do (Tools/hoi4_convert.py): a land designer sub-unit, once
+        /// every equipment archetype it needs is buildable, stockpiled or unlocked by a technology it knows (rocket
+        /// artillery comes with its own equipment technology). One still lacking equipment waits and is checked again
+        /// at each of the country's later technologies. `units` `subunit` notes.
+        /// </summary>
+        void UnlockSubUnits(ushort country, Hoi4.Research.TechDef tech)
+        {
+            var gs = Engine.ArchonEngine.Instance?.GameState;
+            string tag = gs?.Countries.GetCountryTag(country);
+            if (tag == null || !subUnitsByTag.TryGetValue(tag, out var list)) return; // no army (no designer)
+            if (!waitingSubUnits.TryGetValue(tag, out var waiting)) waitingSubUnits[tag] = waiting = new List<string>();
+            foreach (string sub in tech.SubUnits)
+                if (!list.Contains(sub) && !waiting.Contains(sub) && !sub.StartsWith("hq_")
+                    && SubUnit(sub) is JObject su && ((bool?)su["land"] ?? false))
+                    waiting.Add(sub);
+            for (int i = 0; i < waiting.Count; i++)
+            {
+                string sub = waiting[i];
+                if (!HasEquipmentFor(country, sub)) continue;
+                int at = list.BinarySearch(sub, System.StringComparer.Ordinal);
+                list.Insert(at < 0 ? ~at : at, sub); // sorted, as the converter writes them
+                waiting.RemoveAt(i--);
+                Core.Recording.SessionRecorder.Note("units", "subunit", country, 0, 0, 0, $"{sub} ({tech.Id})");
+            }
+        }
+
+        /// <summary>Every equipment archetype the sub-unit needs is buildable, in the stockpile, or unlocked by a
+        /// technology the country knows.</summary>
+        bool HasEquipmentFor(ushort country, string sub)
+        {
+            if (!(SubUnit(sub)?["need"] is JObject need)) return true;
+            var production = Hoi4.Production.Hoi4Production.Instance;
+            var equipment = Hoi4Equipment.Instance;
+            var research = Hoi4.Research.Hoi4Research.Instance;
+            foreach (var n in need.Properties())
+            {
+                if (!archetypeIndex.TryGetValue(n.Name, out int a)) return false;
+                if (production != null && production.TryGetBuildable(country, a, out _)) continue;
+                if (equipment != null && equipment.Stock(country, a) > FP.Zero) continue;
+                bool unlocked = false;
+                if (research != null)
+                    foreach (var t in research.Technologies)
+                    {
+                        if (!research.Known(country, t.Index)) continue;
+                        foreach (string e in Hoi4.Production.Hoi4EquipmentCatalog.Unlocks(t.Id)) // tank chassis: their designs
+                            if (Hoi4.Production.Hoi4EquipmentCatalog.Get(e)?.Archetype == n.Name) { unlocked = true; break; }
+                        if (unlocked) break;
+                    }
+                if (!unlocked) return false;
+            }
+            return true;
+        }
+
         /// <summary>Once research is up, every division takes its country's technology bonuses (the 1936 ones: German
         /// artillery has interwar artillery's +10%), then each researched technology with unit bonuses refreshes its
         /// country's divisions.</summary>
@@ -532,7 +590,9 @@ namespace Hoi4.Units
         void OnResearched(ushort country, int tech)
         {
             var t = Hoi4.Research.Hoi4Research.Instance?.Tech(tech);
-            if (t?.Bonuses == null) return;
+            if (t == null) return;
+            UnlockSubUnits(country, t);
+            if (t.Bonuses == null) return;
             Hoi4UnitBonuses.Clear(country);
             var gs = Engine.ArchonEngine.Instance?.GameState;
             string tag = gs?.Countries.GetCountryTag(country);
