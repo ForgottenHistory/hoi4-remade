@@ -344,7 +344,19 @@ def main():
             if field.get(c):
                 print(f"{'':8} field {field[c]}")
 
-    # --- production: weekly notes (Hoi4Production), "factories F free N | archetype active/requested eff% ic" ---
+    # --- tank designs: the AI designer's notes (Hoi4TankDesigns), "TAG:Light Tank II 3 (spec): type modules | stats" ---
+    tanks = [r for r in notes if r["system"] == "tank_design" and r["kind"] == "new"]
+    if tanks:
+        print(f"\n## Tank designs (the AI's new designs: {len(tanks)} by {len({r['country'] for r in tanks})} countries)")
+        by = defaultdict(list)
+        for r in tanks:
+            by[r["country"]].append(r)
+        shown = sorted(by, key=lambda c: -len(by[c]))[: a.top]
+        for c in shown:
+            for r in by[c][-6:]:
+                name, _, rest = r["text"].partition(": ")
+                stats = rest.split(" | ")[-1]
+                print(f"{c:8} {r['date']}  {name:34} {stats}")
     print("\n## Production (last week's factories and lines; AI assignments over the recording)")
     prod_last, ai_assign = {}, Counter()
     for r in notes:

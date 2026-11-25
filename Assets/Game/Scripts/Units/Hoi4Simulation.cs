@@ -23,7 +23,7 @@ namespace Hoi4.Units
         // countries' attacks), [3] recorder, [4] combat daily, [5] equipment, [6] manpower, [7] plans daily,
         // [8] war, [9] AI wars, [10] production, [11] AI production, [12] construction, [13] AI construction, [14] deployment, [15] AI deployment, [16] AI army, [17] railways, [18] supply, [19] weather, [20] research, [21] AI research; then the worst single hour of [0], [1], [2], and the plans' daily line refresh
         static readonly string[] PerfNames =
-            { "combat_h", "plans_h", "ai_h", "recorder", "combat_d", "equipment", "manpower", "plans_d", "war", "ai_wars", "production", "ai_production", "construction", "ai_construction", "deployment", "ai_deployment", "ai_army", "railways", "supply", "weather", "research", "ai_research" };
+            { "combat_h", "plans_h", "ai_h", "recorder", "combat_d", "equipment", "manpower", "plans_d", "war", "ai_wars", "production", "ai_production", "construction", "ai_construction", "deployment", "ai_deployment", "ai_army", "railways", "supply", "weather", "research", "ai_research", "ai_tanks" };
         static readonly string[] MaxNames = { "combat_h_max", "plans_h_max", "ai_h_max", "plans_refresh", "plans_distribute", "plans_ai" };
         readonly double[] perf = new double[PerfNames.Length];
         // One profiler marker per step, named like the perf.tsv columns: they show in a normal (not deep) capture
@@ -150,6 +150,8 @@ namespace Hoi4.Units
                 (int)(Engine.ArchonEngine.Instance.GameState.Time.CurrentTick / 24))); // AI construction queue, each country weekly
             if (RunsAI) Measure(21, () => Hoi4.Research.Hoi4ResearchAI.SimulateDay(
                 (int)(Engine.ArchonEngine.Instance.GameState.Time.CurrentTick / 24))); // AI fills empty research slots
+            if (RunsAI) Measure(22, () => Hoi4.Production.Hoi4TankDesigns.SimulateDay(
+                (int)(Engine.ArchonEngine.Instance.GameState.Time.CurrentTick / 24), PlayerCountry)); // AI tank designs (the player keeps its own)
             if (RunsAI) Measure(15, () => Hoi4.Deployment.Hoi4DeploymentAI.SimulateDay(
                 (int)(Engine.ArchonEngine.Instance.GameState.Time.CurrentTick / 24))); // AI training orders, each country weekly
             WritePerf();
@@ -157,6 +159,15 @@ namespace Hoi4.Units
 
         /// <summary>Archon's lockstep model: the AI decides on the host only and its decisions reach the other
         /// clients as commands. Everything else here is deterministic simulation that every client runs.</summary>
+        static ushort PlayerCountry
+        {
+            get
+            {
+                var p = StarterKit.Initializer.Instance?.PlayerState;
+                return p != null && p.HasPlayerCountry ? p.PlayerCountryId : (ushort)0;
+            }
+        }
+
         static bool RunsAI => Engine.ArchonEngine.Instance?.GameState?.CommandProcessor?.IsAuthoritative ?? true;
     }
 }

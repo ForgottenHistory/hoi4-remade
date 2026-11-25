@@ -231,6 +231,18 @@ namespace Hoi4.Production
             if (any) LinesChanged?.Invoke(country);
         }
 
+        /// <summary>Make EQUIPMENT (a new tank design, Hoi4TankDesigns) what new lines of the archetype build; the
+        /// production AI switches the old lines (LinesChanged).</summary>
+        public void SetBuildable(ushort country, int archetype, string equipment, string why)
+        {
+            if (!countries.TryGetValue(country, out var c)) return;
+            c.Buildable.TryGetValue(archetype, out var now);
+            c.Buildable[archetype] = Describe(country, equipment);
+            Core.Recording.SessionRecorder.Note("production", "unlock", country, 0, 0, 0,
+                $"{equipment} ({why}) replaces {(now.Equipment ?? "nothing")} for new lines");
+            LinesChanged?.Invoke(country);
+        }
+
         // ---- switching a line's equipment ----------------------------------------------------------------
 
         /// <summary>The equipment a line would switch to for this archetype: what the country builds of it now, if it
@@ -311,6 +323,7 @@ namespace Hoi4.Production
                 yield return null;
             gameState = Engine.ArchonEngine.Instance.GameState;
             Hoi4EquipmentCatalog.EnsureLoaded();
+            Hoi4TankDesigns.EnsureLoaded();
             outputId = Hoi4.Modifiers.Hoi4Modifiers.Id(Hoi4.Modifiers.Hoi4Modifiers.FactoryOutput);
             lineChangeId = Hoi4.Modifiers.Hoi4Modifiers.Id(Hoi4.Modifiers.Hoi4Modifiers.LineChange);
             maxId = Hoi4.Modifiers.Hoi4Modifiers.Id(Hoi4.Modifiers.Hoi4Modifiers.MaxEfficiency);

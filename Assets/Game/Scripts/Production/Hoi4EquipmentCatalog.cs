@@ -12,6 +12,9 @@ namespace Hoi4.Production
     /// GAME: every buildable land equipment research can unlock (common/hoi4_equipment.json5, converter
     /// write_equipment_catalog): archetype, parent, year, build cost, combat stats, names and pictures, and which
     /// technologies unlock what. Also HOI4's production efficiency retention when a line changes equipment.
+    /// Tanks are designs (No Step Back): each country's history and default designs come from the file ("GER:Panzer
+    /// II": chassis type, family, parent chassis, modules, upgrades), the AI's new ones are registered at runtime
+    /// (Hoi4TankDesigns); the fixed tank designs (light_tank_equipment_N) are Legacy, only names and pictures.
     /// </summary>
     public static class Hoi4EquipmentCatalog
     {
@@ -27,6 +30,13 @@ namespace Hoi4.Production
             public FP Cost;                // build_cost_ic
             public string General, ArchetypeName, Sprite;
             public readonly Dictionary<string, FP> Stats = new Dictionary<string, FP>();
+            public int Order;              // tank designs: creation order (a later design of the same chassis is newer)
+            public string Chassis, Family, ChassisParent; // tank designs: light_tank_chassis_2, its base tier, its parent
+            public bool Legacy, Obsolete;  // a fixed tank design (no longer built) / a history design marked obsolete
+            public string LegacyOf;        // tank designs: the fixed design of their chassis (names, pictures)
+            public string Owner;           // tank designs: the country that made it
+            public Hoi4TankDesigns.Design Design; // tank designs: type, modules, upgrades
+            public bool IsDesign => Chassis != null;
             // the combat stats a division takes from it (Hoi4Divisions.RefreshStats)
             public FP SoftAttack, HardAttack, Defense, Breakthrough, Hardness, ArmorValue, ApAttack, Reliability;
             public bool HasReliability;
@@ -91,8 +101,15 @@ namespace Hoi4.Production
                         Name = p.Name, Archetype = (string)o["archetype"], Parent = (string)o["parent"],
                         Year = (int?)o["year"] ?? 0, Cost = FP.FromDouble((double?)o["cost"] ?? 0),
                         General = (string)o["general"] ?? p.Name, ArchetypeName = (string)o["archetype_name"],
-                        Sprite = (string)o["sprite"],
+                        Sprite = (string)o["sprite"], Order = (int?)o["order"] ?? 0,
+                        Chassis = (string)o["chassis"], Family = (string)o["family"], ChassisParent = (string)o["chassis_parent"],
+                        Legacy = (bool?)o["legacy"] ?? false, Obsolete = (bool?)o["obsolete"] ?? false, LegacyOf = (string)o["legacy_of"],
                     };
+                    if (o["design"] is JObject d)
+                    {
+                        e.Design = Hoi4TankDesigns.Design.FromJson(d);
+                        e.Owner = p.Name.Contains(":") ? p.Name.Substring(0, p.Name.IndexOf(':')) : null;
+                    }
                     if (o["stats"] is JObject st) foreach (var s in st.Properties()) e.Stats[s.Name] = FP.FromDouble((double)s.Value);
                     entries[p.Name] = e.Resolve();
                 }
@@ -121,12 +138,22 @@ namespace Hoi4.Production
 
         public static Entry Get(string equipment) => equipment != null && entries.TryGetValue(equipment, out var e) ? e : null;
 
+        static int registered = 100000; // runtime designs come after every file entry
+
+        /// <summary>A design made during the game (Hoi4TankDesigns): it gets the next order, so it is newer than any
+        /// other design of its chassis.</summary>
+        public static void Register(Entry e)
+        {
+            e.Order = ++registered;
+            entries[e.Name] = e;
+        }
+
         /// <summary>The archetype's oldest design (earliest year, then cheapest), null when it has none.</summary>
         public static Entry Oldest(string archetype)
         {
             Entry best = null;
             foreach (var e in entries.Values)
-                if (e.Archetype == archetype && (best == null || e.Year < best.Year || (e.Year == best.Year
+                if (e.Archetype == archetype && !e.Legacy && (best == null || e.Year < best.Year || (e.Year == best.Year
                         && (e.Cost < best.Cost || (e.Cost == best.Cost && string.CompareOrdinal(e.Name, best.Name) < 0)))))
                     best = e;
             return best;
@@ -136,19 +163,34 @@ namespace Hoi4.Production
         public static IReadOnlyList<string> Unlocks(string technology) =>
             technology != null && unlocks.TryGetValue(technology, out var u) ? u : System.Array.Empty<string>();
 
-        /// <summary>Newer: later year, then dearer (the converter's start rule).</summary>
+        /// <summary>Newer: later year, then a later design, then dearer (the converter's start rule).</summary>
         public static bool IsNewer(string candidate, string than)
         {
             var a = Get(candidate);
             var b = Get(than);
             if (a == null) return false;
             if (b == null) return true;
-            return a.Year != b.Year ? a.Year > b.Year : a.Cost > b.Cost;
+            return Compare(a, b) > 0;
+        }
+
+        /// <summary>Order of age: year, then creation order (designs), then cost, then name (the same on every machine).
+        /// Positive when A is newer.</summary>
+        public static int Compare(Entry a, Entry b)
+        {
+            if (a.Year != b.Year) return a.Year.CompareTo(b.Year);
+            if (a.Order != b.Order) return a.Order.CompareTo(b.Order);
+            if (a.Cost != b.Cost) return a.Cost > b.Cost ? 1 : -1;
+            return string.CompareOrdinal(b.Name, a.Name);
         }
 
         /// <summary>The country's design name ("MAS-36"), else the general one.</summary>
         public static string Name(string tag, string equipment) =>
             tag != null && names.TryGetValue(tag, out var own) && own.TryGetValue(equipment, out var n) ? n : Get(equipment)?.General ?? equipment;
+
+        /// <summary>The production picture's sprite name (the country's own first), null when none.</summary>
+        public static string SpriteName(string tag, string equipment) =>
+            equipment == null ? null
+            : tag != null && sprites.TryGetValue(tag, out var own) && own.TryGetValue(equipment, out var x) ? x : Get(equipment)?.Sprite;
 
         /// <summary>The production picture's data-directory path (the country's own first).</summary>
         public static string Picture(string tag, string equipment)
@@ -159,8 +201,7 @@ namespace Hoi4.Production
 
         // ---- retention ----------------------------------------------------------------------------------
 
-        // BASE_FACTORY_EFFICIENCY_VARIANT_CHANGE_FACTOR 90% (another design of the same equipment) doesn't arise:
-        // one design per equipment
+        static readonly FP Variant = FP.FromFraction(90, 100);     // ..._VARIANT_CHANGE_FACTOR: another design, same chassis
         static readonly FP Family = FP.FromFraction(70, 100);      // ..._FAMILY_CHANGE_FACTOR: same chassis, other model
         static readonly FP ParentChild = FP.FromFraction(30, 100); // ..._PARENT_CHANGE_FACTOR: direct up/downgrade
         static readonly FP SameArchetype = FP.FromFraction(20, 100); // ..._ARCHETYPE_CHANGE_FACTOR: indirect
@@ -175,6 +216,14 @@ namespace Hoi4.Production
             var a = Get(from);
             var b = Get(to);
             if (a == null || b == null) return Other;
+            if (a.IsDesign && b.IsDesign) // tank designs: by chassis
+            {
+                if (a.Chassis == b.Chassis) return Variant;
+                if (a.Family == b.Family) return Family;                 // light tank I -> light tank destroyer I
+                if (a.Archetype == b.Archetype)
+                    return a.ChassisParent == b.Chassis || b.ChassisParent == a.Chassis ? ParentChild : SameArchetype;
+                return Other;
+            }
             if (a.Archetype == b.Archetype)
                 return a.Parent == to || b.Parent == from ? ParentChild : SameArchetype;
             // tanks: another model of the same chassis (light tank I -> light tank destroyer I)
@@ -191,6 +240,7 @@ namespace Hoi4.Production
         public static FP Retention(string from, string to, FP bonus)
         {
             FP r = BaseRetention(from, to);
+            if (r == Variant) return r; // another variant always loses 10% (wiki): the retention bonus doesn't apply
             return FP.Min(FP.One, r + (FP.One - r) * FP.Max(FP.Zero, bonus));
         }
     }

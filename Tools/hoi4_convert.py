@@ -1150,7 +1150,8 @@ def load_equipment_info(hoi4: Path):
             for n, e in entries.items() if e["archetype"]}
 
 
-def write_equipment_catalog(hoi4: Path, out: Path, tags, equipment, tech_equipment, loc, sprite_names, land_archetypes):
+def write_equipment_catalog(hoi4: Path, out: Path, tags, equipment, tech_equipment, loc, sprite_names, land_archetypes,
+                            designs=None, describe_design=None, tanks=None):
     """common/hoi4_equipment.json5, what research can unlock for production:
     - equipment: every buildable land equipment (tanks: the designs, light_tank_equipment_N, not the chassis) with
       its archetype, parent, year, build cost, combat stats (inherited from parent and archetype), generic name
@@ -1158,7 +1159,10 @@ def write_equipment_catalog(hoi4: Path, out: Path, tags, equipment, tech_equipme
     - unlocks: technology -> the equipment it makes buildable (a tank design comes with its chassis technology);
     - names / sprites: per country only where it has its own (FRA infantry_equipment_1 "MAS-36").
     The game adds a finished technology's equipment to the country's buildable list when it is newer (year, cost)
-    than what the country builds of that archetype."""
+    than what the country builds of that archetype.
+    Tanks are designs (No Step Back): every country's history and default designs (hoi4_tanks.Designs, id
+    "TAG:name") with their chassis type, family, parent chassis, modules and upgrades; the fixed tank designs
+    (light_tank_equipment_N) stay only as `legacy` (names and pictures of AI designs), unlocked by nothing."""
     stats = load_equipment_combat(hoi4, every=True)
     parents = load_parent(hoi4)
     projects = load_project_equipment(hoi4)
@@ -1173,16 +1177,28 @@ def write_equipment_catalog(hoi4: Path, out: Path, tags, equipment, tech_equipme
         cat[name] = {"archetype": arch, "parent": parents.get(name), "year": info["year"], "cost": info["cost"],
                      "general": b["general"], "archetype_name": b["archetype_name"], "sprite": b["sprite"],
                      "stats": {k: round(v, 3) for k, v in sorted(stats.get(name, {}).items())}}
+        if tanks and arch in tanks.tank_archetypes:
+            cat[name]["legacy"] = True
+    for did, d in sorted((designs.all if designs else {}).items(), key=lambda x: x[1]["order"]):
+        desc = describe_design(did)
+        cat[did] = {"archetype": d["archetype"], "parent": None, "year": d["year"], "order": d["order"], "cost": d["cost"],
+                    "general": desc["general"], "archetype_name": desc["archetype_name"], "sprite": desc["sprite"],
+                    "stats": d["stats"], "design": {"type": d["type"], "modules": d["modules"], "upgrades": d["upgrades"]},
+                    "chassis": d["type"], "family": d["family"], "chassis_parent": d["chassis_parent"],
+                    "obsolete": d["obsolete"], "legacy_of": desc["legacy"]}
     unlocks = {}
     for tech, es in sorted(tech_equipment.items()):
-        got = {e for e in es if e in cat}
-        got |= {chassis_design(e, equipment) for e in es if "chassis" in e} & set(cat)
+        got = {e for e in es if e in cat and not cat[e].get("legacy") and "design" not in cat[e]}
+        if not tanks:
+            got |= {chassis_design(e, equipment) for e in es if "chassis" in e} & set(cat)
         if got:
             unlocks[tech] = sorted(got)
     names, sprites = {}, {}
     for tag in tags:
         own_n, own_s = {}, {}
         for name, c in cat.items():
+            if "design" in c:
+                continue
             b = {"equipment": name}
             describe_equipment(tag, {c["archetype"]: b}, equipment, tech_equipment, loc, sprite_names)
             if b["name"] != c["general"]:
@@ -1199,6 +1215,32 @@ def write_equipment_catalog(hoi4: Path, out: Path, tags, equipment, tech_equipme
         + json.dumps(doc, ensure_ascii=False, indent=0) + "\n", encoding="utf-8")
     print(f"Equipment catalogue: {len(cat)} land equipment, {len(unlocks)} technologies unlock some, "
           f"{len(names)} countries with own names, {len(sprites)} with own pictures")
+
+
+def write_tank_designs(hoi4: Path, out: Path, tanks, designs, equipment):
+    """common/hoi4_tank_designs.json5, what the game's tank designer needs (Hoi4TankDesigns): every chassis type
+    (archetype, year, base stats, module boost, roles, parent, family), each archetype's slots in order and default
+    modules, the modules (category, stats, what they widen, forbid and allow), the upgrades (stats per level, the
+    technologies levels need), the technologies' modules, and the AI design groups (common/ai_equipment).
+    Prototype: Tools/prototypes/tanks/tank_designs.py."""
+    import hoi4_tanks
+    types = {t: hoi4_tanks.type_info(tanks, t) for t in sorted(tanks.eq) if tanks.archetype(t) in tanks.tank_archetypes
+             and t not in tanks.tank_archetypes and "_chassis" in t}
+    for t, info in types.items():  # the fixed design of the chassis: names and pictures of the AI's designs
+        info["legacy"] = chassis_design(t, equipment) or chassis_design(info["family"], equipment)
+    doc = {"types": types,
+           "archetypes": {a: hoi4_tanks.archetype_info(tanks, a) for a in sorted(tanks.tank_archetypes)},
+           "modules": {m: hoi4_tanks.module_info(tanks, m) for m in sorted(tanks.modules)},
+           "upgrades": {u: hoi4_tanks.upgrade_info(tanks, u, pdx_json) for u in sorted(tanks.upgrades)},
+           "tech_modules": {t: sorted(set(ms)) for t, ms in sorted(tanks.tech_modules.items())
+                            if any(m in tanks.modules for m in ms)},
+           "ai": hoi4_tanks.ai_groups(tanks, pdx_json, tech_ai)}
+    (out / "common" / "hoi4_tank_designs.json5").write_text(
+        "// Generated by hoi4_convert.py from common/units/equipment (tank chassis, modules, upgrades), "
+        "common/technologies and common/ai_equipment\n" + json.dumps(doc, ensure_ascii=False, indent=0) + "\n",
+        encoding="utf-8")
+    print(f"Tank designs: {len(types)} chassis types, {len(doc['modules'])} modules, {len(doc['ai'])} AI design groups, "
+          f"{len(designs.all)} country designs ({sum(1 for d in designs.all.values() if d['name'] == d['type'])} default)")
 
 
 def chassis_design(chassis, equipment):
@@ -1395,16 +1437,21 @@ def collect_blocks(items, key, out):
     return out
 
 
-def starting_equipment(hoi4: Path, oob_root, country_root, equipment, land_archetypes):
+def starting_equipment(hoi4: Path, oob_root, country_root, equipment, land_archetypes, tank_design=None):
     """A country's 1936 production lines (add_equipment_production in its OOB's instant_effect) and starting stockpile
     (add_equipment_to_stockpile in its history), land equipment only. Lines: equipment, archetype, factories,
     efficiency (0..1), cost. Stockpile: archetype -> amount; the history often lists the same stock twice, in a DLC
-    and a no-DLC branch, so per archetype the largest amount counts rather than the sum."""
+    and a no-DLC branch, so per archetype the largest amount counts rather than the sum.
+    Tanks (TANK_DESIGN(type, version_name, creator) -> (design id, archetype, cost)): a line builds a design (the
+    No Step Back OOB's `type = light_tank_chassis_2 version_name = "Panzer II"`)."""
     lines = []
     for p in collect_blocks(oob_root, "add_equipment_production", []):
         eq = get(p, "equipment")
         kind = get(eq, "type") if isinstance(eq, list) else None
-        info = equipment.get(kind or "")
+        tank = tank_design(kind, get(eq, "version_name"), get(eq, "creator")) if tank_design and kind else None
+        info = {"archetype": tank[1], "cost": tank[2]} if tank else equipment.get(kind or "")
+        if tank:
+            kind = tank[0]
         if not info or info["archetype"] not in land_archetypes or not info["cost"]:
             continue
         try:
@@ -1455,6 +1502,30 @@ def convert_oob(hoi4: Path, out: Path, existing_tags, ruling_party):
         return any(f.with_suffix(ext).exists() for ext in (f.suffix, ".dds", ".tga", ".png"))
     sprite_names = {n for n, s in gui.load_sprites(hoi4).items() if has_texture(s)}  # pictures that exist
     land_archetypes = {a for n in designer_subs for a in subs[n]["need"]}
+    import hoi4_tanks
+    tanks = hoi4_tanks.TankData(hoi4)
+    designs = hoi4_tanks.Designs(tanks)
+    for f in sorted((hoi4 / "history" / "countries").glob("*.txt")):  # first every country's history designs: a
+        if f.name[:3] in existing_tags:                                  # line may build another country's (creator)
+            designs.history(f.name[:3], parse_pdx(read_text(f)))
+    described = {}
+
+    def describe_design(did):
+        """What the production screen shows of a tank design: its name, the generic name and picture of the legacy
+        design of its chassis (light_tank_chassis_2 -> light_tank_equipment_2: "Light Tank II", the creator's own
+        picture), its history icon when it has one."""
+        if did in described:
+            return described[did]
+        d = designs.all[did]
+        legacy = chassis_design(d["type"], equipment) or chassis_design(hoi4_tanks.type_info(tanks, d["type"])["family"], equipment)
+        b = {"equipment": legacy or d["archetype"]}
+        describe_equipment(d["tag"], {d["archetype"]: b}, equipment, tech_equipment, loc, sprite_names)
+        name = b["general"] if d["name"] == d["type"] else d["name"]
+        sprite = d["icon"] if d.get("icon") in sprite_names else b["sprite"]
+        described[did] = {"name": name, "general": name, "archetype_name": b["archetype_name"], "sprite": sprite,
+                          "legacy": legacy}
+        return described[did]
+
     countries = {}
     used_subs = set()
     main_types = set()
@@ -1537,17 +1608,81 @@ def convert_oob(hoi4: Path, out: Path, existing_tags, ruling_party):
                 used_subs.update(t["regiments"] + t["support"] + t["regimental_support"])
                 main_types.add(t["main"])
         if divisions:
-            lines_, stock = starting_equipment(hoi4, root, country_root, equipment, land_archetypes)
+            # tanks are designs (No Step Back, every DLC owned): the No Step Back OOB names them (its lines'
+            # version_name, its divisions' force_equipment_variants); it differs from the base OOB only there and
+            # in officers
+            nsb = [o for o, dlc in found if dlc and "_nsb" in o and o.startswith(f"{tag}_{OOB_START}")]
+            nsb_path = next((hoi4 / "history" / "units" / f"{o}.txt" for o in sorted(nsb, key=len)
+                             if (hoi4 / "history" / "units" / f"{o}.txt").exists()), None)
+            tank_root = parse_pdx(read_text(nsb_path)) if nsb_path else root
+            known = known_technologies(country_root)
+            tank_types, _ = tanks.unlocked(known)
+
+            def tank_design(kind, version=None, creator=None):
+                """(design id, archetype, cost) of a tank a line builds or a division holds: the named design, else
+                the country's newest of the archetype, else a default design of the type (or its newest unlocked
+                tier); None for no tank. A legacy design (light_tank_equipment_2, the base OOB) counts as its
+                archetype."""
+                arch = tanks.archetype(kind) if kind in tanks.eq else None
+                t = kind if arch in tanks.tank_archetypes else None
+                if t is None:
+                    arch = (equipment.get(kind) or {}).get("archetype")
+                    if arch not in tanks.tank_archetypes:
+                        return None
+                did = f"{creator or tag}:{version}" if version else None
+                if did not in designs.all:
+                    did = designs.best(tag, arch, tank_types | ({t} if t else set()))
+                if did is None:
+                    t = t or designs.newest_type(arch, tank_types)
+                    did = designs.default(tag, t) if t else None
+                return (did, arch, designs.all[did]["cost"]) if did else None
+
+            lines_, stock = starting_equipment(hoi4, tank_root, country_root, equipment, land_archetypes, tank_design)
             buildable = available_equipment(country_root, equipment, tech_equipment, land_archetypes)
+            buildable = {a: b for a, b in buildable.items() if a not in tanks.tank_archetypes}  # no legacy designs
+            # per tank archetype its newest design it may build; a default design where it needs the archetype
+            # (its templates, stockpile or lines) and has none
+            needed = {a for t in templates.values() for u in t["regiments"] + t["support"] + t["regimental_support"]
+                      for a in subs[u]["need"]} | set(stock)
+            held_only = {}  # archetypes it holds but can't build (Finland's 34 light tanks, no chassis technology)
+            for arch in sorted(tanks.tank_archetypes):
+                did = designs.best(tag, arch, tank_types)
+                if did is None and arch in needed:
+                    t = designs.newest_type(arch, tank_types)
+                    if t:
+                        did = designs.default(tag, t)
+                    elif designs.oldest_type(arch):
+                        held_only[arch] = designs.default(tag, designs.oldest_type(arch))
+                if did:
+                    buildable[arch] = {"equipment": did, "cost": designs.all[did]["cost"]}
+            # the design its divisions hold (force_equipment_variants), the most common per archetype
+            forced = {}
+            for units in get_all(tank_root, "units"):
+                for dv in get_all(units, "division"):
+                    for k, _, v in (get(dv, "force_equipment_variants") or []):
+                        r = tank_design(k, get(v, "version_name"), get(v, "owner")) if isinstance(v, list) else None
+                        if r:
+                            forced.setdefault(r[1], {}).setdefault(r[0], 0)
+                            forced[r[1]][r[0]] += 1
+            start_versions = {a: max(c.items(), key=lambda x: (x[1], x[0]))[0] for a, c in sorted(forced.items())}
+            for a, did in held_only.items():
+                start_versions.setdefault(a, did)
+
+            def rank(e):
+                d = designs.all.get(e)
+                return (d["year"], d["order"]) if d else ((equipment.get(e) or {}).get("year") or 0,
+                                                          (equipment.get(e) or {}).get("cost") or 0)
             for p in lines_:  # what a 1936 line builds is buildable, whatever the technology check says, unless
                 # the technologies give something newer (SOV builds light tank I, knows light tank II): then the
                 # line can switch to it
                 now = buildable.get(p["archetype"])
-                rank = lambda e: ((equipment.get(e) or {}).get("year") or 0, (equipment.get(e) or {}).get("cost") or 0)
                 if now is None or rank(p["equipment"]) >= rank(now["equipment"]):
                     buildable[p["archetype"]] = {"equipment": p["equipment"], "cost": p["cost"]}
-            describe_equipment(tag, buildable, equipment, tech_equipment, loc, sprite_names)
-            known = known_technologies(country_root)
+            plain = {a: b for a, b in buildable.items() if b["equipment"] not in designs.all}
+            describe_equipment(tag, plain, equipment, tech_equipment, loc, sprite_names)
+            for a, b in buildable.items():
+                if b["equipment"] in designs.all:
+                    b.update(describe_design(b["equipment"]))
             unlocked = {s for tech in known for s in tech_subunits.get(tech, [])}
             # a technology unlocks it, or no technology gates it and it is active (active alone doesn't do:
             # mechanized is active and still needs its technology)
@@ -1562,7 +1697,8 @@ def convert_oob(hoi4: Path, out: Path, existing_tags, ruling_party):
                               "equipment": buildable,
                               "templates": {k: {kk: vv for kk, vv in v.items() if kk != "names_group"}
                                             for k, v in templates.items()},
-                              "divisions": divisions, "production": lines_, "stockpile": stock}
+                              "divisions": divisions, "production": lines_, "stockpile": stock,
+                              "start_versions": start_versions}
 
     # Only land equipment (sub-units also cover ships and planes): what the designer's sub-units use
     land_archetypes = {a for name in designer_subs for a in subs[name]["need"]}
@@ -1608,11 +1744,15 @@ def convert_oob(hoi4: Path, out: Path, existing_tags, ruling_party):
         lines.append(f"      stockpile: {j(c['stockpile'])},")
         # what it can build at the start: archetype -> newest unlocked equipment and its build cost
         lines.append(f"      equipment: {j(c['equipment'])},")
+        # tanks: the design its divisions hold per archetype (force_equipment_variants), where the OOB names one
+        lines.append(f"      start_versions: {j(c['start_versions'])},")
         lines.append("    },")
     lines += ["  }", "}", ""]
     (out / "history" / "units").mkdir(parents=True, exist_ok=True)
     (out / "history" / "units" / f"oob_{OOB_START}.json5").write_text("\n".join(lines), encoding="utf-8")
-    write_equipment_catalog(hoi4, out, sorted(countries), equipment, tech_equipment, loc, sprite_names, land_archetypes)
+    write_equipment_catalog(hoi4, out, sorted(countries), equipment, tech_equipment, loc, sprite_names, land_archetypes,
+                            designs, describe_design, tanks)
+    write_tank_designs(hoi4, out, tanks, designs, equipment)
 
     # Engine unit types (StarterKit format), one per division main type. speed = days per province. Every battalion
     # type counts: a template made in the division designer can have any of them as its main type.

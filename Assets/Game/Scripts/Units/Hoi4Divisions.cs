@@ -674,8 +674,10 @@ namespace Hoi4.Units
             {
                 var start = new Hoi4.Production.Hoi4EquipmentCatalog.Entry[Archetypes.Length];
                 var eq = country.Value["equipment"] as JObject;
+                var held = country.Value["start_versions"] as JObject; // tanks: the design its divisions hold
                 for (int i = 0; i < Archetypes.Length; i++)
-                    start[i] = Hoi4.Production.Hoi4EquipmentCatalog.Get((string)eq?[Archetypes[i]]?["equipment"])
+                    start[i] = Hoi4.Production.Hoi4EquipmentCatalog.Get((string)held?[Archetypes[i]])
+                               ?? Hoi4.Production.Hoi4EquipmentCatalog.Get((string)eq?[Archetypes[i]]?["equipment"])
                                ?? Hoi4.Production.Hoi4EquipmentCatalog.Oldest(Archetypes[i]); // none buildable (Finland's light tanks): the oldest design
                 startVersions[country.Name] = start;
             }

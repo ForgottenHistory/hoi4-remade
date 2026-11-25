@@ -102,6 +102,59 @@ namespace Hoi4.Research
             countedDay = -1;
         }
 
+        // ---- triggers for other AI systems (Hoi4TankDesigns) ------------------------------------------------
+
+        /// <summary>A trigger block compiled once (the same triggers the research AI knows).</summary>
+        public sealed class Trigger { internal object Root; }
+
+        /// <summary>Compile a trigger block ([[key, op, value], ...], the converter's pdx_json); null lines hold.</summary>
+        public static Trigger CompileTrigger(JArray lines)
+        {
+            var research = Hoi4Research.Instance;
+            return research == null ? null : new Trigger { Root = Lines(research, lines, Kind.And) };
+        }
+
+        /// <summary>The trigger for a country: 1 true, 0 false, -1 can't tell (a trigger it doesn't know). Factory
+        /// counts and majors as the research AI counts them (weekly).</summary>
+        public static int Evaluate(Trigger t, ushort country, int day)
+        {
+            var research = Hoi4Research.Instance;
+            if (t == null) return 1;
+            if (research == null) return -1;
+            var gameState = Engine.ArchonEngine.Instance.GameState;
+            if (countedDay < 0 || day - countedDay >= 7) CountFactories(gameState, research, day);
+            var now = gameState.Time.GetCurrentGameTime();
+            var construction = Hoi4.Construction.Hoi4Construction.Instance;
+            var ctx = new Ctx
+            {
+                Country = country, Tag = gameState.Countries.GetCountryTag(country), Major = majors.Contains(country),
+                AtWar = gameState.Diplomacy != null && gameState.Diplomacy.IsAtWar(country),
+                Civ = construction != null ? construction.Civilian(country) : 0,
+                Mil = construction != null ? construction.Military(country) : 0,
+                Nav = naval.TryGetValue(country, out int nav) ? nav : 0,
+                Date = now.Year * 10000 + now.Month * 100 + now.Day, Research = research,
+            };
+            return Eval(ctx, (Node)t.Root);
+        }
+
+        /// <summary>A weight block ({base, modifiers: [{factor | add, if}]}, the converter's tech_ai) for a country:
+        /// the base, then each modifier whose trigger holds.</summary>
+        public static double Weight(JObject block, ushort country, int day, Dictionary<JToken, Trigger> cache)
+        {
+            if (block == null) return 1;
+            double w = block["base"] != null ? (double)block["base"] : 1;
+            if (block["modifiers"] is JArray ms)
+                foreach (var m in ms)
+                {
+                    if (!(m is JObject mo)) continue;
+                    if (!cache.TryGetValue(mo, out var t)) cache[mo] = t = CompileTrigger(mo["if"] as JArray);
+                    if (Evaluate(t, country, day) != 1) continue;
+                    if (mo["factor"] != null) w *= (double)mo["factor"];
+                    if (mo["add"] != null) w += (double)mo["add"];
+                }
+            return w;
+        }
+
         /// <summary>Daily, on the host only (Hoi4Simulation); each country on its day of the cycle.</summary>
         public static void SimulateDay(int day)
         {

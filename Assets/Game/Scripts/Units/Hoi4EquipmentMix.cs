@@ -116,14 +116,12 @@ namespace Hoi4.Units
             return s * total;
         }
 
-        /// <summary>Newest first: later year, then dearer, then by name (the same order on every machine).</summary>
+        /// <summary>Newest first (Hoi4EquipmentCatalog.Compare: year, a later design, cost, name).</summary>
         public static bool Before(Hoi4EquipmentCatalog.Entry a, Hoi4EquipmentCatalog.Entry b)
         {
             if (a == b || a == null) return false;
             if (b == null) return true;
-            if (a.Year != b.Year) return a.Year > b.Year;
-            if (a.Cost != b.Cost) return a.Cost > b.Cost;
-            return string.CompareOrdinal(a.Name, b.Name) < 0;
+            return Hoi4EquipmentCatalog.Compare(a, b) > 0;
         }
 
         /// <summary>Drop dust shares and give the newest the remainder, so the shares add up to exactly 1.</summary>
