@@ -39,8 +39,10 @@ namespace Hoi4.Modifiers
         public const string StartEfficiency = "production_factory_start_efficiency_factor";   // + points on the start
         public const string EfficiencyGain = "production_factory_efficiency_gain_factor";     // x (1 + value) growth
         public const string StabilityFactor = "stability_factor";                             // + stability (Hoi4Stability)
+        public const string LineChange = "line_change_production_efficiency_factor";         // retention bonus
         static readonly string[] Keys = { ConsumerGoods, ConsumerGoodsFactor, ConstructionSpeed, ResearchSpeed,
-                                          FactoryOutput, MaxEfficiency, StartEfficiency, EfficiencyGain, StabilityFactor };
+                                          FactoryOutput, MaxEfficiency, StartEfficiency, EfficiencyGain, StabilityFactor,
+                                          LineChange };
 
         static readonly Dictionary<string, ushort> ids = new Dictionary<string, ushort>();
         static readonly List<string> ideaNames = new List<string>();

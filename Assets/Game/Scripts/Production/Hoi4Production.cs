@@ -93,7 +93,7 @@ namespace Hoi4.Production
         static readonly FP GrowthFactor = FP.FromFraction(1, 1000);
         static readonly FP UnusedLoss = FP.FromFraction(1, 100);                  // EFFICIENCY_LOSS_PER_UNUSED_DAY 1 (%)
         static readonly FP MinCap = FP.FromFraction(1, 10);
-        ushort outputId, maxId, startId, gainId;
+        ushort outputId, maxId, startId, gainId, lineChangeId;
         public const int MaxFactoriesPerLine = 150;                               // MAX_MIL_FACTORIES_PER_LINE
         public const int MaxLines = 64;
 
@@ -138,6 +138,7 @@ namespace Hoi4.Production
         void OnDestroy()
         {
             Hoi4.Modifiers.Hoi4Modifiers.Changed -= OnModifiersChanged;
+            if (Hoi4.Research.Hoi4Research.Instance != null) Hoi4.Research.Hoi4Research.Instance.Researched -= OnResearched;
             if (Instance == this) Instance = null;
         }
 
@@ -192,6 +193,83 @@ namespace Hoi4.Production
             return countries.TryGetValue(country, out var c) && c.Buildable.TryGetValue(archetype, out b);
         }
 
+        /// <summary>How the production screen shows a line's own equipment (it may be older than what the country can
+        /// build now): its design name, general name, picture and cost.</summary>
+        public Buildable Describe(ushort country, string equipment)
+        {
+            if (countries.TryGetValue(country, out var c))
+                foreach (var b in c.Buildable.Values) if (b.Equipment == equipment) return b;
+            var e = Hoi4EquipmentCatalog.Get(equipment);
+            string tag = gameState?.Countries.GetCountryTag(country);
+            return new Buildable
+            {
+                Equipment = equipment, Cost = e?.Cost ?? FP.Zero, Name = Hoi4EquipmentCatalog.Name(tag, equipment),
+                General = e?.General ?? equipment, Picture = Hoi4EquipmentCatalog.Picture(tag, equipment),
+            };
+        }
+
+        // ---- research unlocks ---------------------------------------------------------------------------
+
+        /// <summary>A finished technology's equipment (Hoi4EquipmentCatalog.Unlocks) becomes what the country builds
+        /// of its archetype when it is newer than what it builds now. Lines keep their equipment until switched.</summary>
+        void OnResearched(ushort country, int tech)
+        {
+            var def = Hoi4.Research.Hoi4Research.Instance?.Tech(tech);
+            if (def == null || !countries.TryGetValue(country, out var c)) return;
+            bool any = false;
+            foreach (string eq in Hoi4EquipmentCatalog.Unlocks(def.Id))
+            {
+                var e = Hoi4EquipmentCatalog.Get(eq);
+                int a = e != null ? System.Array.IndexOf(Hoi4Divisions.Archetypes, e.Archetype) : -1;
+                if (a < 0) continue; // an archetype no sub-unit uses
+                if (c.Buildable.TryGetValue(a, out var now) && !Hoi4EquipmentCatalog.IsNewer(eq, now.Equipment)) continue;
+                c.Buildable[a] = Describe(country, eq);
+                any = true;
+                Core.Recording.SessionRecorder.Note("production", "unlock", country, 0, 0, 0,
+                    $"{eq} ({def.Id}) replaces {(now.Equipment ?? "nothing")} for new lines");
+            }
+            if (any) LinesChanged?.Invoke(country);
+        }
+
+        // ---- switching a line's equipment ----------------------------------------------------------------
+
+        /// <summary>The equipment a line would switch to for this archetype: what the country builds of it now, if it
+        /// differs from the line's.</summary>
+        public bool CanSwitch(ushort country, int lineId, int archetype)
+        {
+            var l = Line(country, lineId);
+            return l != null && TryGetBuildable(country, archetype, out var b) && b.Equipment != l.Equipment && b.Cost > FP.Zero;
+        }
+
+        /// <summary>Share of its efficiency the line keeps switching to the archetype's current equipment.</summary>
+        public FP SwitchRetention(ushort country, int lineId, int archetype)
+        {
+            var l = Line(country, lineId);
+            if (l == null || !TryGetBuildable(country, archetype, out var b)) return FP.One;
+            return Hoi4EquipmentCatalog.Retention(l.Equipment, b.Equipment, Hoi4.Modifiers.Hoi4Modifiers.Sum(country, lineChangeId));
+        }
+
+        /// <summary>Switch a line to the country's current equipment of an archetype (HOI4 changing a line's
+        /// equipment): each slot keeps efficiency x retention, at least the start efficiency, and the unit in
+        /// progress is lost.</summary>
+        public bool SwitchLine(ushort country, int lineId, int archetype)
+        {
+            if (!CanSwitch(country, lineId, archetype)) return false;
+            var l = Line(country, lineId);
+            TryGetBuildable(country, archetype, out var b);
+            FP keep = SwitchRetention(country, lineId, archetype);
+            for (int i = 0; i < l.Efficiency.Count; i++) l.Efficiency[i] = FP.Max(l.Efficiency[i] * keep, l.Rates.Start);
+            Core.Recording.SessionRecorder.Note("production", "switch", country, 0, 0, 0,
+                $"line {l.Id} {l.Equipment} -> {b.Equipment}, keeps {FP.Round(keep * 100).ToInt()}%");
+            l.Equipment = b.Equipment;
+            l.Cost = b.Cost;
+            l.Archetype = archetype;
+            l.Progress = FP.Zero;
+            l.StartEfficiency = FP.Zero; // no longer a 1936 line
+            LinesChanged?.Invoke(country);
+            return true;
+        }
+
         /// <summary>Archetypes the country can build, in index order.</summary>
         public List<int> BuildableArchetypes(ushort country)
         {
@@ -232,7 +310,9 @@ namespace Hoi4.Production
                    || Hoi4.Research.Hoi4Research.Instance == null || !Hoi4.Research.Hoi4Research.Instance.IsReady)
                 yield return null;
             gameState = Engine.ArchonEngine.Instance.GameState;
+            Hoi4EquipmentCatalog.Load();
             outputId = Hoi4.Modifiers.Hoi4Modifiers.Id(Hoi4.Modifiers.Hoi4Modifiers.FactoryOutput);
+            lineChangeId = Hoi4.Modifiers.Hoi4Modifiers.Id(Hoi4.Modifiers.Hoi4Modifiers.LineChange);
             maxId = Hoi4.Modifiers.Hoi4Modifiers.Id(Hoi4.Modifiers.Hoi4Modifiers.MaxEfficiency);
             startId = Hoi4.Modifiers.Hoi4Modifiers.Id(Hoi4.Modifiers.Hoi4Modifiers.StartEfficiency);
             gainId = Hoi4.Modifiers.Hoi4Modifiers.Id(Hoi4.Modifiers.Hoi4Modifiers.EfficiencyGain);
@@ -295,6 +375,7 @@ namespace Hoi4.Production
             }
             IsReady = true;
             Hoi4.Modifiers.Hoi4Modifiers.Changed += OnModifiersChanged;
+            Hoi4.Research.Hoi4Research.Instance.Researched += OnResearched;
             CountFactories();
             AllocateFactories();
             int total = 0;

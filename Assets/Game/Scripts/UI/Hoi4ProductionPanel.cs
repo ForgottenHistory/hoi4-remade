@@ -18,6 +18,8 @@ namespace Hoi4.UI
     ///   The factory grid glows while the country has free factories.
     /// - Add line: the infantry/artillery or armour button opens the equipment picker beside the window; a pick adds a
     ///   line at the bottom with the free factories (at least 1, at most 15).
+    /// - Change equipment: a line's picture opens the picker with what it can switch to (the country's current equipment
+    ///   of each archetype in its category that differs from the line's) and the share of efficiency it keeps.
     /// - Filters (checked = shown, HOI4's yellow border and tick): infantry/artillery, armour, and reinforcing (the
     ///   divisions lack the equipment) or stockpiling. Air, naval, refit, resources, outdated and upgrading stay on at 0.
     /// Values refresh four times a real second (a presentation throttle, not game time); the list is rebuilt only
@@ -43,6 +45,7 @@ namespace Hoi4.UI
         bool open, pickerArmour, hideInf, hideArmour, hideStockpiling, hideReinforcing, structureDirty = true;
         FP[] lack = new FP[0];
         int pickerOpenFor = -1; // -1 closed, 0 infantry/artillery, 1 armour
+        int switchLine;         // the picker switches this line's equipment (0: it adds a line)
         int step = 1;
         float nextRefresh;
         ushort shownCountry;
@@ -116,7 +119,12 @@ namespace Hoi4.UI
             panel.Q("pr-filter-reinforcing").RegisterCallback<ClickEvent>(_ => { hideReinforcing = !hideReinforcing; structureDirty = true; });
 
             while (Hoi4Production.Instance == null) yield return null;
-            Hoi4Production.Instance.LinesChanged += c => { if (c == shownCountry) structureDirty = true; };
+            Hoi4Production.Instance.LinesChanged += c =>
+            {
+                if (c != shownCountry) return;
+                structureDirty = true;
+                if (pickerOpenFor >= 0) FillPicker(); // research unlocked something, or a line switched
+            };
         }
 
         void OnDestroy()
@@ -168,7 +176,8 @@ namespace Hoi4.UI
 
         void TogglePicker(int category)
         {
-            if (pickerOpenFor == category) { ClosePicker(); return; }
+            if (pickerOpenFor == category && switchLine == 0) { ClosePicker(); return; }
+            switchLine = 0;
             pickerOpenFor = category;
             pickerArmour = category == 1;
             picker.style.display = DisplayStyle.Flex;
@@ -177,9 +186,26 @@ namespace Hoi4.UI
             FillPicker();
         }
 
+        /// <summary>A line's picture: the picker lists what the line can switch to (same category), with the share
+        /// of its efficiency it keeps.</summary>
+        void OpenSwitch(int lineId)
+        {
+            var line = Hoi4Production.Instance?.Line(shownCountry, lineId);
+            if (line == null) return;
+            if (pickerOpenFor >= 0 && switchLine == lineId) { ClosePicker(); return; }
+            switchLine = lineId;
+            pickerOpenFor = Hoi4ProductionPresenter.IsArmour(line.Archetype) ? 1 : 0;
+            pickerArmour = pickerOpenFor == 1;
+            picker.style.display = DisplayStyle.Flex;
+            panel.Q("pr-add-inf").RemoveFromClassList("open");
+            panel.Q("pr-add-armour").RemoveFromClassList("open");
+            FillPicker();
+        }
+
         void ClosePicker()
         {
             pickerOpenFor = -1;
+            switchLine = 0;
             if (picker == null) return;
             picker.style.display = DisplayStyle.None;
             panel.Q("pr-add-inf").RemoveFromClassList("open");
@@ -190,19 +216,26 @@ namespace Hoi4.UI
         {
             var production = Hoi4Production.Instance;
             pickerList.Clear();
-            picker.Q<Label>("pr-picker-title").text = pickerArmour ? "Armour" : "Infantry and Artillery";
+            picker.Q<Label>("pr-picker-title").text = switchLine != 0 ? "Change equipment"
+                : pickerArmour ? "Armour" : "Infantry and Artillery";
             if (production == null) return;
             foreach (int a in production.BuildableArchetypes(shownCountry))
             {
                 if (Hoi4ProductionPresenter.IsArmour(a) != pickerArmour) continue;
+                if (switchLine != 0 && !production.CanSwitch(shownCountry, switchLine, a)) continue;
                 production.TryGetBuildable(shownCountry, a, out var b);
                 var e = pickerTree.Instantiate().Q(className: "pp-entry");
                 Hoi4Sprites.Bind(e);
-                Hoi4ProductionPresenter.ShowPickerEntry(e, b.Name, b.General, b.Cost, b.Picture);
-                int archetype = a;
-                e.RegisterCallback<ClickEvent>(_ => AddLine(archetype));
+                string general = b.General;
+                if (switchLine != 0) // HOI4 shows the efficiency the line keeps
+                    general += $"  (keeps {FP.Round(production.SwitchRetention(shownCountry, switchLine, a) * 100).ToInt()}% efficiency)";
+                Hoi4ProductionPresenter.ShowPickerEntry(e, b.Name, general, b.Cost, b.Picture);
+                int archetype = a, line = switchLine;
+                e.RegisterCallback<ClickEvent>(_ => { if (line != 0) SwitchLine(line, archetype); else AddLine(archetype); });
                 pickerList.Add(e);
             }
+            if (switchLine != 0 && pickerList.childCount == 0)
+                pickerList.Add(new Label("Nothing newer to switch to") { pickingMode = PickingMode.Ignore });
         }
 
         // ---- commands ---------------------------------------------------------------------------------
@@ -213,6 +246,13 @@ namespace Hoi4.UI
             int factories = Mathf.Clamp(production.Free(shownCountry), 1, NewLineMaxFactories);
             gameState.TryExecuteCommand(new AddProductionLineCommand { CountryId = shownCountry, Archetype = archetype, Factories = factories }, out _);
             ClosePicker();
+        }
+
+        void SwitchLine(int lineId, int archetype)
+        {
+            gameState.TryExecuteCommand(new SwitchLineEquipmentCommand { CountryId = shownCountry, LineId = lineId, Archetype = archetype }, out _);
+            ClosePicker();
+            nextRefresh = 0f;
         }
 
         int Step()
@@ -297,6 +337,10 @@ namespace Hoi4.UI
                 e.Q("pl-down").RegisterCallback<ClickEvent>(_ => Move((int)e.userData, +1));
                 e.Q("pl-x5").RegisterCallback<ClickEvent>(_ => { step = step == 5 ? 1 : 5; nextRefresh = 0f; });
                 e.Q("pl-x10").RegisterCallback<ClickEvent>(_ => { step = step == 10 ? 1 : 10; nextRefresh = 0f; });
+                var picture = e.Q("pl-picture");
+                picture.pickingMode = PickingMode.Position;
+                picture.AddToClassList("hoi4-button");
+                picture.RegisterCallback<ClickEvent>(_ => OpenSwitch((int)e.userData));
                 entries.Add(e);
             }
             lineList.Clear();
@@ -337,7 +381,7 @@ namespace Hoi4.UI
                 int position = 0;
                 for (int k = 0; k < lines.Count; k++) if (lines[k].Id == shownIds[i]) { line = lines[k]; position = k; }
                 if (line == null) { structureDirty = true; return; }
-                production.TryGetBuildable(shownCountry, line.Archetype, out var b);
+                var b = production.Describe(shownCountry, line.Equipment); // the line's own equipment
                 FP stock = equipment != null ? equipment.Stock(shownCountry, line.Archetype) : FP.Zero;
                 Hoi4ProductionPresenter.ShowLine(entries[i], line, position, b, b.Name ?? line.Equipment, b.General ?? line.Equipment,
                     b.Picture, lack[line.Archetype], stock, free, step);

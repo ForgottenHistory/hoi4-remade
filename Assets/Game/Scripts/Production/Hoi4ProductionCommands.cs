@@ -53,6 +53,23 @@ namespace Hoi4.Production
         public override void Deserialize(BinaryReader r) { CountryId = r.ReadUInt16(); LineId = r.ReadInt32(); }
     }
 
+    /// <summary>Switch a line to the country's current equipment of an archetype; it keeps part of its efficiency
+    /// (Hoi4Production.SwitchLine).</summary>
+    public sealed class SwitchLineEquipmentCommand : BaseCommand
+    {
+        public ushort CountryId;
+        public int LineId;
+        public int Archetype;
+
+        public override bool Validate(GameState gameState) =>
+            Hoi4Production.Instance != null && Hoi4Production.Instance.CanSwitch(CountryId, LineId, Archetype);
+
+        public override void Execute(GameState gameState) => Hoi4Production.Instance.SwitchLine(CountryId, LineId, Archetype);
+        public override void Undo(GameState gameState) { }
+        public override void Serialize(BinaryWriter w) { w.Write(CountryId); w.Write(LineId); w.Write(Archetype); }
+        public override void Deserialize(BinaryReader r) { CountryId = r.ReadUInt16(); LineId = r.ReadInt32(); Archetype = r.ReadInt32(); }
+    }
+
     /// <summary>Move a line in the priority queue (Position 0 = top). Higher lines get factories first.</summary>
     public sealed class MoveProductionLineCommand : BaseCommand
     {

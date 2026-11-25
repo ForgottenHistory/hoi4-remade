@@ -40,6 +40,10 @@ namespace Hoi4.Production
             foreach (ushort c in production.Countries) if (c != player && c % 7 == day % 7) ids.Add(c);
             foreach (ushort country in ids)
             {
+                // research unlocked newer equipment: lines switch to it (HOI4's AI upgrades its lines)
+                foreach (var l in production.Lines(country).ToList())
+                    if (production.CanSwitch(country, l.Id, l.Archetype))
+                        gameState.TryExecuteCommand(new SwitchLineEquipmentCommand { CountryId = country, LineId = l.Id, Archetype = l.Archetype }, out _);
                 int free = production.Free(country);
                 if (free <= 0 && Hoi4.Deployment.Hoi4ArmyAI.PlanOf(country) == null) continue; // a plan may give lines up
                 var archetypes = production.BuildableArchetypes(country);

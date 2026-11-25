@@ -22,7 +22,8 @@ namespace Hoi4.UI
         public static bool IsArmour(int archetype)
         {
             var names = Hoi4Divisions.Archetypes;
-            return archetype >= 0 && archetype < names.Length && names[archetype].Contains("tank");
+            // tank chassis (light_tank_chassis, light_tank_destroyer_chassis...); anti_tank_equipment is artillery
+            return archetype >= 0 && archetype < names.Length && names[archetype].EndsWith("_chassis");
         }
 
         /// <summary>What the country's divisions lack of each archetype (need - have, summed).</summary>
