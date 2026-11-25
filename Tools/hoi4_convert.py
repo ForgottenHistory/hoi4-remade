@@ -971,7 +971,7 @@ def load_equipment_combat(hoi4: Path, year=1936, every=False):
     return {arch: resolve(name) for arch, name in best.items()}
 
 
-EQUIPMENT_FACTOR_STATS = ("soft_attack", "hard_attack", "defense", "breakthrough", "air_attack")
+EQUIPMENT_FACTOR_STATS = ("soft_attack", "hard_attack", "defense", "breakthrough", "air_attack", "armor_value", "ap_attack")
 
 
 def load_sub_units(hoi4: Path):
@@ -1035,13 +1035,17 @@ def load_sub_units(hoi4: Path):
                     "defense": round(stat("defense"), 2),
                     "breakthrough": round(stat("breakthrough"), 2),
                     "hardness": round(max((e.get("hardness", 0.0) for e in eq), default=0.0), 3),
-                    "armor": round(max((e.get("armor_value", 0.0) for e in eq), default=0.0), 1),
-                    "piercing": round(max((e.get("ap_attack", 0.0) for e in eq), default=0.0), 1),
+                    # its own factor applies to armour and piercing too (recon armoured cars -60% armour)
+                    "armor": round(max((e.get("armor_value", 0.0) for e in eq), default=0.0) * (1 + num("armor_value")), 2),
+                    "piercing": round(max((e.get("ap_attack", 0.0) for e in eq), default=0.0) * (1 + num("ap_attack")), 2),
                     "air_attack": round(stat("air_attack"), 2),
                     # its own factors on its equipment's attack and defence (the stats above are equipment x (1 +
                     # factor) for the 1936 designs; the game recomputes them from the equipment versions a division
                     # holds)
                     "factors": {k: num(k) for k in EQUIPMENT_FACTOR_STATS if num(k)},
+                    # its unit categories (category_all_infantry...): technologies give bonuses to them as well as to
+                    # the sub-unit by name
+                    "categories": [x if x else y for x, _, y in (get(u, "categories") or []) if (x or y)],
                     # division designer: base stats of the sub-unit itself
                     "recovery": num("default_morale"),        # HOI4 recovery rate
                     "recon": num("recon"),
@@ -2017,6 +2021,9 @@ def write_technologies(hoi4: Path, out: Path, tags, loc):
                     elif isinstance(k, str) and k not in TECH_STRUCTURE:
                         if isinstance(v, list):
                             stats = {kk: num(vv) for kk, _, vv in v if isinstance(kk, str) and not isinstance(vv, list)}
+                            terrain = terrain_modifiers(v)  # mountain = { attack = 0.05 }...
+                            if terrain:
+                                stats["terrain"] = terrain
                             if stats:
                                 tech["bonuses"][k] = stats
                         else:

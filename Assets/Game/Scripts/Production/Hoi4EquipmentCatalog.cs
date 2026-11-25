@@ -27,7 +27,7 @@ namespace Hoi4.Production
             public FP Cost;                // build_cost_ic
             public string General, ArchetypeName, Sprite;
             public readonly Dictionary<string, FP> Stats = new Dictionary<string, FP>();
-            // the combat stats a division takes from it (Hoi4Divisions.ApplyEquipmentStats)
+            // the combat stats a division takes from it (Hoi4Divisions.RefreshStats)
             public FP SoftAttack, HardAttack, Defense, Breakthrough, Hardness, ArmorValue, ApAttack, Reliability;
             public bool HasReliability;
 

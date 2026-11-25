@@ -9,7 +9,7 @@ namespace Hoi4.Units
     /// stockpile), as shares of it, newest first (Hoi4EquipmentCatalog.IsNewer). The amount itself lives elsewhere and
     /// stays authoritative: losses, attrition and anything else that scales it leave the shares alone (HOI4 loses
     /// every version alike), only additions and withdrawals of known versions move them. Empty: no version known (the
-    /// division's start version or the archetype's 1936 stats count, Hoi4Divisions.ApplyEquipmentStats).
+    /// division's start version or the archetype's 1936 stats count, Hoi4Divisions.RefreshStats).
     /// </summary>
     public sealed class Hoi4EquipmentMix
     {

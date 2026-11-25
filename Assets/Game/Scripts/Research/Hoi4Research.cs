@@ -35,6 +35,9 @@ namespace Hoi4.Research
         public readonly Dictionary<string, int> Buildings = new Dictionary<string, int>();
         public readonly Dictionary<string, FP> Modifiers = new Dictionary<string, FP>();
         public JObject Ai;           // ai_will_do: base and modifiers with their triggers (Hoi4ResearchAI)
+        // per sub-unit or unit category its stat bonuses ({"artillery_brigade": {"soft_attack": 0.1}}, terrain
+        // under "terrain"), null when none (Hoi4.Units.Hoi4UnitBonuses)
+        public JObject Bonuses;
     }
 
     /// <summary>One research slot. Technology is -1 while the slot is empty. Its tech's progress is SyncProgress at the
@@ -217,6 +220,7 @@ namespace Hoi4.Research
                     gates.Add((t.Index, gate.Value));
                 }
                 t.Ai = o["ai"] as JObject;
+                t.Bonuses = o["bonuses"] is JObject bo && bo.Count > 0 ? bo : null;
                 if (o["places"] is JArray places)
                     foreach (var pl in places)
                         if (pl is JArray a && a.Count >= 3) t.Places.Add(((string)a[0], (float)a[1], (float)a[2]));

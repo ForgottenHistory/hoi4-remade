@@ -30,7 +30,7 @@ namespace Hoi4.Units
     ///   newest first. Then upgrades (HOI4 "upgrading fielded units"): a division with all it needs of an archetype
     ///   but older versions than the stockpile's newest swaps up to 10% of its need a day, the old equipment going
     ///   back to the stockpile, in the same priority order. A division's stats follow what it holds
-    ///   (Hoi4Divisions.ApplyEquipmentStats). Returns to the stockpile (disbanding, cancelled training, a smaller
+    ///   (Hoi4Divisions.RefreshStats). Returns to the stockpile (disbanding, cancelled training, a smaller
     ///   template) go through Return with their versions.
     /// Countries, lines and divisions all go in id or file order: the same on every machine.
     /// </summary>
@@ -243,7 +243,7 @@ namespace Hoi4.Units
                     }
                 for (int a = 0; a < n; a++) resources.SetResource(country, (ushort)(StockResourceBase + a), stock[a]);
                 foreach (var (d, _) in consumers)
-                    if (d.VersionsChanged) Hoi4Divisions.ApplyEquipmentStats(d);
+                    if (d.VersionsChanged) Hoi4Divisions.RefreshStats(d);
             }
             resources.EndBatch();
 

@@ -34,7 +34,7 @@ namespace Hoi4.Units
         public FP[] Need, Have;
         // Which equipment versions its Have is made of, per archetype (null or empty: none known; HOI4 keeps every
         // version apart). Hoi4Equipment delivers the newest first and upgrades full divisions; its attack, defence,
-        // armour and reliability are the held versions' stats weighted by amount (Hoi4Divisions.ApplyEquipmentStats).
+        // armour and reliability are the held versions' stats weighted by amount (Hoi4Divisions.RefreshStats).
         public Hoi4EquipmentMix[] Versions;
         internal bool VersionsChanged; // its stats need recomputing (Hoi4Equipment, end of the day)
 
@@ -49,6 +49,7 @@ namespace Hoi4.Units
         // Terrain modifiers (forest, urban..., river, amphibious): its battalions' averaged, plus its support
         // companies' (Sum). Shared with the other divisions of its template: read only.
         public Dictionary<string, Hoi4TerrainModifier> Terrain;
+        public Dictionary<string, Hoi4TerrainModifier> BaseTerrain; // the template's, before technologies
 
         static readonly Dictionary<string, Hoi4TerrainModifier> NoTerrain = new Dictionary<string, Hoi4TerrainModifier>();
 
@@ -59,8 +60,12 @@ namespace Hoi4.Units
         public struct Part
         {
             public FP Weight; public int[] Archetypes;
-            // its own factors on its equipment's soft attack, hard attack, defence, breakthrough (HOI4 sub-unit stats)
-            public FP SoftFactor, HardFactor, DefenseFactor, BreakthroughFactor;
+            public string SubUnit;  // "infantry": technologies' bonuses go by it and its categories (Hoi4UnitBonuses)
+            public bool Line;       // a battalion (its terrain modifiers are averaged), not a support company
+            public FP Organisation; // its own max_organisation
+            // its own factors on its equipment's soft attack, hard attack, defence, breakthrough, armour, piercing
+            // (HOI4 sub-unit stats)
+            public FP SoftFactor, HardFactor, DefenseFactor, BreakthroughFactor, ArmorFactor, PiercingFactor;
         }
 
         /// <summary>
@@ -400,7 +405,7 @@ namespace Hoi4.Units
                 if (surplus > FP.Zero) Hoi4Equipment.Return(gameState, country, d, a, surplus); // the same mix of versions
                 if (d.Have[a] <= FP.Zero) d.Versions?[a]?.Clear();
             }
-            ApplyEquipmentStats(d);
+            RefreshStats(d);
             FP men = FP.FromInt(d.Manpower);
             if (d.Men > men)
             {
@@ -491,6 +496,7 @@ namespace Hoi4.Units
             if (unitId == 0) return 0;
             division.UnitId = unitId;
             divisions[unitId] = division;
+            RefreshStats(division); // technologies researched while it trained
             return unitId;
         }
 
@@ -509,6 +515,42 @@ namespace Hoi4.Units
         void OnDestroy()
         {
             if (Instance == this) Instance = null;
+            if (Hoi4.Research.Hoi4Research.Instance != null) Hoi4.Research.Hoi4Research.Instance.Researched -= OnResearched;
+        }
+
+        /// <summary>Once research is up, every division takes its country's technology bonuses (the 1936 ones: German
+        /// artillery has interwar artillery's +10%), then each researched technology with unit bonuses refreshes its
+        /// country's divisions.</summary>
+        IEnumerator FollowResearch()
+        {
+            while (Hoi4.Research.Hoi4Research.Instance == null || !Hoi4.Research.Hoi4Research.Instance.IsReady) yield return null;
+            Hoi4UnitBonuses.ClearAll();
+            foreach (var d in divisions.Values) RefreshStats(d);
+            Hoi4.Research.Hoi4Research.Instance.Researched += OnResearched;
+        }
+
+        void OnResearched(ushort country, int tech)
+        {
+            var t = Hoi4.Research.Hoi4Research.Instance?.Tech(tech);
+            if (t?.Bonuses == null) return;
+            Hoi4UnitBonuses.Clear(country);
+            var gs = Engine.ArchonEngine.Instance?.GameState;
+            string tag = gs?.Countries.GetCountryTag(country);
+            if (tag == null) return;
+            int n = 0;
+            FP before = FP.Zero, after = FP.Zero;
+            foreach (var d in divisions.Values)
+            {
+                if (d.Tag != tag) continue;
+                before += d.SoftAttack;
+                RefreshStats(d);
+                after += d.SoftAttack;
+                n++;
+            }
+            // divisions in training refresh when they deploy
+            if (n > 0)
+                Core.Recording.SessionRecorder.Note("units", "tech_bonus", country, 0, 0, 0,
+                    $"{t.Id}: {n} divisions, soft attack {before.ToFloat():0} -> {after.ToFloat():0}");
         }
 
         IEnumerator Start()
@@ -629,6 +671,7 @@ namespace Hoi4.Units
             }
 
             IsLoaded = true;
+            StartCoroutine(FollowResearch());
             ArchonLogger.Log($"Hoi4Divisions: spawned {created} divisions in {countries.Count - missingTags.Count} countries" +
                              (skipped > 0 ? $", skipped {skipped}" : "") +
                              (missingTags.Count > 0 ? $", unknown tags: {string.Join(", ", missingTags)}" : ""), "game_units");
@@ -661,15 +704,75 @@ namespace Hoi4.Units
 
         /// <summary>
         /// A division's attack, defence, breakthrough, hardness, armour, piercing and reliability from the equipment
-        /// versions it holds: per archetype the versions' stats weighted by amount (no version held: its country's
-        /// start version, else the archetype's 1936 design), per sub-unit its equipment's sum x (1 + its own factor)
-        /// for attack and defence, the highest hardness, armour and piercing, the average reliability; per division
-        /// the sub-units' sums, hardness and reliability averaged, armour 30% best + 70% average, piercing 40% best +
-        /// 60% average (Sum's rules for the template's 1936 numbers, which this replaces).
+        /// versions it holds, and its organisation and terrain modifiers, with its country's technologies: per
+        /// archetype the versions' stats weighted by amount (no version held: its country's start version, else the
+        /// archetype's 1936 design); per sub-unit its equipment's sum x (1 + its own factor + its technology bonuses,
+        /// Hoi4UnitBonuses) for attack and defence, the highest hardness, the highest armour and piercing x (1 + own +
+        /// technologies), the average reliability, its max_organisation + technologies; per division the sub-units'
+        /// sums, hardness, reliability and organisation averaged, armour 30% best + 70% average, piercing 40% best +
+        /// 60% average, terrain modifiers the template's plus the technologies' (battalions averaged, support companies
+        /// in full). Without technologies and on the 1936 designs this is exactly Sum's template numbers.
         /// </summary>
-        public static void ApplyEquipmentStats(Hoi4Division d)
+        struct EquipmentStats
+        {
+            public bool Known, HasReliability;
+            public FP Soft, Hard, Defense, Breakthrough, Hardness, Armor, Piercing, Reliability;
+        }
+
+        // RefreshStats' equipment of each archetype for the division at hand (stamp: which division); the simulation
+        // runs on one thread
+        static EquipmentStats[] eqCache = new EquipmentStats[0];
+        static int[] eqStamp = new int[0];
+        static int stamp;
+
+        /// <summary>The equipment stats of an archetype the division holds: its versions weighted by amount, else its
+        /// country's start version, else the archetype's 1936 design (Known false: none).</summary>
+        static EquipmentStats Equipment(Hoi4Division d, int a)
+        {
+            if (a < eqStamp.Length && eqStamp[a] == stamp) return eqCache[a];
+            var st = new EquipmentStats();
+            var mix = d.Versions != null && a < d.Versions.Length ? d.Versions[a] : null;
+            if (mix != null && mix.Count > 0)
+            {
+                st.Known = true;
+                for (int i = 0; i < mix.Count; i++)
+                {
+                    var e = mix.Entry(i);
+                    FP w = mix.Share(i);
+                    st.Soft += e.SoftAttack * w; st.Hard += e.HardAttack * w; st.Defense += e.Defense * w;
+                    st.Breakthrough += e.Breakthrough * w; st.Hardness += e.Hardness * w; st.Armor += e.ArmorValue * w;
+                    st.Piercing += e.ApAttack * w; st.Reliability += e.Reliability * w;
+                    st.HasReliability |= e.HasReliability;
+                }
+            }
+            else
+            {
+                var e = StartVersion(d.Tag, a) ?? (a < fallbackEquipment.Length ? fallbackEquipment[a] : null);
+                if (e != null)
+                {
+                    st.Known = true;
+                    st.Soft = e.SoftAttack; st.Hard = e.HardAttack; st.Defense = e.Defense; st.Breakthrough = e.Breakthrough;
+                    st.Hardness = e.Hardness; st.Armor = e.ArmorValue; st.Piercing = e.ApAttack; st.Reliability = e.Reliability;
+                    st.HasReliability = e.HasReliability;
+                }
+            }
+            if (a < eqStamp.Length) { eqStamp[a] = stamp; eqCache[a] = st; }
+            return st;
+        }
+
+        public static void RefreshStats(Hoi4Division d)
         {
             if (d?.Parts == null || d.Parts.Length == 0) return;
+            var gs = Engine.ArchonEngine.Instance?.GameState;
+            ushort country = gs != null && d.Tag != null ? gs.Countries.GetCountryIdFromTag(d.Tag) : (ushort)0;
+            FP org = FP.Zero;
+            int lines = 0;
+            foreach (var p in d.Parts) if (p.Line) lines++;
+            Dictionary<string, Hoi4TerrainModifier> terrain = null;
+            if (eqStamp.Length != Archetypes.Length) { eqStamp = new int[Archetypes.Length]; eqCache = new EquipmentStats[Archetypes.Length]; }
+            stamp++;
+            string lastSub = null;
+            Hoi4UnitBonuses.Bonus tb = null;
             FP soft = FP.Zero, hard = FP.Zero, def = FP.Zero, bt = FP.Zero, hardness = FP.Zero, rel = FP.Zero;
             FP armorMax = FP.Zero, armorSum = FP.Zero, pierceMax = FP.Zero, pierceSum = FP.Zero;
             foreach (var p in d.Parts)
@@ -678,33 +781,31 @@ namespace Hoi4.Units
                 int relN = 0;
                 foreach (int a in p.Archetypes)
                 {
-                    var mix = d.Versions != null && a < d.Versions.Length ? d.Versions[a] : null;
-                    FP es = FP.Zero, eh = FP.Zero, ed = FP.Zero, eb = FP.Zero, ehd = FP.Zero, ear = FP.Zero, eap = FP.Zero, er = FP.Zero;
-                    bool hasRel = false;
-                    if (mix != null && mix.Count > 0)
-                        for (int i = 0; i < mix.Count; i++)
-                        {
-                            var e = mix.Entry(i);
-                            FP w = mix.Share(i);
-                            es += e.SoftAttack * w; eh += e.HardAttack * w; ed += e.Defense * w; eb += e.Breakthrough * w;
-                            ehd += e.Hardness * w; ear += e.ArmorValue * w; eap += e.ApAttack * w; er += e.Reliability * w;
-                            hasRel |= e.HasReliability;
-                        }
-                    else
-                    {
-                        var e = StartVersion(d.Tag, a) ?? (a < fallbackEquipment.Length ? fallbackEquipment[a] : null);
-                        if (e == null) continue;
-                        es = e.SoftAttack; eh = e.HardAttack; ed = e.Defense; eb = e.Breakthrough;
-                        ehd = e.Hardness; ear = e.ArmorValue; eap = e.ApAttack; er = e.Reliability; hasRel = e.HasReliability;
-                    }
-                    s += es; h += eh; df += ed; b += eb;
-                    hd = FP.Max(hd, ehd); ar = FP.Max(ar, ear); ap = FP.Max(ap, eap);
-                    if (hasRel) { r += er; relN++; }
+                    var e = Equipment(d, a); // once per archetype a division: its battalions share it
+                    if (!e.Known) continue;
+                    s += e.Soft; h += e.Hard; df += e.Defense; b += e.Breakthrough;
+                    hd = FP.Max(hd, e.Hardness); ar = FP.Max(ar, e.Armor); ap = FP.Max(ap, e.Piercing);
+                    if (e.HasReliability) { r += e.Reliability; relN++; }
                 }
-                soft += s * (FP.One + p.SoftFactor);
-                hard += h * (FP.One + p.HardFactor);
-                def += df * (FP.One + p.DefenseFactor);
-                bt += b * (FP.One + p.BreakthroughFactor);
+                if (!ReferenceEquals(p.SubUnit, lastSub)) { lastSub = p.SubUnit; tb = Hoi4UnitBonuses.For(country, p.SubUnit); }
+                soft += s * (FP.One + p.SoftFactor + tb.SoftAttack);
+                hard += h * (FP.One + p.HardFactor + tb.HardAttack);
+                def += df * (FP.One + p.DefenseFactor + tb.Defense);
+                bt += b * (FP.One + p.BreakthroughFactor + tb.Breakthrough);
+                ar *= FP.One + p.ArmorFactor + tb.Armor;
+                ap *= FP.One + p.PiercingFactor + tb.Piercing;
+                org += p.Organisation + tb.Organisation;
+                if (tb.Terrain != null)
+                {
+                    if (terrain == null) terrain = new Dictionary<string, Hoi4TerrainModifier>(d.BaseTerrain ?? new Dictionary<string, Hoi4TerrainModifier>());
+                    FP share = p.Line ? FP.One / System.Math.Max(1, lines) : FP.One;
+                    foreach (var kv in tb.Terrain)
+                    {
+                        terrain.TryGetValue(kv.Key, out var m);
+                        m.Attack += kv.Value.Attack * share; m.Defence += kv.Value.Defence * share; m.Movement += kv.Value.Movement * share;
+                        terrain[kv.Key] = m;
+                    }
+                }
                 hardness += hd;
                 armorMax = FP.Max(armorMax, ar); armorSum += ar;
                 pierceMax = FP.Max(pierceMax, ap); pierceSum += ap;
@@ -716,6 +817,9 @@ namespace Hoi4.Units
             d.Armor = P3 * armorMax + P7 * armorSum / n;
             d.Piercing = P4 * pierceMax + P6 * pierceSum / n;
             d.Reliability = rel / n;
+            d.MaxOrganisation = org / n;
+            if (d.Organisation > d.MaxOrganisation) d.Organisation = d.MaxOrganisation;
+            d.Terrain = terrain ?? d.BaseTerrain;
             d.VersionsChanged = false;
         }
 
@@ -740,7 +844,7 @@ namespace Hoi4.Units
                 var v = StartVersion(tag, i);
                 if (division.Have[i] > FP.Zero && v != null) division.Mix(i).Set(v);
             }
-            ApplyEquipmentStats(division);
+            RefreshStats(division);
             division.Men = FP.FromInt(division.Manpower); // HOI4 1936 divisions have their full manpower; equipment is what they lack
             division.Organisation = division.MaxOrganisation;
             division.Strength = division.FullStrength; // = max strength x start_equipment_factor
@@ -770,7 +874,7 @@ namespace Hoi4.Units
             division.SoftAttack = st.SoftAttack; division.HardAttack = st.HardAttack;
             division.Defense = st.Defense; division.Breakthrough = st.Breakthrough;
             division.Hardness = st.Hardness; division.Armor = st.Armor; division.Piercing = st.Piercing;
-            division.Terrain = st.Terrain;
+            division.Terrain = division.BaseTerrain = st.Terrain;
         }
 
         /// <summary>HOI4 shows a division by its highest-priority battalion (sub-unit `priority`).</summary>
@@ -821,6 +925,8 @@ namespace Hoi4.Units
                     Weight = Val(s, "max_strength"), Archetypes = uses.ToArray(),
                     SoftFactor = f != null ? Val(f, "soft_attack") : FP.Zero, HardFactor = f != null ? Val(f, "hard_attack") : FP.Zero,
                     DefenseFactor = f != null ? Val(f, "defense") : FP.Zero, BreakthroughFactor = f != null ? Val(f, "breakthrough") : FP.Zero,
+                    ArmorFactor = f != null ? Val(f, "armor_value") : FP.Zero, PiercingFactor = f != null ? Val(f, "ap_attack") : FP.Zero,
+                    SubUnit = name, Line = index < regiments.Count, Organisation = Val(s, "max_organisation"),
                 });
                 st.MaxStrength += Val(s, "max_strength");
                 st.MaxOrganisation += Val(s, "max_organisation");
