@@ -33,7 +33,12 @@ namespace Hoi4.Modifiers
         public const string ConsumerGoodsFactor = "consumer_goods_factor";     // stacks multiplicatively
         public const string ConstructionSpeed = "production_speed_buildings_factor";
         public const string ResearchSpeed = "research_speed_factor";
-        static readonly string[] Keys = { ConsumerGoods, ConsumerGoodsFactor, ConstructionSpeed, ResearchSpeed };
+        public const string FactoryOutput = "industrial_capacity_factory";                    // military factory output
+        public const string MaxEfficiency = "production_factory_max_efficiency_factor";       // + points on the cap
+        public const string StartEfficiency = "production_factory_start_efficiency_factor";   // + points on the start
+        public const string EfficiencyGain = "production_factory_efficiency_gain_factor";     // x (1 + value) growth
+        static readonly string[] Keys = { ConsumerGoods, ConsumerGoodsFactor, ConstructionSpeed, ResearchSpeed,
+                                          FactoryOutput, MaxEfficiency, StartEfficiency, EfficiencyGain };
 
         static readonly Dictionary<string, ushort> ids = new Dictionary<string, ushort>();
         static readonly List<string> ideaNames = new List<string>();

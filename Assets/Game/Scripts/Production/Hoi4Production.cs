@@ -13,6 +13,19 @@ using FP = Core.Data.FixedPoint64;
 
 namespace Hoi4.Production
 {
+    /// <summary>A country's production rules from its modifiers (ideas and technologies, Hoi4Modifiers), shared by
+    /// its lines. Measured on a real game's daily lines (Tools/reference/hoi4_production_modifiers.py): the factory
+    /// output factor multiplies, the cap and start efficiency add points (BASE 50% + 10 per machine tools technology,
+    /// 10% + 5 per dispersed industry), the gain factor scales the daily growth.</summary>
+    public sealed class ProductionRates
+    {
+        public static readonly ProductionRates Default = new ProductionRates();
+        public FP Output = FP.One;                     // 1 + industrial_capacity_factory, at least 0
+        public FP Cap = Hoi4Production.MaxEfficiency;   // BASE_FACTORY_MAX_EFFICIENCY_FACTOR + max efficiency factor
+        public FP Start = Hoi4Production.BaseEfficiency; // BASE_FACTORY_START_EFFICIENCY_FACTOR + start factor
+        public FP Gain = FP.One;                       // 1 + production_factory_efficiency_gain_factor
+    }
+
     /// <summary>One HOI4 production line: one equipment, a requested number of military factories, an
     /// efficiency per factory slot, and the IC put into the unit being made.</summary>
     public sealed class ProductionLine
@@ -28,6 +41,7 @@ namespace Hoi4.Production
         public FP StartEfficiency;     // a 1936 line's starting efficiency (zero for lines made in the game)
         public FP OutputToday;         // IC made today (all active factories)
         public int MadeToday;          // whole units made today
+        public ProductionRates Rates = ProductionRates.Default; // the owner's output factor and efficiency rules
 
         public FP AverageEfficiency
         {
@@ -49,16 +63,22 @@ namespace Hoi4.Production
     ///   half of them. Recounted when ownership, control or the buildings change.
     /// - Lines: per country, in priority order. Each day the lines take factories top-down (Requested, at most
     ///   MAX_MIL_FACTORIES_PER_LINE 150) until the country's factories run out; a lost factory comes off the bottom
-    ///   and its slot loses its efficiency, a newly added one starts at BASE_FACTORY_START_EFFICIENCY_FACTOR 10%.
-    /// - Output: per active factory POWERED_FACTORY_SPEED_MIL 4.5 IC x its efficiency a day. Whole units come out
-    ///   once the line's progress reaches the equipment's build_cost_ic; the rest carries over.
+    ///   and its slot loses EFFICIENCY_LOSS_PER_UNUSED_DAY 1% a day down to the start efficiency while unused (it
+    ///   resumes from there if the factory comes back); a new slot starts at the start efficiency,
+    ///   BASE_FACTORY_START_EFFICIENCY_FACTOR 10% + production_factory_start_efficiency_factor (as points).
+    /// - Output: per active factory POWERED_FACTORY_SPEED_MIL 4.5 IC x its efficiency x (1 + industrial_capacity_factory)
+    ///   a day. Whole units come out once the line's progress reaches the equipment's build_cost_ic; the rest carries
+    ///   over.
     /// - First day: until the first game day has passed, factories move freely between the 1936 lines: one added to
     ///   such a line starts at the line's starting efficiency and one taken off costs nothing (HOI4 lets the player
     ///   rearrange the start lines). A line made that day starts at the base like any other new line.
-    /// - Efficiency grows per active factory by 0.001 x cap^2 / current a day, up to
-    ///   BASE_FACTORY_MAX_EFFICIENCY_FACTOR 50% (500 days from 0 to the cap).
-    /// - Not modelled: strategic resources and trade, factory output modifiers (technology, laws, stability), equipment
-    ///   variants and switching a line's equipment (retention), licences, naval and air production.
+    /// - Efficiency grows per active factory by 0.001 x cap^2 / current x (1 + production_factory_efficiency_gain_factor)
+    ///   a day, up to the cap: BASE_FACTORY_MAX_EFFICIENCY_FACTOR 50% + production_factory_max_efficiency_factor (as
+    ///   points; 500 days from 0 to the cap). A slot above the cap stays there.
+    /// - Modifiers: the country's ideas and researched technologies (Hoi4Modifiers, ProductionRates), updated when they
+    ///   change. Rules measured on a real game (Tools/reference/hoi4_production_modifiers.py).
+    /// - Not modelled: strategic resources and trade, stability's factory output (+-), MIO bonuses, equipment variants
+    ///   and switching a line's equipment (retention), licences, naval and air production.
     /// Changes come only through the commands (Hoi4ProductionCommands); the AI (Hoi4ProductionAI) uses the same ones.
     /// Countries, lines and states go in id or list order: the same on every machine.
     /// </summary>
@@ -70,6 +90,9 @@ namespace Hoi4.Production
         public static readonly FP BaseEfficiency = FP.FromFraction(1, 10);        // BASE_FACTORY_START_EFFICIENCY_FACTOR
         public static readonly FP MaxEfficiency = FP.Half;                        // BASE_FACTORY_MAX_EFFICIENCY_FACTOR
         static readonly FP GrowthFactor = FP.FromFraction(1, 1000);
+        static readonly FP UnusedLoss = FP.FromFraction(1, 100);                  // EFFICIENCY_LOSS_PER_UNUSED_DAY 1 (%)
+        static readonly FP MinCap = FP.FromFraction(1, 10);
+        ushort outputId, maxId, startId, gainId;
         public const int MaxFactoriesPerLine = 150;                               // MAX_MIL_FACTORIES_PER_LINE
         public const int MaxLines = 64;
 
@@ -85,6 +108,7 @@ namespace Hoi4.Production
             public readonly Dictionary<int, Buildable> Buildable = new Dictionary<int, Buildable>();
             public int NextLineId = 1;
             public int Factories;
+            public readonly ProductionRates Rates = new ProductionRates();
         }
 
         GameState gameState;
@@ -112,6 +136,7 @@ namespace Hoi4.Production
 
         void OnDestroy()
         {
+            Hoi4.Modifiers.Hoi4Modifiers.Changed -= OnModifiersChanged;
             if (Instance == this) Instance = null;
         }
 
@@ -190,7 +215,7 @@ namespace Hoi4.Production
             FP sum = FP.Zero;
             int n = System.Math.Min(l.Active, l.Efficiency.Count);
             for (int i = 0; i < n; i++) sum += l.Efficiency[i];
-            return sum * FactoryOutput;
+            return sum * FactoryOutput * l.Rates.Output;
         }
 
         // ---- loading ------------------------------------------------------------------------------------
@@ -201,9 +226,15 @@ namespace Hoi4.Production
                    || Engine.ArchonEngine.Instance == null || Engine.ArchonEngine.Instance.GameState == null
                    || Engine.ArchonEngine.Instance.GameState.Provinces == null || !DataFileResolver.IsInitialized
                    || Hoi4Equipment.Instance == null || !Hoi4Equipment.Instance.IsReady
-                   || !Hoi4StateData.Available || !Hoi4Regions.Available) // factories come from the states
+                   || !Hoi4StateData.Available || !Hoi4Regions.Available // factories come from the states
+                   // output and efficiency rules: the modifier system, filled by research (ideas and technologies)
+                   || Hoi4.Research.Hoi4Research.Instance == null || !Hoi4.Research.Hoi4Research.Instance.IsReady)
                 yield return null;
             gameState = Engine.ArchonEngine.Instance.GameState;
+            outputId = Hoi4.Modifiers.Hoi4Modifiers.Id(Hoi4.Modifiers.Hoi4Modifiers.FactoryOutput);
+            maxId = Hoi4.Modifiers.Hoi4Modifiers.Id(Hoi4.Modifiers.Hoi4Modifiers.MaxEfficiency);
+            startId = Hoi4.Modifiers.Hoi4Modifiers.Id(Hoi4.Modifiers.Hoi4Modifiers.StartEfficiency);
+            gainId = Hoi4.Modifiers.Hoi4Modifiers.Id(Hoi4.Modifiers.Hoi4Modifiers.EfficiencyGain);
             var archetypes = Hoi4Divisions.Archetypes;
             var index = new Dictionary<string, int>();
             for (int i = 0; i < archetypes.Length; i++) index[archetypes[i]] = i;
@@ -222,6 +253,7 @@ namespace Hoi4.Production
                 ushort country = gameState.Countries.GetCountryIdFromTag(p.Name);
                 if (country == 0) continue;
                 var cp = new CountryProduction();
+                UpdateRates(country, cp.Rates);
                 if (p.Value["equipment"] is JObject eq)
                     foreach (var e in eq.Properties())
                     {
@@ -245,11 +277,11 @@ namespace Hoi4.Production
                         if (cost <= FP.Zero) continue;
                         int factories = System.Math.Max(1, System.Math.Min(MaxFactoriesPerLine, (int)l["factories"]));
                         // histories start some lines at 100%: the game caps them (research raises the cap)
-                        FP eff = FP.Clamp(Num(l["efficiency"]), BaseEfficiency, MaxEfficiency);
+                        FP eff = FP.Clamp(Num(l["efficiency"]), cp.Rates.Start, cp.Rates.Cap);
                         var line = new ProductionLine
                         {
                             Id = cp.NextLineId++, Archetype = a, Equipment = (string)l["equipment"], Cost = cost,
-                            Requested = factories,
+                            Requested = factories, Rates = cp.Rates,
                         };
                         for (int i = 0; i < factories; i++) line.Efficiency.Add(eff);
                         line.StartEfficiency = eff;
@@ -261,6 +293,7 @@ namespace Hoi4.Production
                 countries[country] = cp;
             }
             IsReady = true;
+            Hoi4.Modifiers.Hoi4Modifiers.Changed += OnModifiersChanged;
             CountFactories();
             AllocateFactories();
             int total = 0;
@@ -306,13 +339,33 @@ namespace Hoi4.Production
                     l.Active = System.Math.Max(0, System.Math.Min(slots, left));
                     left -= l.Active;
                     if (l.Efficiency.Count > slots) l.Efficiency.RemoveRange(slots, l.Efficiency.Count - slots);
-                    // first day: a 1936 line's new or freed slots stay at its starting efficiency
-                    FP fresh = day == 0 && l.StartEfficiency > FP.Zero ? l.StartEfficiency : BaseEfficiency;
+                    // first day: a 1936 line's new or freed slots stay at its starting efficiency. Later a new
+                    // slot starts at the country's start efficiency; a freed one keeps its efficiency and loses
+                    // EFFICIENCY_LOSS_PER_UNUSED_DAY a day while unused (SimulateDay)
+                    bool firstDay = day == 0 && l.StartEfficiency > FP.Zero;
+                    FP fresh = firstDay ? l.StartEfficiency : l.Rates.Start;
                     while (l.Efficiency.Count < slots) l.Efficiency.Add(fresh);
-                    for (int i = l.Active; i < was && i < l.Efficiency.Count; i++) l.Efficiency[i] = fresh;
+                    if (firstDay) for (int i = l.Active; i < was && i < l.Efficiency.Count; i++) l.Efficiency[i] = fresh;
                 }
             }
         }
+
+        void UpdateRates(ushort country, ProductionRates r)
+        {
+            r.Output = FP.Max(FP.Zero, FP.One + Hoi4.Modifiers.Hoi4Modifiers.Sum(country, outputId));
+            r.Cap = FP.Max(MinCap, MaxEfficiency + Hoi4.Modifiers.Hoi4Modifiers.Sum(country, maxId));
+            r.Start = FP.Clamp(BaseEfficiency + Hoi4.Modifiers.Hoi4Modifiers.Sum(country, startId), FP.Zero, r.Cap);
+            r.Gain = FP.Max(FP.Zero, FP.One + Hoi4.Modifiers.Hoi4Modifiers.Sum(country, gainId));
+        }
+
+        void OnModifiersChanged(ushort country)
+        {
+            if (countries.TryGetValue(country, out var c)) UpdateRates(country, c.Rates);
+        }
+
+        /// <summary>The country's production rules (output factor, efficiency cap and start).</summary>
+        public ProductionRates Rates(ushort country) =>
+            countries.TryGetValue(country, out var c) ? c.Rates : ProductionRates.Default;
 
         // ---- daily --------------------------------------------------------------------------------------
 
@@ -330,6 +383,8 @@ namespace Hoi4.Production
                 {
                     l.OutputToday = LineOutput(l);
                     l.MadeToday = 0;
+                    for (int i = l.Active; i < l.Efficiency.Count; i++) // unused slots fall back to the start
+                        if (l.Efficiency[i] > l.Rates.Start) l.Efficiency[i] = FP.Max(l.Rates.Start, l.Efficiency[i] - UnusedLoss);
                     if (l.Active == 0) continue;
                     l.Progress += l.OutputToday;
                     if (l.Progress >= l.Cost)
@@ -341,11 +396,12 @@ namespace Hoi4.Production
                         resources.AddResource(kv.Key, (ushort)(Hoi4Equipment.StockResourceBase + l.Archetype), made);
                         equipment?.CountMade(kv.Key, l.Archetype, made);
                     }
+                    var r = l.Rates;
                     for (int i = 0; i < l.Active; i++)
                     {
                         FP e = l.Efficiency[i];
-                        if (e >= MaxEfficiency) continue;
-                        l.Efficiency[i] = FP.Min(MaxEfficiency, e + GrowthFactor * MaxEfficiency * MaxEfficiency / FP.Max(e, BaseEfficiency));
+                        if (e >= r.Cap) continue; // above the cap (the cap fell, or a history line): stays
+                        l.Efficiency[i] = FP.Min(r.Cap, e + GrowthFactor * r.Gain * r.Cap * r.Cap / FP.Max(e, BaseEfficiency));
                     }
                 }
             resources.EndBatch();
@@ -382,7 +438,7 @@ namespace Hoi4.Production
             var line = new ProductionLine
             {
                 Id = c.NextLineId++, Archetype = archetype, Equipment = b.Equipment, Cost = b.Cost,
-                Requested = System.Math.Max(0, System.Math.Min(MaxFactoriesPerLine, factories)),
+                Requested = System.Math.Max(0, System.Math.Min(MaxFactoriesPerLine, factories)), Rates = c.Rates,
             };
             c.Lines.Add(line);
             AllocateFactories();

@@ -1585,9 +1585,12 @@ def load_idea_modifiers(hoi4: Path):
 
 def history_values(items, key, out):
     """Every value of KEY (a single value or a block's values) at any depth, skipping else branches and date
-    blocks after the start, like collect_blocks."""
+    blocks after the start, like collect_blocks, and branches for a missing DLC (every DLC is assumed owned:
+    `if = { limit = { NOT = { has_dlc = ... } } }` would add a no-DLC idea beside its DLC twin)."""
     for k, _, v in (items if isinstance(items, list) else []):
         if isinstance(k, str) and k.lower() in ("else", "else_if"):
+            continue
+        if isinstance(k, str) and k.lower() == "if" and isinstance(v, list) and has_not_dlc(get(v, "limit")):
             continue
         if isinstance(k, str) and re.fullmatch(r"\d+\.\d+\.\d+", k) and \
                 tuple(int(x) for x in k.split(".")) > (int(OOB_START), 1, 1):

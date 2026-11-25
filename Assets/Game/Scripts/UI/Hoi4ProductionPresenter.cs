@@ -128,7 +128,7 @@ namespace Hoi4.UI
             // efficiency on HOI4's 0-100% scale: the to-max bar (red, yellow tick at its end) up to the cap, the grey
             // fill over it up to the current value, so a line at the 50% cap is half full with the tick in the middle
             // and a line below the cap shows red between its value and the cap
-            float cap = Mathf.Max(3f, Mathf.Round(93f * Mathf.Clamp01(Hoi4Production.MaxEfficiency.ToFloat())));
+            float cap = Mathf.Max(3f, Mathf.Round(93f * Mathf.Clamp01(line.Rates.Cap.ToFloat())));
             float fill = Mathf.Min(cap - 3f, Mathf.Round(93f * Mathf.Clamp01(line.AverageEfficiency.ToFloat())));
             e.Q("pl-eff-max").style.width = cap;
             e.Q("pl-eff-fill").style.width = Mathf.Max(0f, fill);
