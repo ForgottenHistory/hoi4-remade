@@ -537,6 +537,7 @@ def convert(hoi4: Path, out: Path):
     convert_move_arrow(hoi4, out)
     write_country_stats(out, tags, country_stats, owner_manpower, ruling_party)
     write_country_economy(hoi4, out, tags)
+    write_technologies(hoi4, out, tags, loc)
     convert_topbar(hoi4, out, {t: ruling_party.get(t) or "neutrality" for t in tags})
 
     # HOI4 visual style data for the GAME terrain shader
@@ -1702,6 +1703,198 @@ def write_country_economy(hoi4: Path, out: Path, tags):
     lines.append("}")
     (out / "common" / "hoi4_country_economy.json5").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"Country economy: {len(lines) - 3} countries")
+
+
+# Keys of a technology block that are not modifiers (scalars) or unit bonuses (blocks)
+TECH_STRUCTURE = {
+    "research_cost", "start_year", "folder", "path", "categories", "ai_will_do", "allow", "allow_branch",
+    "enable_equipments", "enable_equipment_modules", "enable_subunits", "enable_building", "on_research_complete",
+    "sub_technologies", "dependencies", "xor", "xp_research_type", "xp_unlock_cost", "xp_boost_cost",
+    "xp_research_bonus", "doctrine", "doctrine_name", "show_effect_as_desc", "desc", "force_use_small_tech_layout",
+    "is_special_project_tech", "special_project_specialization", "ai_research_weights", "show_equipment_icon",
+    "enable_tactic", "on_research_complete_limit", "sub_technology", "potential", "visible",
+}
+
+
+def has_not_dlc(block):
+    """Whether a trigger block asks for a DLC to be missing (NOT = { has_dlc = ... })."""
+    for k, _, v in block if isinstance(block, list) else []:
+        if isinstance(k, str) and k.lower() == "not" and isinstance(v, list) and any(
+                isinstance(kk, str) and kk.lower() == "has_dlc" for kk, _, _ in v):
+            return True
+        if isinstance(v, list) and has_not_dlc(v):
+            return True
+    return False
+
+
+def pdx_json(items):
+    """A parsed trigger block as JSON: [[key, op, value or nested list], ...] (keys lower case)."""
+    out = []
+    for k, op, v in items if isinstance(items, list) else []:
+        if isinstance(v, tuple):
+            continue
+        out.append([k.lower() if isinstance(k, str) else None, op, pdx_json(v) if isinstance(v, list) else v])
+    return out
+
+
+def tech_ai(block):
+    """A technology's ai_will_do: base (base or factor, 1 when missing) and the modifiers, each a factor or an add
+    with its trigger (the modifier's other lines, ANDed). The GAME evaluates the triggers it knows."""
+    if not isinstance(block, list):
+        return None
+    ai = {"base": 1.0, "modifiers": []}
+    for k, _, v in block:
+        if k in ("base", "factor") and not isinstance(v, list):
+            try:
+                ai["base"] = float(v)
+            except ValueError:
+                pass
+        elif k == "modifier" and isinstance(v, list):
+            m = {}
+            for kk, _, vv in v:
+                if kk in ("factor", "add") and not isinstance(vv, list):
+                    try:
+                        m[kk] = float(vv)
+                    except ValueError:
+                        pass
+            if m:
+                m["if"] = pdx_json([x for x in v if x[0] not in ("factor", "add")])
+                ai["modifiers"].append(m)
+    return ai
+
+
+def research_strategies(hoi4: Path):
+    """AI strategies (common/ai_strategy) that weight technologies: name, allowed / enable / abort triggers, the
+    research_weight_factor per tech (value 100 = +100%) and research_tech (research it as soon as possible)."""
+    out = []
+    for f in sorted((hoi4 / "common" / "ai_strategy").glob("*.txt")):
+        for name, _, s in parse_pdx(read_text(f)):
+            if not isinstance(s, list):
+                continue
+            weights, force = {}, []
+            for k, _, v in s:
+                if k == "ai_strategy" and isinstance(v, list):
+                    kind, tech = get(v, "type"), get(v, "id")
+                    try:
+                        value = float(get(v, "value", 0))
+                    except ValueError:
+                        continue
+                    if kind == "research_weight_factor" and tech:
+                        weights[tech] = value
+                    elif kind == "research_tech" and tech and value > 0:
+                        force.append(tech)
+            if weights or force:
+                out.append({"name": name, "allowed": pdx_json(get(s, "allowed") or []),
+                            "enable": pdx_json(get(s, "enable") or []), "abort": pdx_json(get(s, "abort") or []),
+                            "weights": weights, "force": force})
+    return out
+
+
+def write_technologies(hoi4: Path, out: Path, tags, loc):
+    """common/hoi4_technologies.json5 for the GAME's research (Hoi4Research): every researchable technology of the
+    tech tree folders (doctrines are their own system, common/doctrines, not here) and each country's 1936 ones.
+    Assumes every DLC is owned (like the reference games): folders and branches only shown without a DLC are left out
+    (armour_folder for nsb_armour_folder, naval_folder for the Man the Guns ones, air_techs_folder for By Blood Alone).
+    Per technology: name (English), cost (research_cost; x BASE_TECH_COST 110 = research points), year (start_year,
+    the ahead-of-time penalty counts from 1 January of it), folder and x/y (grid position), leads_to ([tech, cost
+    coefficient]), requires (dependencies: every one needed), xor (excludes), categories, what it enables (equipment,
+    sub-units, buildings with the level), modifiers (country-wide, e.g. research_speed_factor), bonuses (per sub-unit
+    or category stat blocks), focus_only (allow = { always = no }: only a focus or event gives it) and ai (ai_will_do:
+    base and modifiers with their triggers). ai_strategies: the AI strategies weighting technologies.
+    Prototype: Tools/prototypes/research/research_cost.py (cost and speed checked against a real game)."""
+    folders = {}
+    tags_file = hoi4 / "common" / "technology_tags" / "00_technology.txt"
+    for key, _, block in parse_pdx(read_text(tags_file)):
+        if key != "technology_folders" or not isinstance(block, list):
+            continue
+        for name, _, f in block:
+            if not isinstance(f, list) or str(get(f, "doctrine", "no")).lower() == "yes":
+                continue
+            if has_not_dlc(get(f, "available") or []):
+                continue
+            folders[name] = {"ledger": get(f, "ledger") or ""}
+
+    techs = {}
+    for f in sorted((hoi4 / "common" / "technologies").glob("*.txt")):
+        for key, _, block in parse_pdx(read_text(f)):
+            if key != "technologies" or not isinstance(block, list):
+                continue
+            consts = {k: v for k, _, v in block if isinstance(k, str) and k.startswith("@")}
+
+            def num(v, default=0.0):
+                v = consts.get(v, v) if isinstance(v, str) else v
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    return default
+            for name, _, t in block:
+                if not isinstance(t, list) or not isinstance(name, str) or name.startswith("@"):
+                    continue
+                folder = get(t, "folder")
+                fname = get(folder, "name") if isinstance(folder, list) else None
+                if fname not in folders or has_not_dlc(get(t, "allow_branch") or []):
+                    continue
+                pos = get(folder, "position") if isinstance(folder, list) else None
+                tech = {"name": loc.get(name) or name, "cost": num(get(t, "research_cost")),
+                        "year": int(num(get(t, "start_year"))), "folder": fname,
+                        "x": num(get(pos, "x")) if isinstance(pos, list) else 0.0,
+                        "y": num(get(pos, "y")) if isinstance(pos, list) else 0.0,
+                        "leads_to": [], "requires": [], "xor": [], "categories": [], "equipment": [], "subunits": [],
+                        "buildings": {}, "modifiers": {}, "bonuses": {}}
+                for k, _, v in t:
+                    k = k.lower() if isinstance(k, str) else k   # the files write XOR and xor
+                    if k == "path" and isinstance(v, list) and get(v, "leads_to_tech"):
+                        tech["leads_to"].append([get(v, "leads_to_tech"), num(get(v, "research_cost_coeff"), 1.0)])
+                    elif k == "dependencies" and isinstance(v, list):
+                        tech["requires"] += [kk for kk, _, _ in v if isinstance(kk, str)]
+                    elif k == "xor" and isinstance(v, list):
+                        tech["xor"] += values(v)
+                    elif k == "categories" and isinstance(v, list):
+                        tech["categories"] += values(v)
+                    elif k == "enable_equipments" and isinstance(v, list):
+                        tech["equipment"] += values(v)
+                    elif k == "enable_subunits" and isinstance(v, list):
+                        tech["subunits"] += [x for x in values(v)]
+                    elif k == "enable_building" and isinstance(v, list) and get(v, "building"):
+                        tech["buildings"][get(v, "building")] = int(num(get(v, "level"), 1))
+                    elif k == "ai_will_do":
+                        tech["ai"] = tech_ai(v)
+                    elif k == "allow" and isinstance(v, list) and str(get(v, "always", "")).lower() == "no":
+                        tech["focus_only"] = True
+                    elif isinstance(k, str) and k not in TECH_STRUCTURE:
+                        if isinstance(v, list):
+                            stats = {kk: num(vv) for kk, _, vv in v if isinstance(kk, str) and not isinstance(vv, list)}
+                            if stats:
+                                tech["bonuses"][k] = stats
+                        else:
+                            n = num(v, None)
+                            if n is not None:
+                                tech["modifiers"][k] = n
+                # a tech that enables equipment or a sub-unit has no name of its own: HOI4 shows the equipment's
+                if tech["name"] == name:
+                    tech["name"] = next((loc[e] for e in tech["equipment"] + tech["subunits"] if e in loc), name)
+                techs[name] = {k: v for k, v in tech.items() if v or k in ("cost", "year", "x", "y")}
+
+    # paths into branches left out (the no-DLC variants) go nowhere here
+    for t in techs.values():
+        for k in ("leads_to", "requires", "xor"):
+            if k in t:
+                t[k] = [x for x in t[k] if (x[0] if isinstance(x, list) else x) in techs]
+                if not t[k]:
+                    del t[k]
+    countries = {}
+    for tag in sorted(tags):
+        files = sorted((hoi4 / "history" / "countries").glob(f"{tag} - *.txt"))
+        if files:
+            countries[tag] = sorted(t for t in known_technologies(parse_pdx(read_text(files[0]))) if t in techs)
+    strategies = [s for s in research_strategies(hoi4)
+                  if any(t in techs for t in list(s["weights"]) + s["force"])]
+    doc = {"folders": folders, "technologies": techs, "countries": countries, "ai_strategies": strategies}
+    (out / "common" / "hoi4_technologies.json5").write_text(
+        "// Generated by hoi4_convert.py from common/technologies, common/technology_tags and history/countries\n"
+        + json.dumps(doc, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(f"Technologies: {len(techs)} in {len(folders)} folders, {len(countries)} countries, "
+          f"{len(strategies)} AI research strategies")
 
 
 def write_country_stats(out: Path, tags, country_stats, owner_manpower, ruling_party=None):

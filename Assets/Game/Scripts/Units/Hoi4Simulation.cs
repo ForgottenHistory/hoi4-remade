@@ -21,9 +21,9 @@ namespace Hoi4.Units
 
         // Timing, per day: [0] combat hourly, [1] plans hourly, [2] AI hourly (break-offs and that hour's
         // countries' attacks), [3] recorder, [4] combat daily, [5] equipment, [6] manpower, [7] plans daily,
-        // [8] war, [9] AI wars, [10] production, [11] AI production, [12] construction, [13] AI construction, [14] deployment, [15] AI deployment, [16] AI army, [17] railways, [18] supply, [19] weather, [20] research; then the worst single hour of [0], [1], [2], and the plans' daily line refresh
+        // [8] war, [9] AI wars, [10] production, [11] AI production, [12] construction, [13] AI construction, [14] deployment, [15] AI deployment, [16] AI army, [17] railways, [18] supply, [19] weather, [20] research, [21] AI research; then the worst single hour of [0], [1], [2], and the plans' daily line refresh
         static readonly string[] PerfNames =
-            { "combat_h", "plans_h", "ai_h", "recorder", "combat_d", "equipment", "manpower", "plans_d", "war", "ai_wars", "production", "ai_production", "construction", "ai_construction", "deployment", "ai_deployment", "ai_army", "railways", "supply", "weather", "research" };
+            { "combat_h", "plans_h", "ai_h", "recorder", "combat_d", "equipment", "manpower", "plans_d", "war", "ai_wars", "production", "ai_production", "construction", "ai_construction", "deployment", "ai_deployment", "ai_army", "railways", "supply", "weather", "research", "ai_research" };
         static readonly string[] MaxNames = { "combat_h_max", "plans_h_max", "ai_h_max", "plans_refresh", "plans_distribute", "plans_ai" };
         readonly double[] perf = new double[PerfNames.Length];
         // One profiler marker per step, named like the perf.tsv columns: they show in a normal (not deep) capture
@@ -147,6 +147,8 @@ namespace Hoi4.Units
                 (int)(Engine.ArchonEngine.Instance.GameState.Time.CurrentTick / 24))); // AI factories to lines, each country weekly
             if (RunsAI) Measure(13, () => Hoi4.Construction.Hoi4ConstructionAI.SimulateDay(
                 (int)(Engine.ArchonEngine.Instance.GameState.Time.CurrentTick / 24))); // AI construction queue, each country weekly
+            if (RunsAI) Measure(21, () => Hoi4.Research.Hoi4ResearchAI.SimulateDay(
+                (int)(Engine.ArchonEngine.Instance.GameState.Time.CurrentTick / 24))); // AI fills empty research slots
             if (RunsAI) Measure(15, () => Hoi4.Deployment.Hoi4DeploymentAI.SimulateDay(
                 (int)(Engine.ArchonEngine.Instance.GameState.Time.CurrentTick / 24))); // AI training orders, each country weekly
             WritePerf();

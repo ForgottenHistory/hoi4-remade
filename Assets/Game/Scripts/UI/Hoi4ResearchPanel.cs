@@ -200,12 +200,14 @@ namespace Hoi4.UI
             {
                 var e = entries[i];
                 var slot = slots[i];
-                bool empty = slot.Technology == null;
+                bool empty = slot.Empty;
                 e.Q("rs-glow").style.display = empty ? DisplayStyle.Flex : DisplayStyle.None;
                 e.Q("rs-glow-b").style.display = empty ? DisplayStyle.Flex : DisplayStyle.None;
-                e.Q<Label>("rs-entry-title").text = empty ? EmptyText : slot.Technology;
-                // empty: the research saved so far, out of the 30 days a slot can save
-                float fill = empty ? Mathf.Clamp01((slot.Saved / Hoi4Research.SavedMaxDays).ToFloat()) : 0f;
+                e.Q<Label>("rs-entry-title").text = empty ? EmptyText : research.Tech(slot.Technology).Name;
+                // empty: the research saved so far, out of the 30 days a slot can save; else the tech's progress
+                FP cost = empty ? FP.Zero : research.Cost(shownCountry, slot.Technology);
+                float fill = empty ? Mathf.Clamp01((research.Saved(shownCountry, i) / Hoi4Research.SavedMaxDays).ToFloat())
+                    : cost > FP.Zero ? Mathf.Clamp01((research.Progress(shownCountry, slot.Technology) / cost).ToFloat()) : 0f;
                 e.Q("rs-bar").style.width = Mathf.Round(BarWidth * fill);
             }
         }

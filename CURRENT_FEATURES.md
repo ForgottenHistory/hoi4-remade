@@ -16,7 +16,7 @@
 
 **Construction:** Civilian factories and consumer goods from economy laws, a construction queue (civilian and military factories, infrastructure) with infrastructure speed-up and shared slots, construction AI and the construction screen
 
-**Research:** Research slots per country (1936 history), research speed, empty slots saving up to 30 days of research, the research screen's slots tab (technologies not in yet)
+**Research:** The tech tree's technologies with each country's 1936 ones, research slots and speed, researching a tech in a slot at HOI4's rate (ahead-of-time penalty included, checked against a real game), empty slots saving up to 30 days, a research AI scoring techs with HOI4's own AI weights, the research screen's slots tab (no tech picker yet; finished techs unlock nothing yet)
 
 **Recruit & deploy:** Training lines per deployment order take manpower up front, get equipment after the field, train up to their equipment level and deploy at the capital or a chosen province; recruitment AI and the recruit & deploy screen
 
@@ -134,10 +134,15 @@ The goal is to stress-test Archon-Engine, not to ship a game. Big visual wins ar
 
 - **Slots** - `set_research_slots` from the country's 1936 history, else `BASE_RESEARCH_SLOTS` (2), in `common/hoi4_country_economy.json5`. Matches real HOI4 Germany (4)
 - **Research speed** - `research_speed_factor` summed over the 1936 ideas and technologies (Germany +1%, as in HOI4)
-- **Saved research** - Each day an empty slot saves a day of research, up to `BASE_RESEARCH_POINTS_SAVED` (30), for the next technology picked in it
+- **Technologies** - `common/hoi4_technologies.json5` (converter `write_technologies`): the tech tree folders' technologies (328; doctrines are a separate system and not in), every DLC assumed owned (the no-DLC folders and branches left out), with name, cost, start year, folder and grid position, paths (with their cost coefficient), dependencies, exclusions, what they enable and their modifiers; each country's 1936 technologies from its history
+- **Researching** - A tech needs research_cost x 110 points (`BASE_TECH_COST`). A slot gains each day max(0.1, 1 + research speed) / (1 + 2 x years before 1 January of its start year), recomputed daily, so research ahead of time speeds up as the year nears. It can start once any one tech leading to it is known (a root always), every dependency is known and nothing it excludes is. Progress stays with a tech that leaves its slot. A finished tech is known and adds its research speed. Checked against a real 1936 German game's daily save blocks (prototype `Tools/prototypes/research/research_cost.py`: finished techs' points, the start factors, the daily penalty, the any-parent rule)
+- **Saved research** - Each day an empty slot saves a day of research, up to `BASE_RESEARCH_POINTS_SAVED` (30); picking a tech in it spends them at once at the slot's rate
+- **Cost** - Nothing runs per slot per day: when a tech goes into a slot, or the country's speed changes, its finish day is found by summing the coming days' rates and booked; a day only finishes the slots booked for it. Progress is summed on demand (the research screen's one country) and saved days are the days since the slot emptied: the same sums as a daily tick. The AI compiles the HOI4 triggers once into typed nodes
+- **Commands** - `SetResearchCommand` (a tech in a slot, or -1 to empty it)
+- **Research AI** - `Hoi4ResearchAI`, on the host, each country but the player's on its own day of a 28-day cycle (waiting costs nothing: an empty slot saves up to 30 days and the pick spends them) when it has an empty slot. A tech excluded by one in another slot is not picked. Score: the tech's `ai_will_do` (base, then the modifiers whose triggers hold: AND/OR/NOT, date, tag, is_major, has_war, has_tech, factory counts, DLC owned; others left out) x active `common/ai_strategy` research weights (research_tech ones picked first), none past the AI's ahead-of-time limit (penalty 3), / (1 + 4 x the penalty), x 60 / (60 + days to research). Pick at random among the techs scoring 75% of the best (NAI defines). Majors: the 7 with most factories plus any over 0.7 x their average. In two recorded HOI4 games the AI's real picks fall in that band 78-79% of the time, a random tech's chance 3-4%; by 15 February 1937 AI countries have 4.65 techs on average, the real AI 5.06 (prototype `Tools/prototypes/research/research_ai.py`)
 - **Research screen** - HOI4's `countrytechnologyview.gui` layout and art, opened by the top bar's research button or W (shares the left side with production, construction and deployment): limited bonuses, research speed, one entry per slot; an empty slot glows (the two glow frames blended) and its bar shows the saved research out of 30 days. The Experimental Facilities tab is a placeholder (prototype `Tools/prototypes/research/render_research.py`)
-- **Not yet** - Technologies, the tech tree, picking and progress, experimental facilities, limited bonuses
-- **Recording** - A `research` column in `perf.tsv`
+- **Not yet** - The tech tree screen to pick from, what finished techs unlock (equipment, sub-units, buildings) and their other modifiers, limited bonuses, design teams, doctrines, experimental facilities
+- **Recording** - `research` notes (`start`, `done`), `research_ai` `pick` notes (the pick, the band, the best), `research` and `ai_research` columns in `perf.tsv`
 
 ## Recruit and Deploy
 
