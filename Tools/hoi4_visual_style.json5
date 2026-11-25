@@ -76,6 +76,9 @@
     // Falling weather when zoomed in (Hoi4/Precipitation, Hoi4WeatherSky): [opacity, screen px per map px where it
     // starts showing, where it is full, density]. Rain streaks, snowflakes, lightning over thunderstorms
     _Hoi4Precip:    { value: [0.6, 1.0, 2.0, 1.0], type: "vector" },
+    // Fog of rain and thunderstorms in the same zoom range (Hoi4Fog.hlsl): [ground desaturation, haze alpha, puff
+    // alpha, puff size map px]. Prototype weather/weather_fog.py. Off for now (all zero); tuned: [0.35, 0.3, 0.6, 50]
+    _Hoi4Fog:       { value: [0, 0, 0, 50], type: "vector" },
   },
 
   // Mesh border classes (Archon MeshGeometry borders). HOI4 border.shader: strips are

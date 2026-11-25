@@ -260,6 +260,7 @@ float3 Hoi4Light(float3 albedo, float3 normal, float3 positionWS, float gloss, f
 
 // Snow and mud on land, ice on water
 #include "Hoi4Weather.hlsl"
+#include "Hoi4Fog.hlsl"
 
 // ----------------------------------------------------------------------------
 // Water
@@ -420,7 +421,9 @@ float4 Hoi4Render(float2 uv, float3 positionWS, float4 countryColor)
         land = Hoi4Light(albedo, s.normal, positionWS, s.gloss, s.spec * (1 - countryColor.a));
     }
 
-    return float4(lerp(water, land, s.land), 1);
+    uint mw, mh;
+    _Hoi4TerrainIndex.GetDimensions(mw, mh);
+    return float4(Hoi4FogGround(lerp(water, land, s.land), uv, float2(mw, mh)), 1);
 }
 
 #endif // HOI4_TERRAIN_INCLUDED

@@ -13,6 +13,8 @@ Shader "Hoi4/Precipitation"
     //     layers of each. A streak has a bright head at the bottom and a tail fading upward, and reads the mask at its
     //     own spot, so it is whole or absent, never cut by the soft edge of a rain area. All layers fall at one speed
     //     (at different speeds, overlapping streaks of two layers drifted apart and read as one streak splitting).
+    //   - Fog under them where it rains (Hoi4Fog.hlsl, shared with the terrain shader, which washes the colour out of the
+    //     ground under it): a pale haze with lighter puffs drifting in it, greyer over a thunderstorm.
     //   - Lightning in map space: now and then a patch of a thunderstorm lights up for a moment, shaped by cloud noise
     //     (HOI4: a flashing cloud puff, lightning_storm.asset), kept inside its 120 map px cell.
     // _Hoi4PrecipTex (Hoi4WeatherSky, map space): r rain, g snow, b thunderstorm, each 0..1, blurred.
@@ -46,10 +48,9 @@ Shader "Hoi4/Precipitation"
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Assets/Archon-Engine/Shaders/Includes/DayNight.hlsl"
+            #include "Assets/Game/Shaders/MapModes/Hoi4Fog.hlsl"   // _Hoi4PrecipTex, _Hoi4Precip, the fog
 
-            TEXTURE2D(_Hoi4PrecipTex);
             SAMPLER(sampler_Hoi4PrecipTex);
-            float4 _Hoi4Precip;
             float4 _Hoi4PrecipView;    // Hoi4WeatherSky, every frame: xy = map px at the screen centre (y from the south),
                                        // zw = viewport units per map px there (x across, y up the screen); z 0 = none
 
@@ -178,42 +179,62 @@ Shader "Hoi4/Precipitation"
                 float4 cs = TransformWorldToHClip(posWS);
                 float worldPerScreenPx = 2.0 * max(cs.w, 1e-3) / (abs(UNITY_MATRIX_P[1][1]) * _ScreenParams.y);
                 float screenPxPerMapPx = _WorldPerMapPx / worldPerScreenPx;
-                float2 zoom = _Hoi4Precip.z > _Hoi4Precip.y ? _Hoi4Precip.yz : float2(1.0, 2.0);
-                float fade = smoothstep(zoom.x, zoom.y, screenPxPerMapPx);
+                float fade = Hoi4FogZoom(screenPxPerMapPx);
                 if (fade <= 0.001) discard;
 
                 float2 mapUV = ArchonWorldToMapUV(posWS, _MapWorldBounds);
                 float4 m = SAMPLE_TEXTURE2D_LOD(_Hoi4PrecipTex, sampler_Hoi4PrecipTex, mapUV, 0);
                 if (m.r + m.g + m.b <= 0.01) discard;
 
+                // Fog: haze, then puffs over it (premultiplied), linear colours from the prototype's sRGB ones
+                float2 mapPx = mapUV * MapSizePx();
+                float fog = _Hoi4Fog.y + _Hoi4Fog.z > 0 ? Hoi4FogAmount(mapPx, m) * fade : 0;   // off: both alphas 0
+                float4 fogC = 0;
+                if (fog > 0.001)
+                {
+                    float storm = saturate(m.b);
+                    float hazeA = fog * _Hoi4Fog.y;
+                    float puffA = fog * Hoi4FogPuffs(mapPx, storm) * _Hoi4Fog.z;
+                    float3 hazeC = lerp(float3(0.604, 0.620, 0.694), float3(0.342, 0.342, 0.367), storm);
+                    float3 puffC = lerp(float3(0.890, 0.890, 0.932), float3(0.709, 0.709, 0.745), storm);
+                    hazeC = ArchonApplyNight(hazeC, mapUV, 1.0);
+                    puffC = ArchonApplyNight(puffC, mapUV, 1.0);
+                    fogC = float4(hazeC * hazeA * (1.0 - puffA) + puffC * puffA, 1.0 - (1.0 - hazeA) * (1.0 - puffA));
+                }
+
                 // View-anchored pattern position in map px: around the map point at the screen centre, screen-aligned
                 // (rain falls straight down the screen), so it pans and zooms with the map
-                if (_Hoi4PrecipView.z <= 0) discard;
                 float2 ndc = cs.xy / cs.w;
                 ndc.y *= _ProjectionParams.x;                               // up the screen, flipped targets too
-                float2 p = _Hoi4PrecipView.xy + ndc * 0.5 / _Hoi4PrecipView.zw;
+                float2 p = _Hoi4PrecipView.xy + ndc * 0.5 / max(_Hoi4PrecipView.zw, 1e-6);
                 float2 pxPerUnit = _Hoi4PrecipView.zw * _ScreenParams.xy;   // screen px per pattern map px
                 float density = _Hoi4Precip.w > 0 ? _Hoi4Precip.w : 1.0;
+                // The pattern is sized at the view centre: fade it by the zoom there too. Zoomed out, streaks a screen
+                // pixel wide would outgrow their cells, line up on a regular grid and shimmer as moire bands.
+                float fall = fade * Hoi4FogZoom(min(pxPerUnit.x, pxPerUnit.y));
 
                 float rain = 0;
-                if (m.r > 0.01)
+                bool view = _Hoi4PrecipView.z > 0;
+                if (view && fall > 0.001 && m.r > 0.01)
                 {
-                    float halfWidth = 1.1 / pxPerUnit.x;                   // ~1.5 screen px across the 45-degree streak
+                    float halfWidth = min(1.1 / pxPerUnit.x, 0.4);         // ~1.5 screen px across, never wider than the cell allows
                     rain = RainLayer(p, 9.0, 4.0, 48.0, halfWidth, 0.12 * density, 0.0)
                          + 0.7 * RainLayer(p, 6.0, 2.8, 48.0, halfWidth * 0.8, 0.12 * density, 17.0);
                 }
                 float snow = 0;
-                if (m.g > 0.01)
+                if (view && fall > 0.001 && m.g > 0.01)
                 {
-                    float flakeR = max(0.15, 1.1 / pxPerUnit.y);           // at least about two screen px across
+                    float flakeR = clamp(1.1 / pxPerUnit.y, 0.15, 0.5);    // about two screen px across, small within its cell
                     snow = SnowLayer(p, 4.0, flakeR, 4.5, 0.25 * density, 3.0)
                          + 0.7 * SnowLayer(p, 2.6, flakeR * 0.7, 4.5, 0.22 * density, 11.0);
                 }
-                float flash = m.b > 0.01 ? Lightning(mapUV * MapSizePx()) * saturate(m.b * 1.5) : 0;
+                float flash = m.b > 0.01 ? Lightning(mapPx) * saturate(m.b * 1.5) : 0;
 
                 float opacity = (_Hoi4Precip.x > 0 ? _Hoi4Precip.x : 0.6) * fade;
-                float a = saturate(rain * 0.55 + snow * 0.85) * opacity;
+                float a = saturate(rain * 0.55 + snow * 0.85) * opacity * (fall / max(fade, 1e-3));
                 float3 c = ArchonApplyNight(float3(0.9, 0.92, 1.0), mapUV, 1.0) * a;
+                c += fogC.rgb * (1.0 - a);                                    // the fog under the rain
+                a += fogC.a * (1.0 - a);
                 c += flash * 0.4 * fade * float3(0.85, 0.88, 1.0);           // additive: lights up the cloud below
                 return half4(c, a);
             }
