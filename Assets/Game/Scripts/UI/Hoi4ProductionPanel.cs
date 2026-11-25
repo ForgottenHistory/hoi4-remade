@@ -148,6 +148,7 @@ namespace Hoi4.UI
             if (panel == null || Player == 0) return;
             // the state view lives behind the left-side panels: drop the selected state (and its panel)
             Engine.ArchonEngine.Instance?.ProvinceSelector?.ClearSelection();
+            if (Hoi4.Units.Hoi4UnitSelection.Instance != null) Hoi4.Units.Hoi4UnitSelection.Instance.Clear(); // and the divisions
             if (Hoi4DiplomacyPanel.IsOpen) Hoi4DiplomacyPanel.Instance.Close(); // back to the map mode before diplomacy
             if (Hoi4ConstructionPanel.IsOpen) Hoi4ConstructionPanel.Instance.Close(); // they share the left side
             if (Hoi4DeploymentPanel.IsOpen) Hoi4DeploymentPanel.Instance.Close();
