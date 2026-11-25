@@ -40,6 +40,7 @@ namespace Hoi4.Units
                 : $"<color=#8fd96b>{count}</color> Divisions";
 
             var list = panel.Q<ScrollView>("list");
+            Hoi4.UI.Hoi4Scrollbar.Apply(list);
             list.Clear();
             list.style.height = shown * CardHeight;
             for (int i = 0; i < cards; i++)

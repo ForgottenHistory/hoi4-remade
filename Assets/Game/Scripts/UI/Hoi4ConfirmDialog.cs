@@ -69,6 +69,7 @@ namespace Hoi4.UI
             root.Add(dialog);
             title = dialog.Q<Label>("cd-title");
             scroll = dialog.Q<ScrollView>("cd-scroll");
+            Hoi4Scrollbar.ApplyAll(dialog); // HOI4's scrollbars
             text = dialog.Q<Label>("cd-text");
             dialog.Q("cd-cancel").RegisterCallback<ClickEvent>(_ => Close());
             dialog.Q("cd-ok").RegisterCallback<ClickEvent>(_ => Accept());

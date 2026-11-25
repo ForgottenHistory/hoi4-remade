@@ -12,6 +12,7 @@ Usage:
 """
 import argparse
 import filecmp
+import copy
 import json
 import colorsys
 import os
@@ -538,6 +539,8 @@ def convert(hoi4: Path, out: Path):
     write_country_stats(out, tags, country_stats, owner_manpower, ruling_party)
     write_country_economy(hoi4, out, tags)
     write_technologies(hoi4, out, tags, loc)
+    convert_techtree_gfx(hoi4, out, loc)
+    convert_scrollbar_gfx(hoi4, out)
     convert_topbar(hoi4, out, {t: ruling_party.get(t) or "neutrality" for t in tags})
 
     # HOI4 visual style data for the GAME terrain shader
@@ -1716,6 +1719,11 @@ TECH_STRUCTURE = {
 }
 
 
+def loc_refs(text, loc):
+    """Localisation text with its $key$ references resolved ("$gw_armored_car_equipment$" -> "Armored Car I")."""
+    return re.sub(r"\$(\w+)\$", lambda m: loc.get(m.group(1), m.group(1)), text or "")
+
+
 def has_not_dlc(block):
     """Whether a trigger block asks for a DLC to be missing (NOT = { has_dlc = ... })."""
     for k, _, v in block if isinstance(block, list) else []:
@@ -1815,6 +1823,7 @@ def write_technologies(hoi4: Path, out: Path, tags, loc):
             folders[name] = {"ledger": get(f, "ledger") or ""}
 
     techs = {}
+    raw_parents = {}   # every path in the files, the techs left out included
     for f in sorted((hoi4 / "common" / "technologies").glob("*.txt")):
         for key, _, block in parse_pdx(read_text(f)):
             if key != "technologies" or not isinstance(block, list):
@@ -1830,15 +1839,22 @@ def write_technologies(hoi4: Path, out: Path, tags, loc):
             for name, _, t in block:
                 if not isinstance(t, list) or not isinstance(name, str) or name.startswith("@"):
                     continue
-                folder = get(t, "folder")
-                fname = get(folder, "name") if isinstance(folder, list) else None
-                if fname not in folders or has_not_dlc(get(t, "allow_branch") or []):
+                for k, _, pth in t:
+                    if k == "path" and isinstance(pth, list) and get(pth, "leads_to_tech"):
+                        raw_parents.setdefault(get(pth, "leads_to_tech"), set()).add(name)
+                # a tech may sit in several folders (motorised_infantry: infantry and support); the first one we
+                # keep is its folder, every one we keep goes in places [[folder, x, y], ...]
+                places = []
+                for k, _, f in t:
+                    if k == "folder" and isinstance(f, list) and get(f, "name") in folders:
+                        pos = get(f, "position")
+                        places.append([get(f, "name"), num(get(pos, "x")) if isinstance(pos, list) else 0.0,
+                                       num(get(pos, "y")) if isinstance(pos, list) else 0.0])
+                if not places or has_not_dlc(get(t, "allow_branch") or []):
                     continue
-                pos = get(folder, "position") if isinstance(folder, list) else None
                 tech = {"name": loc.get(name) or name, "cost": num(get(t, "research_cost")),
-                        "year": int(num(get(t, "start_year"))), "folder": fname,
-                        "x": num(get(pos, "x")) if isinstance(pos, list) else 0.0,
-                        "y": num(get(pos, "y")) if isinstance(pos, list) else 0.0,
+                        "year": int(num(get(t, "start_year"))), "folder": places[0][0],
+                        "x": places[0][1], "y": places[0][2], "places": places,
                         "leads_to": [], "requires": [], "xor": [], "categories": [], "equipment": [], "subunits": [],
                         "buildings": {}, "modifiers": {}, "bonuses": {}}
                 for k, _, v in t:
@@ -1873,8 +1889,28 @@ def write_technologies(hoi4: Path, out: Path, tags, loc):
                 # a tech that enables equipment or a sub-unit has no name of its own: HOI4 shows the equipment's
                 if tech["name"] == name:
                     tech["name"] = next((loc[e] for e in tech["equipment"] + tech["subunits"] if e in loc), name)
+                tech["name"] = loc_refs(tech["name"], loc)
+                # the large tech-tree card shows the equipment's design name: the country's own (GER_infantry_equipment_0
+                # "Gewehr 98") where it has one, else the generic one
+                if tech["equipment"]:
+                    e = tech["equipment"][0]
+
+                    def short(key):   # the card shows the short name (GER_motorized_equipment_0_short "ALZ 13")
+                        return loc.get(f"{key}_short") or loc.get(key)
+                    tech["equipment_name"] = loc_refs(short(e) or tech["name"], loc)
+                    own = {tag: loc_refs(short(f"{tag}_{e}"), loc) for tag in tags if short(f"{tag}_{e}")}
+                    if own:
+                        tech["equipment_names"] = own
                 techs[name] = {k: v for k, v in tech.items() if v or k in ("cost", "year", "x", "y")}
 
+    # a branch reached only through techs left out is hidden too (tech_special_forces, no-DLC only, is the one way to
+    # advanced_special_forces and what follows it)
+    while True:
+        orphans = [n for n in techs if raw_parents.get(n) and not any(p in techs for p in raw_parents[n])]
+        if not orphans:
+            break
+        for n in orphans:
+            del techs[n]
     # paths into branches left out (the no-DLC variants) go nowhere here
     for t in techs.values():
         for k in ("leads_to", "requires", "xor"):
@@ -2439,6 +2475,179 @@ def convert_research_gfx(hoi4: Path, out: Path):
             continue
         img.save(dst / f"{name}.png")
     print("Research sprites written")
+
+
+SCROLLBAR_SPRITES = {"vertical_bg": "GFX_scrollbar_vertical_bg", "horizontal_bg": "GFX_scrollbar_horisontal_bg",
+                     "drager": "GFX_scroll_drager", "track": "GFX_scroll_track",
+                     "track_horizontal": "GFX_scroll_track_horisontal", "up": "GFX_scroll_up", "down": "GFX_scroll_down",
+                     "left": "GFX_scroll_left", "right": "GFX_scroll_right"}
+
+
+def convert_scrollbar_gfx(hoi4: Path, out: Path):
+    """HOI4's scrollbars (interface/core.gui right_vertical_slider, bottom_horizontal_slider) for the Hoi4Theme
+    hoi4-scroll class: gfx/interface/scrollbar/<part>.png (frame 0 of each)."""
+    import hoi4_gui as gui
+    dst = out / "gfx" / "interface" / "scrollbar"
+    dst.mkdir(parents=True, exist_ok=True)
+    sprites = gui.load_sprites(hoi4)
+    for name, spr in SCROLLBAR_SPRITES.items():
+        frames = gui.sprite_frames(hoi4, sprites, spr)
+        if frames:
+            frames[0].save(dst / f"{name}.png")
+
+
+TECHTREE_STATES = ("unavailable", "available", "researched", "currently_researching", "branch")
+TECHTREE_LINE_SPRITES = {"line_up": "GFX_techtree_line_up_states", "line_down": "GFX_techtree_line_down_states",
+                         "line_left": "GFX_techtree_line_left_states", "line_right": "GFX_techtree_line_right_states",
+                         "line_center": "GFX_techline_center_all_states"}
+TECHTREE_SPRITES = {"window_bg": "GFX_tiled_plain_bg2", "folder_bg": "GFX_tiled_window_2b_border",
+                    "close": "GFX_closebutton"}
+
+
+def convert_techtree_gfx(hoi4: Path, out: Path, loc):
+    """The tech tree screen (interface/countrytechtreeview.gui) for Hoi4TechTreePanel, under gfx/interface/techtree/:
+    techtree.json5 with, per folder we research in (hoi4_technologies.json5), its tab, its content size, backgrounds,
+    labels (years, subtitles; positions in the folder's content) and gridboxes (root tech, position, slot size, format:
+    LEFT puts a tech's y across and its x down, the others x across and y down), and per folder the small and large
+    item templates (size, offset, icon and name places); the sprites: tabs (frame 1 open), item backgrounds per folder,
+    size and state (the folder's own, else the generic; the researching one a 9-frame strip), the link line pieces
+    (4 frames: researched, available, unavailable, researching... see the prototype), and every tech's picture
+    (icons/<tech>.png, country versions icons/<TAG>_<tech>.png).
+    Prototype: Tools/prototypes/research/render_techtree.py"""
+    import hoi4_gui as gui
+    dst = out / "gfx" / "interface" / "techtree"
+    (dst / "icons").mkdir(parents=True, exist_ok=True)
+    sprites = gui.load_sprites(hoi4)
+    techdoc = json.loads((out / "common" / "hoi4_technologies.json5").read_text(encoding="utf-8").split("\n", 1)[1])
+    techs, folders = techdoc["technologies"], techdoc["folders"]
+
+    def save(spr, name):
+        frames = gui.sprite_frames(hoi4, sprites, spr)
+        if not frames:
+            return None
+        names = []
+        for i, fr in enumerate(frames):
+            fn = f"{name}.png" if len(frames) == 1 else f"{name}_{i}.png"
+            fr.save(dst / fn)
+            names.append(fn)
+        return {"image": names[0], "frames": names, "w": frames[0].width, "h": frames[0].height,
+                "border": list(sprites[spr]["border"]) if sprites[spr].get("border") else None}
+
+    root = gui.load_gui(hoi4, "countrytechtreeview.gui")
+    types = {gui.kv(v, "name"): v for k, _, v in gui.kv(root, "guiTypes") or [] if isinstance(v, list)}
+    win = types["countrytechtreeview"]
+    doc = {"window": {k: save(s, k) for k, s in TECHTREE_SPRITES.items()}, "folders": {}, "items": {}}
+    tabs = next(v for k, _, v in win if isinstance(v, list) and gui.kv(v, "name") == "folder_tabs")
+    tab_pos = {}
+    for k, _, b in tabs:
+        if isinstance(b, list) and k == "buttonType":
+            pos = gui.kv(b, "position")
+            tab_pos[gui.kv(b, "name")] = (float(gui.kv(pos, "x") or 0), float(gui.kv(pos, "y") or 0),
+                                          gui.kv(b, "quadTextureSprite") or gui.kv(b, "spriteType"))
+
+    for k, _, f in win:
+        name = gui.kv(f, "name") if isinstance(f, list) else None
+        if k != "containerWindowType" or name not in folders:
+            continue
+        margin = gui.kv(f, "margin") or []
+        folder = {"margin": {s: float(gui.kv(margin, s) or 0) for s in ("top", "left", "bottom", "right")},
+                  "images": [], "labels": [], "grids": [], "width": 0, "height": 0}
+        tx, ty, tspr = tab_pos.get(f"{name}_tab", (0, 0, None))
+        folder["tab"] = {"x": tx, "y": ty, **(save(tspr, f"tab_{name}") or {})} if tspr else None
+        # the content container (techtree_stripes, size_filler) is its size or the visible folder, whichever is
+        # larger (min = 100%%); what it holds may anchor to its centre or right edge (artillery_subtitles center_up,
+        # artillery_year_right upper_right). Laid out at two widths, ax is how far an element moves per pixel of
+        # extra width (0 left, 0.5 centre, 1 right): x on screen = x + ax * (content width - width).
+        def stretchable(block):
+            sz = gui.kv(block, "size") if isinstance(block, list) else None
+            return isinstance(sz, list) and gui.kv(sz, "min") is not None
+
+        def laid_out(extra):
+            fb = copy.deepcopy(f)
+            for k, _, v in fb:
+                if k == "containerWindowType" and stretchable(v):
+                    sz = gui.kv(v, "size")
+                    for j, (kk, op, vv) in enumerate(sz):
+                        if kk == "width":
+                            sz[j] = (kk, op, str(gui.num(vv) + extra))
+            out = []
+            gui.layout(fb, (0, 0, 1920, 1080), out)
+            return out
+        laid, wide = laid_out(0), laid_out(1000)
+        for (kind, el, x, y, block), (_, _, x2, _, _) in zip(laid, wide):
+            kind = kind.lower()
+            ax = round((x2 - x) / 1000, 3)
+            if kind == "containerwindowtype" and stretchable(block) and not folder["width"]:
+                sz = gui.kv(block, "size") or []
+                folder["width"] = gui.num(gui.kv(sz, "width"))
+                folder["height"] = gui.num(gui.kv(sz, "height"))
+            elif kind == "icontype":
+                spr = gui.kv(block, "spriteType")
+                if spr and not str(el).startswith("highlight") and str(gui.kv(block, "hide") or "no") != "yes":
+                    img = save(spr, f"bg_{name}_{el}")
+                    if img:
+                        folder["images"].append({"x": x, "y": y, "ax": ax, **img})
+            elif kind == "instanttextboxtype":
+                text = gui.kv(block, "text") or ""
+                folder["labels"].append({"x": x, "y": y, "ax": ax, "text": loc_refs(loc.get(text, text), loc),
+                                         "w": float(gui.kv(block, "maxWidth") or 0),
+                                         "h": float(gui.kv(block, "maxHeight") or 0),
+                                         "font": gui.kv(block, "font") or "",
+                                         "header": "36header" in (gui.kv(block, "font") or "")})
+            elif kind == "gridboxtype":
+                ss = gui.kv(block, "slotsize") or []
+                folder["grids"].append({"root": str(el)[:-5] if str(el).endswith("_tree") else el, "x": x, "y": y,
+                                        "w": float(gui.kv(ss, "width") or 70), "h": float(gui.kv(ss, "height") or 70),
+                                        "format": (gui.kv(block, "format") or "UPPER_LEFT").strip('"').upper()})
+        doc["folders"][name] = folder
+
+        # item templates: the large card (techtree_<folder>_item) and the small icon (techtree_<folder>_small_item)
+        items = {}
+        for size, tname in (("large", f"techtree_{name}_item"), ("small", f"techtree_{name}_small_item")):
+            t = types.get(tname)
+            if t is None:
+                continue
+            pos, sz = gui.kv(t, "position") or [], gui.kv(t, "size") or []
+            item = {"x": float(gui.kv(pos, "x") or 0), "y": float(gui.kv(pos, "y") or 0),
+                    "w": float(gui.kv(sz, "width") or 0), "h": float(gui.kv(sz, "height") or 0), "bg": {}}
+            for kk, _, e in t:
+                if not isinstance(e, list):
+                    continue
+                en, ep = gui.kv(e, "name"), gui.kv(e, "position") or []
+                if kk == "iconType" and en == "Icon":
+                    item["icon"] = {"x": float(gui.kv(ep, "x") or 0), "y": float(gui.kv(ep, "y") or 0),
+                                    "center": str(gui.kv(e, "centerposition") or "no") == "yes"}
+                elif kk.lower() == "instanttextboxtype" and en == "Name":
+                    item["name"] = {"x": float(gui.kv(ep, "x") or 0), "y": float(gui.kv(ep, "y") or 0),
+                                    "w": float(gui.kv(e, "maxWidth") or 0), "h": float(gui.kv(e, "maxHeight") or 0)}
+            prefix = "small_" if size == "small" else ""
+            for state in TECHTREE_STATES:
+                for spr in (f"GFX_technology_{name}_{prefix}{state}_item_bg", f"GFX_technology_{prefix}{state}_item_bg",
+                            f"GFX_technology_{state}_item_bg"):
+                    if spr in sprites:
+                        img = save(spr, f"item_{name}_{size}_{state}")
+                        if img:
+                            item["bg"][state] = img
+                            break
+            items[size] = item
+        doc["items"][name] = items
+
+    doc["lines"] = {k: save(s, k) for k, s in TECHTREE_LINE_SPRITES.items()}
+    n_country = 0
+    for tech in techs:
+        frames = gui.sprite_frames(hoi4, sprites, f"GFX_{tech}_medium")
+        if frames:
+            frames[0].save(dst / "icons" / f"{tech}.png")
+    for spr in sprites:
+        m = re.fullmatch(r"GFX_([A-Z]{3})_(\w+)_medium", spr)
+        if m and m.group(2) in techs:
+            frames = gui.sprite_frames(hoi4, sprites, spr)
+            if frames:
+                frames[0].save(dst / "icons" / f"{m.group(1)}_{m.group(2)}.png")
+                n_country += 1
+    (dst / "techtree.json5").write_text("// Generated from HOI4 interface/countrytechtreeview.gui by hoi4_convert.py\n"
+                                        + json.dumps(doc, indent=1) + "\n", encoding="utf-8")
+    print(f"Tech tree: {len(doc['folders'])} folders, {len(techs)} tech pictures, {n_country} country versions")
 
 
 # State view (interface/countrystateview.gui) sprites: name -> GFX sprite

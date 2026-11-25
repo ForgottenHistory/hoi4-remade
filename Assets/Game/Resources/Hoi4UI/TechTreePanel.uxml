@@ -1,0 +1,14 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <!-- HOI4 tech tree screen (interface/countrytechtreeview.gui), positions in HOI4 pixels. The folder content (techs,
+         links, labels) is laid out by Hoi4TechTreePanel from gfx/interface/techtree/techtree.json5.
+         Prototype: Tools/prototypes/research/render_techtree.py -->
+    <ui:VisualElement name="techtree-panel" class="tt-window" picking-mode="Position">
+        <ui:VisualElement class="spr tt-window-bg" picking-mode="Ignore" />
+        <ui:VisualElement name="tt-tabs" class="tt-tabs" picking-mode="Ignore" />
+        <ui:VisualElement name="tt-close" class="spr hoi4-button tt-close" picking-mode="Position" />
+        <ui:VisualElement class="tt-folder" picking-mode="Ignore">
+            <ui:VisualElement class="spr tt-folder-bg" picking-mode="Ignore" />
+            <ui:ScrollView name="tt-scroll" class="tt-scroll" mode="VerticalAndHorizontal" />
+        </ui:VisualElement>
+    </ui:VisualElement>
+</ui:UXML>

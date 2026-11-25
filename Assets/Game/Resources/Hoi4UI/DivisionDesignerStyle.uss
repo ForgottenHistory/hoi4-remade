@@ -102,11 +102,6 @@
 /* lower than the gui's (title 13, button 2, list 40): room between the header and the entries */
 .ddg-picker-list { position: absolute; left: 72px; top: 76px; width: 530px; height: 490px; }
 .ddg-picker-list .unity-scroll-view__content-container { flex-direction: row; flex-wrap: wrap; }
-.ddg-picker-list .unity-scroller--vertical { width: 8px; background-color: rgba(10, 13, 13, 0.85); }
-.ddg-picker-list .unity-scroller__low-button, .ddg-picker-list .unity-scroller__high-button { display: none; }
-.ddg-picker-list .unity-scroller__slider { margin: 0; border-width: 0; background-color: rgba(0, 0, 0, 0); }
-.ddg-picker-list .unity-base-slider__tracker { display: none; }
-.ddg-picker-list .unity-base-slider__dragger { width: 8px; border-width: 0; border-radius: 2px; background-color: rgb(140, 158, 128); }
 
 /* designer_subunit_entry / _category_entry: 250 x 66 on the mini tooltip tile, in 256 x 69 slots */
 .ddg-entry {

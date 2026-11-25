@@ -92,9 +92,6 @@
     -unity-slice-left: 64; -unity-slice-right: 64; -unity-slice-top: 64; -unity-slice-bottom: 64;
 }
 .pr-lines { position: absolute; left: 14px; top: 302px; right: 4px; bottom: 12px; }
-.pr-lines .unity-scroller--vertical { width: 8px; background-color: rgba(10, 13, 13, 0.85); }
-.pr-lines .unity-scroller__low-button, .pr-lines .unity-scroller__high-button { display: none; }
-.pr-lines .unity-scroller__slider { margin: 0; border-width: 0; background-color: rgba(0, 0, 0, 0); }
 
 /* one line: production_military_line_entry, 500 x 111 */
 .pl-entry { position: relative; width: 511px; height: 111px; flex-shrink: 0; }

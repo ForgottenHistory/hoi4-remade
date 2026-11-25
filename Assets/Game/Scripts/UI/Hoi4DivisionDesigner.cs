@@ -103,6 +103,7 @@ namespace Hoi4.UI
             sheets = root.Q("ddg-sheets");
             picker = root.Q("ddg-picker");
             pickerList = root.Q<ScrollView>("ddg-picker-list");
+            Hoi4Scrollbar.ApplyAll(root); // HOI4's scrollbars
             nameField = root.Q<TextField>("ddg-name");
             nameField.RegisterValueChangedCallback(evt => { if (design != null) { design.Name = evt.newValue; Refresh(); } });
             // a click anywhere else in the designer ends typing (hotkeys come back: Utils.KeyboardFocus)

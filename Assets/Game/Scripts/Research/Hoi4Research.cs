@@ -21,6 +21,11 @@ namespace Hoi4.Research
         public int Year;             // start_year: ahead of 1 January of it costs time
         public string Folder;
         public float X, Y;           // grid position in the folder
+        /// <summary>Every folder it shows in, with its grid position there (motorised_infantry: infantry and support).</summary>
+        public readonly List<(string folder, float x, float y)> Places = new List<(string, float, float)>();
+        public readonly List<int> Children = new List<int>();    // leads_to
+        public string EquipmentName;                              // the tree card's short name ("Basic Eq.")
+        public Dictionary<string, string> EquipmentNames;         // per country tag ("ALZ 13"), null when none
         public readonly List<int> Parents = new List<int>();     // techs that lead here: any one is enough
         public readonly List<FP> ParentCoeff = new List<FP>();    // the path's research_cost_coeff, per parent
         public readonly List<int> Requires = new List<int>();    // dependencies: every one needed
@@ -184,6 +189,7 @@ namespace Hoi4.Research
                         if (l is JArray pair && techIndex.TryGetValue((string)pair[0], out int child))
                         {
                             techs[child].Parents.Add(t.Index);
+                            t.Children.Add(child);
                             techs[child].ParentCoeff.Add(Num(pair[1]));
                         }
                 Names(o["requires"], t.Requires);
@@ -194,6 +200,16 @@ namespace Hoi4.Research
                 if (o["modifiers"] is JObject m) foreach (var x in m.Properties()) t.Modifiers[x.Name] = Num(x.Value);
                 t.Modifiers.TryGetValue("research_speed_factor", out t.ResearchSpeed);
                 t.Ai = o["ai"] as JObject;
+                if (o["places"] is JArray places)
+                    foreach (var pl in places)
+                        if (pl is JArray a && a.Count >= 3) t.Places.Add(((string)a[0], (float)a[1], (float)a[2]));
+                if (t.Places.Count == 0 && t.Folder != null) t.Places.Add((t.Folder, t.X, t.Y));
+                t.EquipmentName = (string)o["equipment_name"];
+                if (o["equipment_names"] is JObject en)
+                {
+                    t.EquipmentNames = new Dictionary<string, string>();
+                    foreach (var x in en.Properties()) t.EquipmentNames[x.Name] = (string)x.Value;
+                }
             }
             if (root["ai_strategies"] is JArray strats)
                 foreach (var x in strats) if (x is JObject so) strategies.Add(so);

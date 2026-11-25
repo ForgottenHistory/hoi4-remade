@@ -137,6 +137,7 @@ namespace Hoi4.UI
             root.Add(panel);
             buildings = panel.Q(className: "co-buildings");
             lineList = panel.Q<ScrollView>("co-lines");
+            Hoi4Scrollbar.ApplyAll(panel); // HOI4's scrollbars
             consumerRow = lineList.Q(className: "co-consumer");
             panel.Q("co-close").RegisterCallback<ClickEvent>(_ => Close());
             panel.Q("co-minimize").RegisterCallback<ClickEvent>(_ => Close());

@@ -103,6 +103,8 @@ namespace Hoi4.UI
             root.Add(picker);
             lineList = panel.Q<ScrollView>("pr-lines");
             pickerList = picker.Q<ScrollView>("pr-picker-list");
+            Hoi4Scrollbar.Apply(lineList); // HOI4's scrollbars
+            Hoi4Scrollbar.Apply(pickerList);
 
             panel.Q("pr-close").RegisterCallback<ClickEvent>(_ => Close());
             picker.Q("pr-picker-close").RegisterCallback<ClickEvent>(_ => ClosePicker());

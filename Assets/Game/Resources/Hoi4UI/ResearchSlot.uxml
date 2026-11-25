@@ -5,7 +5,11 @@
         <!-- empty_research_slot_glow: two frames, HOI4 blends them (buttonstate_blendframes) -->
         <ui:VisualElement name="rs-glow" class="spr rs-glow" picking-mode="Ignore" />
         <ui:VisualElement name="rs-glow-b" class="spr rs-glow rs-glow-b" picking-mode="Ignore" />
+        <!-- technology: the tech's picture centred at (252, 49); year and eta (days left, the number gold) -->
+        <ui:VisualElement name="rs-tech-icon" class="rs-tech-icon" picking-mode="Ignore" />
         <ui:Label name="rs-entry-title" class="hoi4-label rs-entry-title" picking-mode="Ignore" />
+        <ui:Label name="rs-year" class="hoi4-label rs-year" picking-mode="Ignore" />
+        <ui:Label name="rs-eta" class="hoi4-label rs-eta" enable-rich-text="true" picking-mode="Ignore" />
         <ui:VisualElement class="spr rs-bar-frame" picking-mode="Ignore" />
         <ui:VisualElement class="spr rs-bar-bg" picking-mode="Ignore" />
         <ui:VisualElement name="rs-bar" class="rs-bar-clip" picking-mode="Ignore">

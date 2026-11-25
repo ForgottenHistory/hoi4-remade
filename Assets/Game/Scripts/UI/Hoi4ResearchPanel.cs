@@ -15,6 +15,7 @@ namespace Hoi4.UI
     /// - Research Slots tab: limited bonuses, research speed, one entry per slot. An empty slot glows (the two glow
     ///   frames blended, like HOI4) and its bar shows the research saved while idle, out of 30 days.
     /// - Experimental Facilities tab: a placeholder.
+    /// - Clicking a slot opens the tech tree (Hoi4TechTreePanel) to pick its tech.
     /// Values refresh four times a real second (a presentation throttle, not game time).
     /// </summary>
     public sealed class Hoi4ResearchPanel : MonoBehaviour
@@ -87,6 +88,7 @@ namespace Hoi4.UI
             slotsPage = panel.Q("rs-slots-page");
             facilitiesPage = panel.Q("rs-facilities-page");
             slotList = panel.Q<ScrollView>("rs-slots");
+            Hoi4Scrollbar.ApplyAll(panel); // HOI4's scrollbars
             speed = panel.Q<Label>("rs-speed");
             tabSlots = panel.Q("rs-tab-slots");
             tabFacilities = panel.Q("rs-tab-facilities");
@@ -135,6 +137,7 @@ namespace Hoi4.UI
         public void Close()
         {
             open = false;
+            if (Hoi4TechTreePanel.IsOpen) Hoi4TechTreePanel.Instance.Close();
             if (panel != null) panel.style.display = DisplayStyle.None;
         }
 
@@ -159,7 +162,9 @@ namespace Hoi4.UI
                 return;
             }
             if (global::Utils.KeyboardFocus.KeyDown(KeyCode.W)) Toggle();
-            if (open && global::Utils.KeyboardFocus.KeyDown(KeyCode.Escape)) Close();
+            // Escape closes the tech tree first, then this
+            if (open && !Hoi4TechTreePanel.IsOpen && Hoi4TechTreePanel.EscapeFrame != Time.frameCount
+                && global::Utils.KeyboardFocus.KeyDown(KeyCode.Escape)) Close();
             Hoi4UiHover.Report(this, open ? panel : null);
             if (!open) return;
 
@@ -174,6 +179,27 @@ namespace Hoi4.UI
             Refresh(research, slots);
         }
 
+        /// <summary>The slot's tech picture (the tree's: the country's own where it has one), centred on (252, 49).</summary>
+        void SetIcon(VisualElement icon, TechDef tech)
+        {
+            string id = tech?.Id;
+            if (Equals(icon.userData, id)) return;
+            icon.userData = id;
+            Texture2D tex = null;
+            if (tech != null)
+            {
+                string tag = Engine.ArchonEngine.Instance.GameState.Countries.GetCountryTag(shownCountry);
+                tex = Hoi4UiAssets.Texture($"gfx/interface/techtree/icons/{tag}_{id}.png")
+                      ?? Hoi4UiAssets.Texture($"gfx/interface/techtree/icons/{id}.png");
+            }
+            icon.style.display = tex != null ? DisplayStyle.Flex : DisplayStyle.None;
+            if (tex == null) return;
+            icon.style.backgroundImage = new StyleBackground(tex);
+            icon.style.width = tex.width;
+            icon.style.height = tex.height;
+            icon.style.translate = new Translate(-tex.width / 2f, -tex.height / 2f);
+        }
+
         void Rebuild(int count)
         {
             shownCountry = Player;
@@ -181,6 +207,8 @@ namespace Hoi4.UI
             {
                 var e = slotTree.Instantiate().Q(className: "rs-entry");
                 Hoi4Sprites.Bind(e);
+                int slot = entries.Count;
+                e.RegisterCallback<ClickEvent>(_ => Hoi4TechTreePanel.Instance?.Open(slot)); // pick its tech in the tree
                 entries.Add(e);
             }
             while (entries.Count > count) entries.RemoveAt(entries.Count - 1);
@@ -203,7 +231,12 @@ namespace Hoi4.UI
                 bool empty = slot.Empty;
                 e.Q("rs-glow").style.display = empty ? DisplayStyle.Flex : DisplayStyle.None;
                 e.Q("rs-glow-b").style.display = empty ? DisplayStyle.Flex : DisplayStyle.None;
-                e.Q<Label>("rs-entry-title").text = empty ? EmptyText : research.Tech(slot.Technology).Name;
+                var tech = empty ? null : research.Tech(slot.Technology);
+                e.Q<Label>("rs-entry-title").text = empty ? EmptyText : tech.Name;
+                e.Q<Label>("rs-year").text = tech != null && tech.Year > 0 ? tech.Year.ToString() : "";
+                int days = empty ? 0 : research.DaysLeft(shownCountry, slot.Technology);
+                e.Q<Label>("rs-eta").text = empty ? "" : $"<color=#FFC83C>{days}</color> day(s)";
+                SetIcon(e.Q("rs-tech-icon"), tech);
                 // empty: the research saved so far, out of the 30 days a slot can save; else the tech's progress
                 FP cost = empty ? FP.Zero : research.Cost(shownCountry, slot.Technology);
                 float fill = empty ? Mathf.Clamp01((research.Saved(shownCountry, i) / Hoi4Research.SavedMaxDays).ToFloat())

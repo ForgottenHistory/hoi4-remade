@@ -43,9 +43,6 @@
     -unity-slice-left: 64; -unity-slice-right: 64; -unity-slice-top: 64; -unity-slice-bottom: 64;
 }
 .co-lines { position: absolute; left: 14px; top: 148px; width: 413px; bottom: 15px; }
-.co-lines .unity-scroller--vertical { width: 8px; background-color: rgba(10, 13, 13, 0.85); }
-.co-lines .unity-scroller__low-button, .co-lines .unity-scroller__high-button { display: none; }
-.co-lines .unity-scroller__slider { margin: 0; border-width: 0; background-color: rgba(0, 0, 0, 0); }
 
 /* static_consumer_goods_entry: 400 x 52 */
 .co-consumer { position: relative; width: 400px; height: 52px; }

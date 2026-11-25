@@ -97,6 +97,7 @@ namespace Hoi4.UI
             cards = root.Q("pc-cards");
             statesList = root.Q<ScrollView>("pc-states");
             victorsList = root.Q<ScrollView>("pc-victors");
+            Hoi4Scrollbar.ApplyAll(root); // HOI4's scrollbars
             title = root.Q<Label>("pc-title");
             score = root.Q<Label>("pc-score");
             participation = root.Q<Label>("pc-participation");

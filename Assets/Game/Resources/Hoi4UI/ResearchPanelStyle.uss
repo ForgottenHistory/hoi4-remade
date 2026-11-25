@@ -41,9 +41,6 @@
 
 /* slots_window (y 140), research_slots_grid at x 15, slots 500 x 100 */
 .rs-slots { position: absolute; left: 15px; top: 140px; right: 4px; bottom: 20px; }
-.rs-slots .unity-scroller--vertical { width: 8px; background-color: rgba(10, 13, 13, 0.85); }
-.rs-slots .unity-scroller__low-button, .rs-slots .unity-scroller__high-button { display: none; }
-.rs-slots .unity-scroller__slider { margin: 0; border-width: 0; background-color: rgba(0, 0, 0, 0); }
 
 .rs-placeholder { left: 0; top: 40px; width: 550px; height: 30px; font-size: 16px; color: rgb(170, 170, 160); }
 
@@ -56,6 +53,10 @@
 .rs-entry-bg { --sprite: "gfx/interface/research/line_bg.png"; left: 0; top: 0; width: 508px; height: 99px; }
 .rs-glow { --sprite: "gfx/interface/research/empty_glow_0.png"; left: 12px; top: 10px; width: 475px; height: 78px; }
 .rs-glow-b { --sprite: "gfx/interface/research/empty_glow_1.png"; }
+.rs-entry:hover .rs-entry-bg { -unity-background-image-tint-color: rgb(255, 245, 215); }
+.rs-tech-icon { position: absolute; left: 252px; top: 49px; }
+.rs-year { left: 57px; top: 60px; width: 50px; height: 20px; font-size: 15px; -unity-font-style: bold; }
+.rs-eta { left: 335px; top: 12px; width: 125px; height: 20px; font-size: 15px; -unity-font-style: bold; -unity-text-align: upper-right; }
 .rs-entry-title { left: 57px; top: 12px; width: 400px; height: 20px; font-size: 15px; -unity-font-style: bold; }
 .rs-bar-frame { --sprite: "gfx/interface/research/progress_frame.png"; left: 62px; top: 79px; width: 383px; height: 10px; }
 .rs-bar-bg { --sprite: "gfx/interface/research/progress_bar_bg.png"; left: 65px; top: 81px; width: 377px; height: 4px; }

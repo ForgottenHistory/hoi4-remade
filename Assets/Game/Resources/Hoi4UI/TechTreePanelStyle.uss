@@ -1,0 +1,39 @@
+/* HOI4 tech tree screen (interface/countrytechtreeview.gui). Positions and sizes are HOI4's, in HOI4 pixels.
+   Sprites from gfx/interface/techtree/ (converter: convert_techtree_gfx); the tiled frames are 9-sliced with their
+   borderSize and tiled in the middle (tilingCenter). Prototype: Tools/prototypes/research/render_techtree.py */
+
+.tt-window { position: absolute; left: -3px; top: 78px; right: 0; bottom: 0; display: none; }
+.tt-window-bg {
+    --sprite: "gfx/interface/techtree/window_bg.png"; left: 0; top: 0; right: 0; bottom: 0;
+    -unity-slice-left: 64; -unity-slice-right: 64; -unity-slice-top: 64; -unity-slice-bottom: 64; -unity-slice-type: tiled;
+}
+.tt-close { --sprite: "gfx/interface/techtree/close.png"; right: 18px; top: 11px; width: 32px; height: 33px; }
+
+/* folder_tabs (y 7): one per folder at its gui x, frame 0 on the open one */
+.tt-tabs { position: absolute; left: 0; top: 7px; right: 0; height: 61px; }
+.tt-tab { position: absolute; top: 0; width: 91px; height: 61px; }
+
+/* the folder (y 47, margin 13 13 24 25) */
+.tt-folder { position: absolute; left: 0; top: 47px; right: 0; bottom: 0; }
+.tt-folder-bg {
+    --sprite: "gfx/interface/techtree/folder_bg.png"; left: 0; top: 0; right: 0; bottom: 0;
+    -unity-slice-left: 64; -unity-slice-right: 64; -unity-slice-top: 64; -unity-slice-bottom: 64; -unity-slice-type: tiled;
+}
+.tt-scroll { position: absolute; left: 13px; top: 13px; right: 25px; bottom: 24px; }
+/* scrollbars: HOI4's (Hoi4Scrollbar) */
+
+/* content: positions set from techtree.json5 */
+.tt-content { position: relative; }
+.tt-abs { position: absolute; }
+.tt-year { font-size: 26px; color: rgb(235, 235, 235); white-space: nowrap; }
+.tt-subtitle { font-size: 24px; color: rgb(120, 120, 120); white-space: nowrap; }
+.tt-item { position: absolute; }
+.tt-item-bg { position: absolute; left: 0; top: 0; }
+.tt-item-icon { position: absolute; }
+.tt-item-name {
+    position: absolute; font-size: 14px; color: rgb(235, 235, 235); white-space: nowrap; overflow: hidden;
+    -unity-text-outline-width: 0.3px; -unity-text-outline-color: rgba(0, 0, 0, 0.8);
+}
+.tt-item.clickable:hover .tt-item-bg { -unity-background-image-tint-color: rgb(255, 255, 210); }
+.tt-item.clickable:hover .tt-item-icon { scale: 1.04 1.04; }
+.tt-line { position: absolute; }

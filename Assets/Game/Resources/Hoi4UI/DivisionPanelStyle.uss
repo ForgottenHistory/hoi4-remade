@@ -23,14 +23,7 @@
 .dv-sort-5 { left: 365px; width: 31px; }
 
 .dv-list { position: absolute; left: 5px; top: 61px; width: 410px; }
-/* thin dark scrollbar, no arrow buttons */
-.dv-list .unity-scroller--vertical { width: 8px; background-color: rgba(10, 13, 13, 0.85); }
-.dv-list .unity-scroller__low-button, .dv-list .unity-scroller__high-button { display: none; }
-.dv-list .unity-scroller__slider { margin: 0; border-width: 0; background-color: rgba(0, 0, 0, 0); }
-.dv-list .unity-base-slider__tracker { display: none; }
-.dv-list .unity-base-slider__dragger {
-    width: 8px; border-width: 0; border-radius: 2px; background-color: rgb(140, 158, 128);
-}
+/* scrollbar: HOI4's (Hoi4Scrollbar) */
 
 .dv-footer { position: absolute; left: 5px; width: 396px; height: 54px; }
 .dv-footer-bg { --sprite: "gfx/interface/unitpanel/unassigned_bg.png"; left: 0; top: 0; width: 396px; height: 54px; }

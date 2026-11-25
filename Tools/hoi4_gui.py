@@ -9,6 +9,7 @@ Layout rules:
 - Sprites with noOfFrames are horizontal strips; frame 0 is the normal state.
 - Elements far off-screen (position -5000 or less) are hidden.
 """
+import re
 from pathlib import Path
 
 from PIL import Image
@@ -39,7 +40,10 @@ def load_sprites(hoi4: Path):
                 if not name:
                     continue
                 tex = kv(s, "texturefile")
+                border = kv(s, "borderSize")
                 sprites[name] = {
+                    "border": (int(float(kv(border, "x") or 0)), int(float(kv(border, "y") or 0)))
+                    if isinstance(border, list) else None,
                     "texture": tex.replace("//", "/") if tex else None,
                     "frames": int(kv(s, "noOfFrames") or 1),
                     "mask": kv(s, "textureFile2"),
@@ -116,6 +120,14 @@ def masked_flag(hoi4: Path, sprites, name, tag, ideology):
     return img
 
 
+def num(v, default=0.0):
+    """A gui number, forgiving the files' typos (countrytechtreeview.gui has "x = 275k"): its leading number."""
+    if v is None:
+        return default
+    m = re.match(r"\s*-?\d+(\.\d+)?", str(v))
+    return float(m.group(0)) if m else default
+
+
 def _anchor(rect, orientation):
     x, y, w, h = rect
     o = (orientation or "UPPER_LEFT").upper().strip('"')
@@ -136,7 +148,7 @@ def _size(items, parent):
         if v is None:
             return 0.0
         v = str(v)
-        return full * float(v.rstrip("%")) / 100 if v.endswith("%") else float(v)
+        return full * num(v.rstrip("%")) / 100 if v.endswith("%") else num(v)
 
     return dim("width", parent[2]), dim("height", parent[3])
 
@@ -145,12 +157,12 @@ def layout(items, parent, out, depth=0, listing=False):
     """Lay out a container's children on the parent rect (x, y, w, h); appends
     (kind, name, x, y, block) for every visible element, containers included."""
     for k, _, v in items:
-        if not isinstance(v, list) or k is None or not k.endswith("Type"):
+        if not isinstance(v, list) or k is None or not k.lower().endswith("type"):
             continue
         name = kv(v, "name")
         pos = kv(v, "position")
-        px = float(kv(pos, "x") or 0) if isinstance(pos, list) else 0.0
-        py = float(kv(pos, "y") or 0) if isinstance(pos, list) else 0.0
+        px = num(kv(pos, "x")) if isinstance(pos, list) else 0.0
+        py = num(kv(pos, "y")) if isinstance(pos, list) else 0.0
         ax, ay = _anchor(parent, kv(v, "Orientation"))
         x, y = ax + px, ay + py
         if listing:

@@ -144,6 +144,7 @@ namespace Hoi4.UI
             ordersHost = root.Q("dp-orders");
             priorityHost = root.Q("dp-priorities");
             templateList = root.Q<ScrollView>("dt-list");
+            Hoi4Scrollbar.ApplyAll(root); // HOI4's scrollbars
             root.Q("dp-close").RegisterCallback<ClickEvent>(evt => Close());
             root.Q("dt-designer").RegisterCallback<ClickEvent>(evt => Hoi4DivisionDesigner.Instance?.Open(null));
             BuildPriorityRows();

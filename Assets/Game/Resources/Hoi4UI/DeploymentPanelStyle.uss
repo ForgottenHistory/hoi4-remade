@@ -27,9 +27,6 @@
 }
 .dp-list { position: absolute; left: 0; top: 55px; right: 2px; bottom: 13px; }
 .dp-list .unity-scroll-view__content-container { padding-top: 5px; padding-bottom: 20px; }
-.dp-list .unity-scroller--vertical { width: 8px; background-color: rgba(10, 13, 13, 0.85); }
-.dp-list .unity-scroller__low-button, .dp-list .unity-scroller__high-button { display: none; }
-.dp-list .unity-scroller__slider { margin: 0; border-width: 0; background-color: rgba(0, 0, 0, 0); }
 .dp-priorities, .dp-orders { position: relative; }
 
 /* ---- deploy_entry: equipment priority rows, 493 x 47 (shown, not changeable yet) ---------------------------- */
@@ -143,9 +140,6 @@
 .dt-checkbox { --sprite: "gfx/interface/deployment/checkbox_0.png"; left: 19px; top: 103px; width: 34px; height: 30px; }
 .dt-decom { left: 60px; top: 106px; width: 300px; height: 24px; font-size: 17px; -unity-font-style: bold; -unity-text-align: middle-left; }
 .dt-list { position: absolute; left: 12px; top: 138px; width: 360px; bottom: 10px; }
-.dt-list .unity-scroller--vertical { width: 8px; background-color: rgba(10, 13, 13, 0.85); }
-.dt-list .unity-scroller__low-button, .dt-list .unity-scroller__high-button { display: none; }
-.dt-list .unity-scroller__slider { margin: 0; border-width: 0; background-color: rgba(0, 0, 0, 0); }
 
 /* named_division_template_entry: 341 x 72, 74 apart */
 .dte { position: relative; width: 341px; height: 74px; }
