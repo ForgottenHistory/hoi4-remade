@@ -1559,17 +1559,8 @@ def convert_move_arrow(hoi4: Path, out: Path, arrow_name="move_thick"):
 
 
 # Modifiers the economy uses (consumer goods and construction speed), from ideas (`modifier = {}`) and technologies
-ECONOMY_KEYS = ("consumer_goods_expected_value", "consumer_goods_factor", "production_speed_buildings_factor",
-                "research_speed_factor")
-BUILDING_SPEED = re.compile(r"production_speed_(\w+)_factor")  # production_speed_<building>_factor
-
-
-def economy_key(k):
-    return isinstance(k, str) and (k in ECONOMY_KEYS or BUILDING_SPEED.fullmatch(k) is not None)
-
-
 def load_idea_modifiers(hoi4: Path):
-    """{idea: {"category", "law", "default", "mods"}} from common/ideas (only ECONOMY_KEYS in mods)."""
+    """{idea: {"category", "law", "default", "mods"}} from common/ideas (every numeric modifier in mods)."""
     ideas = {}
     for f in sorted((hoi4 / "common" / "ideas").glob("*.txt")):
         root = get(parse_pdx(read_text(f)), "ideas", [])
@@ -1583,55 +1574,13 @@ def load_idea_modifiers(hoi4: Path):
                 mods = {}
                 m = get(idea, "modifier")
                 for k, _, v in (m if isinstance(m, list) else []):
-                    if economy_key(k):
+                    if isinstance(k, str):
                         try:
                             mods[k] = mods.get(k, 0.0) + float(v)
                         except (TypeError, ValueError):
                             pass
                 ideas[name] = {"category": cat, "law": law, "default": get(idea, "default") == "yes", "mods": mods}
     return ideas
-
-
-def load_tech_modifiers(hoi4: Path):
-    """{technology: {key: value}} for ECONOMY_KEYS set directly in the technology."""
-    techs = {}
-    for f in sorted((hoi4 / "common" / "technologies").glob("*.txt")):
-        for key, _, block in parse_pdx(read_text(f)):
-            if key != "technologies" or not isinstance(block, list):
-                continue
-            for name, _, t in block:
-                if not isinstance(t, list):
-                    continue
-                mods = {}
-                for k, _, v in t:
-                    if economy_key(k):
-                        try:
-                            mods[k] = float(v)
-                        except (TypeError, ValueError):
-                            pass
-                if mods:
-                    techs[name] = mods
-    return techs
-
-
-def load_building_techs(hoi4: Path):
-    """{building: {technology: level}}: technologies that enable a building up to a level (enable_building).
-    A building listed here needs one of them; without it HOI4 greys the building out."""
-    gated = {}
-    for f in sorted((hoi4 / "common" / "technologies").glob("*.txt")):
-        for key, _, block in parse_pdx(read_text(f)):
-            if key != "technologies" or not isinstance(block, list):
-                continue
-            for name, _, tech in block:
-                if not isinstance(tech, list):
-                    continue
-                for k, _, v in tech:
-                    if k == "enable_building" and isinstance(v, list) and get(v, "building"):
-                        try:
-                            gated.setdefault(get(v, "building"), {})[name] = int(float(get(v, "level", 1)))
-                        except (TypeError, ValueError):
-                            pass
-    return gated
 
 
 def history_values(items, key, out):
@@ -1651,20 +1600,19 @@ def history_values(items, key, out):
 
 
 def write_country_economy(hoi4: Path, out: Path, tags):
-    """common/hoi4_country_economy.json5: per country the start's consumer goods, construction speed, research slots
-    (set_research_slots) and research speed (research_speed_factor), summed from
-    its starting ideas (laws it doesn't set take the category's default law) and technologies:
-    consumer_goods (the economy law's expected share), consumer_goods_factor (other ideas, stacking multiplicatively),
-    construction_speed (production_speed_buildings_factor) and per building speed (production_speed_<b>_factor)."""
+    """common/hoi4_country_economy.json5: per country its research slots (set_research_slots, else
+    BASE_RESEARCH_SLOTS), its laws and its starting ideas (laws it doesn't set take the category's default law).
+    common/hoi4_ideas.json5: those ideas and every law, with their category and modifiers (every numeric key).
+    The game adds the ideas' and the known technologies' modifiers to the engine's modifier system (Hoi4Modifiers)
+    and reads consumer goods, construction and research speed from it."""
     ideas = load_idea_modifiers(hoi4)
-    techs = load_tech_modifiers(hoi4)
-    gated = load_building_techs(hoi4)
     defaults = {}
     for name, i in sorted(ideas.items()):
         # the generic default law of each law category, not a country's own law (ETH_chitet_law)
         if i["law"] and i["default"] and not re.match(r"[A-Z]{3}_", name):
             defaults.setdefault(i["category"], name)
-    lines = ["// Generated by hoi4_convert.py from history/countries, common/ideas and common/technologies", "{"]
+    lines = ["// Generated by hoi4_convert.py from history/countries and common/ideas", "{"]
+    used = set()
     for tag in sorted(tags):
         files = sorted((hoi4 / "history" / "countries").glob(f"{tag} - *.txt"))
         if not files:
@@ -1673,39 +1621,23 @@ def write_country_economy(hoi4: Path, out: Path, tags):
         own = [i for i in history_values(root, "add_ideas", []) if isinstance(i, str) and i in ideas]
         cats = {ideas[i]["category"] for i in own if ideas[i]["law"]}
         own += [law for cat, law in defaults.items() if cat not in cats]
-        known = set()
-        for block in collect_blocks(root, "set_technology", []):
-            known |= {k for k, _, v in block if isinstance(k, str) and str(v) != "0"}
-        tech = sorted(k for k in known if k in techs)
-        # tech-gated buildings: the most levels the country's 1936 technologies allow (0 = not researched)
-        unlocked = {b: max([lvl for tn, lvl in by.items() if tn in known] or [0]) for b, by in sorted(gated.items())}
-        total = {k: 0.0 for k in ECONOMY_KEYS}
-        cg_factor = 1.0
-        for src in [ideas[i]["mods"] for i in own] + [techs[t] for t in tech]:
-            for k, v in src.items():
-                if k == "consumer_goods_factor":
-                    cg_factor *= 1.0 + v
-                else:
-                    total[k] = total.get(k, 0.0) + v
-        speed = {}
-        for k, v in total.items():
-            m = BUILDING_SPEED.fullmatch(k)
-            if m and m.group(1) not in ("buildings", "buildings_powered", "facility") and round(v, 4) != 0:
-                speed[m.group(1)] = round(v, 4)
         # research slots: the start's set_research_slots, else NCountry BASE_RESEARCH_SLOTS (2)
         slots = [v for v in history_values(root, "set_research_slots", []) if str(v).isdigit()]
-        e = {"consumer_goods": round(total["consumer_goods_expected_value"], 4),
-             "consumer_goods_factor": round(cg_factor - 1.0, 4),
-             "construction_speed": round(total["production_speed_buildings_factor"], 4),
-             "research_slots": int(slots[-1]) if slots else BASE_RESEARCH_SLOTS,
-             "research_speed": round(total["research_speed_factor"], 4),
-             "speed": speed,
+        e = {"research_slots": int(slots[-1]) if slots else BASE_RESEARCH_SLOTS,
              "laws": sorted(i for i in own if ideas[i]["law"]),
-             "unlocked": unlocked}
+             "ideas": sorted(set(own))}
+        used.update(own)
         lines.append(f"  {tag}: {json.dumps(e)},")
     lines.append("}")
     (out / "common" / "hoi4_country_economy.json5").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"Country economy: {len(lines) - 3} countries")
+    # the ideas countries start with, and every law (a country may change law)
+    kept = {n: {"category": i["category"], "law": i["law"],
+                "modifiers": {k: round(v, 6) for k, v in sorted(i["mods"].items())}}
+            for n, i in sorted(ideas.items()) if n in used or i["law"]}
+    (out / "common" / "hoi4_ideas.json5").write_text(
+        "// Generated by hoi4_convert.py from common/ideas: the ideas countries start with and every law\n"
+        + json.dumps(kept, indent=1) + "\n", encoding="utf-8")
+    print(f"Country economy: {len(lines) - 3} countries, {len(kept)} ideas and laws")
 
 
 # Keys of a technology block that are not modifiers (scalars) or unit bonuses (blocks)

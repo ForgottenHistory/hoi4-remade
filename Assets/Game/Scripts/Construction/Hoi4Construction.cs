@@ -10,6 +10,8 @@ using Newtonsoft.Json.Linq;
 using UnityEngine;
 using FP = Core.Data.FixedPoint64;
 
+using Hoi4.Modifiers;
+
 namespace Hoi4.Construction
 {
     /// <summary>One construction order: Count levels of a building in a state, built one after another (HOI4: queueing
@@ -58,6 +60,7 @@ namespace Hoi4.Construction
         public const int MaxFactoriesPerItem = 15;                                  // MAX_CIV_FACTORIES_PER_LINE
         static readonly FP MinConsumerGoodsShare = FP.FromFraction(1, 10);         // ..._CONSUMER_GOODS_PERCENT
         const int MinConsumerGoods = 1;                                             // ..._CONSUMER_GOODS_VALUE
+        static readonly FP CivilianEconomy = FP.FromFraction(35, 100);             // civilian_economy's expected share
         public const int MaxInfrastructure = 5;
         public const int MaxQueue = 200;
         const int ReportEveryDays = 7;
@@ -73,7 +76,7 @@ namespace Hoi4.Construction
         /// gates it, 0 while it is not researched (HOI4 greys the building out), else the highest level unlocked
         /// (radar 1..6 by technology).</summary>
         public int TechCap(ushort country, string building) =>
-            EconomyOf(country).Unlocked.TryGetValue(building, out int n) ? n : int.MaxValue;
+            Hoi4.Research.Hoi4Research.Instance != null ? Hoi4.Research.Hoi4Research.Instance.BuildingLevel(country, building) : int.MaxValue;
 
         /// <summary>Whether the country can build it at all: researched, and one of Buildable.</summary>
         public bool Researched(ushort country, string building) =>
@@ -81,16 +84,11 @@ namespace Hoi4.Construction
 
         public static Hoi4Construction Instance { get; private set; }
 
-        /// <summary>A country's economy at the start: consumer goods and construction speed.</summary>
+        /// <summary>A country's laws at the start. Consumer goods and construction speed come from the modifier system
+        /// (Hoi4Modifiers), building levels from its technologies (Hoi4Research).</summary>
         public sealed class Economy
         {
-            public FP ConsumerGoods;        // the economy law's share
-            public FP ConsumerGoodsFactor;  // other ideas, stacked
-            public FP Speed;                // construction speed
-            public readonly Dictionary<string, FP> BuildingSpeed = new Dictionary<string, FP>();
             public readonly List<string> Laws = new List<string>();
-            // tech-gated buildings (HOI4 enable_building) -> most levels the country's technologies allow (0: locked)
-            public readonly Dictionary<string, int> Unlocked = new Dictionary<string, int>();
         }
 
         sealed class CountryConstruction
@@ -102,6 +100,8 @@ namespace Hoi4.Construction
 
         GameState gameState;
         readonly Dictionary<ushort, Economy> economies = new Dictionary<ushort, Economy>();
+        readonly Dictionary<string, ushort> buildingSpeedIds = new Dictionary<string, ushort>(); // production_speed_[b]_factor
+        ushort consumerGoodsId, consumerGoodsFactorId, constructionSpeedId;
         readonly SortedDictionary<ushort, CountryConstruction> countries = new SortedDictionary<ushort, CountryConstruction>();
         readonly Dictionary<ushort, int> civilian = new Dictionary<ushort, int>();
         readonly Dictionary<ushort, int> military = new Dictionary<ushort, int>();
@@ -135,9 +135,14 @@ namespace Hoi4.Construction
                    || Engine.ArchonEngine.Instance.GameState.Provinces == null || !DataFileResolver.IsInitialized
                    || !Hoi4Buildings.Available
                    // the countries must exist before their tags resolve (the divisions load after them)
-                   || Hoi4.Units.Hoi4Divisions.Instance == null || !Hoi4.Units.Hoi4Divisions.Instance.IsLoaded)
+                   || Hoi4.Units.Hoi4Divisions.Instance == null || !Hoi4.Units.Hoi4Divisions.Instance.IsLoaded
+                   // consumer goods and speed: the modifier system, filled by research (ideas and technologies)
+                   || Hoi4.Research.Hoi4Research.Instance == null || !Hoi4.Research.Hoi4Research.Instance.IsReady)
                 yield return null;
             gameState = Engine.ArchonEngine.Instance.GameState;
+            consumerGoodsId = Hoi4Modifiers.Id(Hoi4Modifiers.ConsumerGoods);
+            consumerGoodsFactorId = Hoi4Modifiers.Id(Hoi4Modifiers.ConsumerGoodsFactor);
+            constructionSpeedId = Hoi4Modifiers.Id(Hoi4Modifiers.ConstructionSpeed);
 
             string path = DataFileResolver.Resolve(EconomyFile);
             if (File.Exists(path))
@@ -145,15 +150,8 @@ namespace Hoi4.Construction
                 {
                     ushort country = gameState.Countries.GetCountryIdFromTag(p.Name);
                     if (country == 0 || !(p.Value is JObject o)) continue;
-                    var e = new Economy
-                    {
-                        ConsumerGoods = Num(o["consumer_goods"]),
-                        ConsumerGoodsFactor = Num(o["consumer_goods_factor"]),
-                        Speed = Num(o["construction_speed"]),
-                    };
-                    if (o["speed"] is JObject s) foreach (var b in s.Properties()) e.BuildingSpeed[b.Name] = Num(b.Value);
+                    var e = new Economy();
                     if (o["laws"] is JArray laws) foreach (var l in laws) e.Laws.Add((string)l);
-                    if (o["unlocked"] is JObject unlocked) foreach (var u in unlocked.Properties()) e.Unlocked[u.Name] = (int)u.Value;
                     economies[country] = e;
                 }
             else
@@ -172,8 +170,7 @@ namespace Hoi4.Construction
 
         public Economy EconomyOf(ushort country)
         {
-            if (!economies.TryGetValue(country, out var e))
-                economies[country] = e = new Economy { ConsumerGoods = FP.FromFraction(35, 100) }; // civilian economy
+            if (!economies.TryGetValue(country, out var e)) economies[country] = e = new Economy();
             return e;
         }
 
@@ -204,12 +201,16 @@ namespace Hoi4.Construction
         {
             int civ = Civilian(country);
             if (civ == 0) return 0;
-            var e = EconomyOf(country);
-            FP share = FP.Max(MinConsumerGoodsShare, e.ConsumerGoods * (FP.One + e.ConsumerGoodsFactor));
+            // the economy law's share x every other idea's (1 + factor); a country without ideas: civilian economy
+            FP expected = Hoi4Modifiers.HasCountry(country) ? Hoi4Modifiers.Sum(country, consumerGoodsId) : CivilianEconomy;
+            FP share = FP.Max(MinConsumerGoodsShare, expected * Hoi4Modifiers.Product(country, consumerGoodsFactorId));
             int total = civ + Military(country);
             int cg = FP.Floor(share * total).ToInt();
             return System.Math.Min(civ, System.Math.Max(MinConsumerGoods, cg));
         }
+
+        /// <summary>Construction speed: production_speed_buildings_factor of the country's ideas and technologies.</summary>
+        public FP ConstructionSpeed(ushort country) => Hoi4Modifiers.Sum(country, constructionSpeedId);
 
         /// <summary>Civilian factories free for construction.</summary>
         public int Available(ushort country) => System.Math.Max(0, Civilian(country) - ConsumerGoods(country));
@@ -285,9 +286,10 @@ namespace Hoi4.Construction
         /// speed) x (1 + infrastructure / 5) when infrastructure speeds the building up.</summary>
         public FP SpeedPerFactory(ushort country, int state, string building)
         {
-            var e = EconomyOf(country);
-            e.BuildingSpeed.TryGetValue(building, out FP own);
-            FP speed = CivilianOutput * FP.Max(FP.Zero, FP.One + e.Speed + own);
+            if (!buildingSpeedIds.TryGetValue(building, out ushort ownId))
+                buildingSpeedIds[building] = ownId = Hoi4Modifiers.BuildingSpeedId(building);
+            FP own = Hoi4Modifiers.Sum(country, ownId);
+            FP speed = CivilianOutput * FP.Max(FP.Zero, FP.One + ConstructionSpeed(country) + own);
             var def = Hoi4StateData.Def(building);
             if (def != null && def.InfraSpeed)
                 speed = speed * (FP.One + FP.FromInt(Hoi4Buildings.Level(state, "infrastructure")) / MaxInfrastructure);

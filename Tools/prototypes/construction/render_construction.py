@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "Tools"))
 import hoi4_gui as gui  # noqa: E402
 from manpower_pools import json5  # noqa: E402
+from hoi4_modifiers import country_modifiers  # noqa: E402
 
 HOI4 = Path(r"C:\Program Files (x86)\Steam\steamapps\common\Hearts of Iron IV")
 DATA = ROOT / "Hoi4Data"
@@ -95,8 +96,8 @@ def main():
     a = ap.parse_args()
 
     defs, civ, mil = country_factories(a.tag)
-    e = json5(DATA / "common" / "hoi4_country_economy.json5")[a.tag]
-    share = max(0.1, e["consumer_goods"] * (1 + e["consumer_goods_factor"]))
+    m = country_modifiers(a.tag)   # ideas + technologies, as the game's Hoi4Modifiers
+    share = max(0.1, m.sum("consumer_goods_expected_value") * m.product("consumer_goods_factor"))
     cg = min(civ, max(1, math.floor((civ + mil) * share)))
 
     win = gui.window(HOI4, "countryconstructionsview.gui", "countryconstructionsview")
@@ -125,7 +126,7 @@ def main():
         text(d, (x + 70, y), str(v), 16, anchor="ra")
     canvas.alpha_composite(img("speed_icon.png"), P("construction_speed_icon"))
     x, y = P("construction_speed_value")
-    speed = e["construction_speed"]
+    speed = m.sum("production_speed_buildings_factor")
     text(d, (x + 70, y), f"{speed:+.0%}", 16, fill=(120, 220, 90) if speed >= 0 else (230, 80, 60), anchor="ra")
 
     # column headers

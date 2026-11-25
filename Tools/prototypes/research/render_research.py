@@ -1,6 +1,6 @@
 """Prototype of the HOI4 research screen's slots tab (interface/countrytechnologyview.gui), drawn from the gui layout
 and the sprites the converter writes (Hoi4Data/gfx/interface/research), with a country's research slots and research
-speed from common/hoi4_country_economy.json5. Check it against a HOI4 screenshot before porting to UXML.
+speed from common/hoi4_country_economy.json5 and the country's modifiers (Tools/hoi4_modifiers.py). Check it against a HOI4 screenshot before porting to UXML.
 
 Empty slots glow (GFX_empty_research_slot_glow, two frames blended) and their bar shows the research saved while idle:
 up to NTechnology BASE_RESEARCH_POINTS_SAVED (30) days, spent on the next technology picked for that slot.
@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "Tools"))
 import hoi4_gui as gui  # noqa: E402
 from manpower_pools import json5  # noqa: E402
+from hoi4_modifiers import country_modifiers  # noqa: E402
 
 HOI4 = Path(r"C:\Program Files (x86)\Steam\steamapps\common\Hearts of Iron IV")
 DATA = ROOT / "Hoi4Data"
@@ -88,7 +89,7 @@ def main():
     a = ap.parse_args()
 
     econ = json5(DATA / "common" / "hoi4_country_economy.json5")[a.tag]
-    slots, speed = econ.get("research_slots", 2), econ.get("research_speed", 0.0)
+    slots, speed = econ.get("research_slots", 2), country_modifiers(a.tag).sum("research_speed_factor")
 
     win = gui.window(HOI4, "countrytechnologyview.gui", "countrytechnologyview")
     W, H = 550, 1000

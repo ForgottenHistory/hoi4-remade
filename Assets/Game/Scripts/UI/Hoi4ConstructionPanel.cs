@@ -378,7 +378,7 @@ namespace Hoi4.UI
             factories.text = $"{used}/{civ}";
             factories.EnableInClassList("all-used", used >= civ);
             panel.Q<Label>("co-owned").text = civ.ToString();
-            var speed = construction.EconomyOf(shownCountry).Speed.ToFloat();
+            var speed = construction.ConstructionSpeed(shownCountry).ToFloat();
             var speedLabel = panel.Q<Label>("co-speed");
             speedLabel.text = (speed >= 0 ? "+" : "") + Mathf.RoundToInt(speed * 100) + "%";
             speedLabel.EnableInClassList("negative", speed < 0);

@@ -34,7 +34,6 @@ namespace Hoi4.Research
         public readonly List<string> SubUnits = new List<string>();
         public readonly Dictionary<string, int> Buildings = new Dictionary<string, int>();
         public readonly Dictionary<string, FP> Modifiers = new Dictionary<string, FP>();
-        public FP ResearchSpeed;     // its research_speed_factor (the country's speed once researched)
         public JObject Ai;           // ai_will_do: base and modifiers with their triggers (Hoi4ResearchAI)
     }
 
@@ -56,7 +55,8 @@ namespace Hoi4.Research
     /// - Technologies: the tech tree folders' technologies (common/hoi4_technologies.json5, every DLC assumed owned), each
     ///   country's 1936 ones from its history.
     /// - Slots: set_research_slots in the 1936 history, else BASE_RESEARCH_SLOTS (2). Research speed: research_speed_factor
-    ///   of the 1936 ideas and technologies (Germany +1%), plus each technology researched since.
+    ///   of the country's ideas and technologies, from the modifier system (Hoi4Modifiers; Germany +1% at the start);
+    ///   a change rebooks its slots.
     /// - A tech needs research_cost x BASE_TECH_COST (110) points, x the research_cost_coeff of the path from a parent
     ///   it has (the cheapest). It can be researched once any one of the techs leading to it is known (a tech nothing
     ///   leads to: always), every dependency is known, nothing it excludes (xor) is known or in a slot, and no other
@@ -109,6 +109,7 @@ namespace Hoi4.Research
         readonly List<JObject> strategies = new List<JObject>();
         // day number (year x 365 + day of the year) -> slots finishing then, as country << 8 | slot
         readonly Dictionary<int, List<int>> finishing = new Dictionary<int, List<int>>();
+        readonly Dictionary<string, List<(int tech, int level)>> buildingGates = new Dictionary<string, List<(int, int)>>(); // building -> techs enabling it, up to a level
         int today;                         // the last simulated day (the start date before the first)
         const int MaxResearchDays = 36500; // a booking past this never finishes (speed floor 0.1: 5500 days at most)
 
@@ -126,6 +127,7 @@ namespace Hoi4.Research
         void OnDestroy()
         {
             if (Instance == this) Instance = null;
+            Hoi4.Modifiers.Hoi4Modifiers.Changed -= OnModifiersChanged;
         }
 
         IEnumerator Start()
@@ -139,6 +141,11 @@ namespace Hoi4.Research
             today = DayNumber();
 
             var start = LoadTechnologies();
+            // the modifier system: ideas now, each country's known technologies below (their keys get ids too)
+            var keys = new HashSet<string>();
+            foreach (var t in techs) foreach (var k in t.Modifiers.Keys) keys.Add(k);
+            Hoi4.Modifiers.Hoi4Modifiers.Initialize(gameState, keys);
+            Hoi4.Modifiers.Hoi4Modifiers.Changed += OnModifiersChanged;
             string path = DataFileResolver.Resolve(EconomyFile);
             if (File.Exists(path))
                 foreach (var p in Json5Loader.LoadJson5File(path).Properties())
@@ -147,9 +154,13 @@ namespace Hoi4.Research
                     if (country == 0 || !(p.Value is JObject o)) continue;
                     int slots = o["research_slots"] != null ? (int)o["research_slots"] : BaseSlots;
                     var c = Create(country, slots);
-                    c.Speed = o["research_speed"] != null ? FP.FromDouble((double)o["research_speed"]) : FP.Zero;
                     if (start.TryGetValue(p.Name, out var known))
-                        foreach (int t in known) c.Known[t] = true;
+                        foreach (int t in known)
+                        {
+                            c.Known[t] = true;
+                            Hoi4.Modifiers.Hoi4Modifiers.AddTechnology(country, t, techs[t].Modifiers, quiet: true);
+                        }
+                    c.Speed = Hoi4.Modifiers.Hoi4Modifiers.Sum(country, Hoi4.Modifiers.Hoi4Modifiers.ResearchSpeed);
                 }
             else
                 ArchonLogger.LogWarning($"Hoi4Research: no {EconomyFile} (run Tools/hoi4_convert.py); no country researches", "game_research");
@@ -198,7 +209,11 @@ namespace Hoi4.Research
                 if (o["subunits"] is JArray su) foreach (var s in su) t.SubUnits.Add((string)s);
                 if (o["buildings"] is JObject b) foreach (var x in b.Properties()) t.Buildings[x.Name] = (int)x.Value;
                 if (o["modifiers"] is JObject m) foreach (var x in m.Properties()) t.Modifiers[x.Name] = Num(x.Value);
-                t.Modifiers.TryGetValue("research_speed_factor", out t.ResearchSpeed);
+                foreach (var gate in t.Buildings)
+                {
+                    if (!buildingGates.TryGetValue(gate.Key, out var gates)) buildingGates[gate.Key] = gates = new List<(int, int)>();
+                    gates.Add((t.Index, gate.Value));
+                }
                 t.Ai = o["ai"] as JObject;
                 if (o["places"] is JArray places)
                     foreach (var pl in places)
@@ -432,6 +447,25 @@ namespace Hoi4.Research
             list.Add(country << 8 | slot);
         }
 
+        /// <summary>A country's modifiers changed: research_speed_factor may have.</summary>
+        void OnModifiersChanged(ushort country)
+        {
+            if (!countries.TryGetValue(country, out var c)) return;
+            FP speed = Hoi4.Modifiers.Hoi4Modifiers.Sum(country, Hoi4.Modifiers.Hoi4Modifiers.ResearchSpeed);
+            if (speed != c.Speed) SetSpeed(country, c, speed);
+        }
+
+        /// <summary>Most levels of a building the country's technologies allow: int.MaxValue when no technology gates
+        /// it, 0 while none of its technologies is researched (HOI4 greys it out), else the highest level unlocked
+        /// (radar 1..6 by technology).</summary>
+        public int BuildingLevel(ushort country, string building)
+        {
+            if (!buildingGates.TryGetValue(building, out var gates)) return int.MaxValue;
+            int best = 0;
+            foreach (var (tech, level) in gates) if (Known(country, tech) && level > best) best = level;
+            return best;
+        }
+
         /// <summary>The country's research speed changed (a tech or, later, a law): its slots keep the progress made
         /// so far and are booked again at the new speed, which counts from the next day.</summary>
         void SetSpeed(ushort country, CountryResearch c, FP speed)
@@ -487,7 +521,8 @@ namespace Hoi4.Research
                     other.Technology = -1;
                     other.EmptySince = today;
                 }
-            if (techs[tech].ResearchSpeed != FP.Zero) SetSpeed(country, c, c.Speed + techs[tech].ResearchSpeed);
+            // its modifiers join the country's (a research speed change comes back through OnModifiersChanged)
+            Hoi4.Modifiers.Hoi4Modifiers.AddTechnology(country, tech, techs[tech].Modifiers);
             Core.Recording.SessionRecorder.Note("research", "done", country, 0, 0, 0, techs[tech].Id);
             Researched?.Invoke(country, tech);
         }
