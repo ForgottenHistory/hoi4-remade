@@ -1,0 +1,66 @@
+/* HOI4 research screen (interface/countrytechnologyview.gui). Positions and sizes are HOI4's, in HOI4 pixels.
+   Sprites from gfx/interface/research/ (converter: convert_research_gfx); tiled ones are 9-sliced with their
+   borderSize. Prototype: Tools/prototypes/research/render_research.py */
+
+.rs-window { position: absolute; left: 0; top: 78px; bottom: 0; width: 550px; display: none; }
+.rs-plain-bg {
+    --sprite: "gfx/interface/research/plain_bg.png"; left: 0; top: 0; right: 0; bottom: 0;
+    -unity-slice-left: 64; -unity-slice-right: 64; -unity-slice-top: 64; -unity-slice-bottom: 64;
+}
+.rs-header-bg { --sprite: "gfx/interface/research/header_bg.png"; left: 5px; top: 7px; width: 543px; height: 41px; }
+.rs-title { left: 45px; top: 10px; height: 34px; font-size: 22px; letter-spacing: 3px; }
+.rs-close { --sprite: "gfx/interface/research/close.png"; left: 507px; top: 9px; width: 32px; height: 33px; }
+
+/* tabs: GFX_tab_large, frame 0 on the open tab, 1 on the other */
+.rs-tab { --sprite: "gfx/interface/research/tab_1.png"; top: 44px; width: 258px; height: 42px; }
+.rs-tab.selected { --sprite: "gfx/interface/research/tab_0.png"; }
+.rs-tab-slots { left: 25px; }
+.rs-tab-facilities { left: 275px; }
+.rs-tab-label { left: 0; top: 0; width: 258px; height: 42px; font-size: 16px; -unity-font-style: bold; }
+
+/* research_slots (y 80, to 5 above the bottom) */
+.rs-page { position: absolute; left: 0; top: 80px; right: 0; bottom: 5px; }
+.rs-hidden { display: none; }
+.rs-slots-border {
+    --sprite: "gfx/interface/research/slots_border.png"; left: 0; top: 0; right: 0; bottom: 0;
+    -unity-slice-left: 64; -unity-slice-right: 64; -unity-slice-top: 64; -unity-slice-bottom: 64;
+}
+/* GFX_tiled_generic_overlay_bg1: corners of 268 (the oak leaves at the bottom) */
+.rs-overlay {
+    --sprite: "gfx/interface/research/overlay_bg.png"; left: 0; top: 0; width: 549px; bottom: 0;
+    -unity-slice-left: 268; -unity-slice-right: 268; -unity-slice-top: 268; -unity-slice-bottom: 268;
+}
+.rs-top-win { --sprite: "gfx/interface/research/top_win.png"; left: 1px; top: 0; width: 548px; height: 138px; }
+.rs-limited-text { left: 50px; top: 110px; width: 130px; height: 20px; font-size: 15px; -unity-font-style: bold; }
+.rs-focus-icon { --sprite: "gfx/interface/research/focus_bonuses_icon.png"; left: 180px; top: 108px; width: 32px; height: 23px; }
+.rs-limited { left: 215px; top: 110px; width: 50px; height: 20px; font-size: 15px; -unity-font-style: bold; }
+.rs-speed-text { left: 295px; top: 110px; width: 125px; height: 20px; font-size: 15px; -unity-font-style: bold; }
+.rs-speed-icon { --sprite: "gfx/interface/research/speed_icon.png"; left: 422px; top: 108px; width: 31px; height: 25px; }
+.rs-speed { left: 455px; top: 110px; width: 50px; height: 20px; font-size: 15px; -unity-font-style: bold; color: rgb(140, 220, 100); }
+.rs-speed.negative { color: rgb(230, 80, 60); }
+
+/* slots_window (y 140), research_slots_grid at x 15, slots 500 x 100 */
+.rs-slots { position: absolute; left: 15px; top: 140px; right: 4px; bottom: 20px; }
+.rs-slots .unity-scroller--vertical { width: 8px; background-color: rgba(10, 13, 13, 0.85); }
+.rs-slots .unity-scroller__low-button, .rs-slots .unity-scroller__high-button { display: none; }
+.rs-slots .unity-scroller__slider { margin: 0; border-width: 0; background-color: rgba(0, 0, 0, 0); }
+
+.rs-placeholder { left: 0; top: 40px; width: 550px; height: 30px; font-size: 16px; color: rgb(170, 170, 160); }
+
+/* research_win_bottom: the bottom 20 px of GFX_production_win_bottom */
+.rs-bottom { position: absolute; left: 1px; bottom: 0; width: 546px; height: 20px; overflow: hidden; }
+.rs-bottom-img { --sprite: "gfx/interface/research/win_bottom.png"; left: 0; top: -46px; width: 546px; height: 66px; }
+
+/* one slot: research_slot_entry */
+.rs-entry { position: relative; width: 500px; height: 100px; flex-shrink: 0; }
+.rs-entry-bg { --sprite: "gfx/interface/research/line_bg.png"; left: 0; top: 0; width: 508px; height: 99px; }
+.rs-glow { --sprite: "gfx/interface/research/empty_glow_0.png"; left: 12px; top: 10px; width: 475px; height: 78px; }
+.rs-glow-b { --sprite: "gfx/interface/research/empty_glow_1.png"; }
+.rs-entry-title { left: 57px; top: 12px; width: 400px; height: 20px; font-size: 15px; -unity-font-style: bold; }
+.rs-bar-frame { --sprite: "gfx/interface/research/progress_frame.png"; left: 62px; top: 79px; width: 383px; height: 10px; }
+.rs-bar-bg { --sprite: "gfx/interface/research/progress_bar_bg.png"; left: 65px; top: 81px; width: 377px; height: 4px; }
+/* Gfx_research_progressbar (progress_startend): three 4 px rows. The body (row 1) left-aligned up to the progress,
+   the bright tip (row 2) right-aligned so its end sits at the progress */
+.rs-bar-clip { position: absolute; left: 65px; top: 81px; width: 0; height: 4px; overflow: hidden; }
+.rs-bar-body { --sprite: "gfx/interface/research/progress_bar.png"; left: 0; top: -4px; width: 377px; height: 12px; }
+.rs-bar-tip { --sprite: "gfx/interface/research/progress_bar.png"; right: 0; top: -8px; width: 377px; height: 12px; }

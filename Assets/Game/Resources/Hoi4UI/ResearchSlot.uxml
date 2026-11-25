@@ -1,0 +1,16 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <!-- One research slot (countrytechnologyview.gui research_slot_entry, 500 x 100) -->
+    <ui:VisualElement class="rs-entry" picking-mode="Position">
+        <ui:VisualElement class="spr rs-entry-bg" picking-mode="Ignore" />
+        <!-- empty_research_slot_glow: two frames, HOI4 blends them (buttonstate_blendframes) -->
+        <ui:VisualElement name="rs-glow" class="spr rs-glow" picking-mode="Ignore" />
+        <ui:VisualElement name="rs-glow-b" class="spr rs-glow rs-glow-b" picking-mode="Ignore" />
+        <ui:Label name="rs-entry-title" class="hoi4-label rs-entry-title" picking-mode="Ignore" />
+        <ui:VisualElement class="spr rs-bar-frame" picking-mode="Ignore" />
+        <ui:VisualElement class="spr rs-bar-bg" picking-mode="Ignore" />
+        <ui:VisualElement name="rs-bar" class="rs-bar-clip" picking-mode="Ignore">
+            <ui:VisualElement class="spr rs-bar-body" picking-mode="Ignore" />
+            <ui:VisualElement class="spr rs-bar-tip" picking-mode="Ignore" />
+        </ui:VisualElement>
+    </ui:VisualElement>
+</ui:UXML>

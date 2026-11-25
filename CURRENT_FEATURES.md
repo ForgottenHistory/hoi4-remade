@@ -16,13 +16,15 @@
 
 **Construction:** Civilian factories and consumer goods from economy laws, a construction queue (civilian and military factories, infrastructure) with infrastructure speed-up and shared slots, construction AI and the construction screen
 
+**Research:** Research slots per country (1936 history), research speed, empty slots saving up to 30 days of research, the research screen's slots tab (technologies not in yet)
+
 **Recruit & deploy:** Training lines per deployment order take manpower up front, get equipment after the field, train up to their equipment level and deploy at the capital or a chosen province; recruitment AI and the recruit & deploy screen
 
 **AI:** War AI in layers: theatres, budgets and 24-division armies holding front-line sections like the player's, odds-based attacks from the line; army plans (role templates, division mix, factory split); production, construction and recruitment AI
 
 **Simulation:** Every decision is a command, one fixed-order hourly tick, fixed-point maths and adjacency-based fronts (deterministic, lockstep-ready), session recordings for debugging
 
-**UI:** Top bar, production screen, state panel, division panel, army cards, battle plan window, diplomacy panel (UI Toolkit: UXML + USS + C#), all sprites loaded at runtime from the converted data
+**UI:** Top bar, production screen, research screen, state panel, division panel, army cards, battle plan window, diplomacy panel (UI Toolkit: UXML + USS + C#), all sprites loaded at runtime from the converted data
 
 **Data:** One Python converter turns the HOI4 install into an Archon data directory
 
@@ -125,6 +127,17 @@ The goal is to stress-test Archon-Engine, not to ship a game. Big visual wins ar
 - **Recording** - Weekly `construction` notes (civilian, military, consumer goods, free, queue, built), `done`, `dropped` and `ai_queue` notes, a Construction section in `report.py`, `construction` and `ai_construction` columns in `perf.tsv`
 
 ---
+
+## Research
+
+`Assets/Game/Scripts/Research/` (wiki "Research", `NDefines.NCountry` / `NTechnology`):
+
+- **Slots** - `set_research_slots` from the country's 1936 history, else `BASE_RESEARCH_SLOTS` (2), in `common/hoi4_country_economy.json5`. Matches real HOI4 Germany (4)
+- **Research speed** - `research_speed_factor` summed over the 1936 ideas and technologies (Germany +1%, as in HOI4)
+- **Saved research** - Each day an empty slot saves a day of research, up to `BASE_RESEARCH_POINTS_SAVED` (30), for the next technology picked in it
+- **Research screen** - HOI4's `countrytechnologyview.gui` layout and art, opened by the top bar's research button or W (shares the left side with production, construction and deployment): limited bonuses, research speed, one entry per slot; an empty slot glows (the two glow frames blended) and its bar shows the saved research out of 30 days. The Experimental Facilities tab is a placeholder (prototype `Tools/prototypes/research/render_research.py`)
+- **Not yet** - Technologies, the tech tree, picking and progress, experimental facilities, limited bonuses
+- **Recording** - A `research` column in `perf.tsv`
 
 ## Recruit and Deploy
 

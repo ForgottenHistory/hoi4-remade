@@ -34,6 +34,7 @@
         <ui:VisualElement name="step-5" class="spr hoi4-button tb-step tb-step-5" picking-mode="Position" />
         <ui:Label name="date" class="tb-label right tb-date" picking-mode="Ignore" />
 
+        <ui:VisualElement name="research-button" class="spr hoi4-button tb-research" picking-mode="Position" />
         <ui:VisualElement name="construction-button" class="spr hoi4-button tb-construction" picking-mode="Position" />
         <ui:VisualElement name="production-button" class="spr hoi4-button tb-production" picking-mode="Position" />
         <ui:VisualElement name="deployment-button" class="spr hoi4-button tb-deployment" picking-mode="Position" />

@@ -528,6 +528,7 @@ def convert(hoi4: Path, out: Path):
     convert_battleplan_gfx(hoi4, out)
     convert_peace_gfx(hoi4, out)
     convert_production_gfx(hoi4, out, oob_countries)
+    convert_research_gfx(hoi4, out)
     convert_construction_gfx(hoi4, out)
     convert_deployment_gfx(hoi4, out)
     convert_designer_gfx(hoi4, out, land_subs)
@@ -1554,7 +1555,8 @@ def convert_move_arrow(hoi4: Path, out: Path, arrow_name="move_thick"):
 
 
 # Modifiers the economy uses (consumer goods and construction speed), from ideas (`modifier = {}`) and technologies
-ECONOMY_KEYS = ("consumer_goods_expected_value", "consumer_goods_factor", "production_speed_buildings_factor")
+ECONOMY_KEYS = ("consumer_goods_expected_value", "consumer_goods_factor", "production_speed_buildings_factor",
+                "research_speed_factor")
 BUILDING_SPEED = re.compile(r"production_speed_(\w+)_factor")  # production_speed_<building>_factor
 
 
@@ -1645,7 +1647,8 @@ def history_values(items, key, out):
 
 
 def write_country_economy(hoi4: Path, out: Path, tags):
-    """common/hoi4_country_economy.json5: per country the start's consumer goods and construction speed, summed from
+    """common/hoi4_country_economy.json5: per country the start's consumer goods, construction speed, research slots
+    (set_research_slots) and research speed (research_speed_factor), summed from
     its starting ideas (laws it doesn't set take the category's default law) and technologies:
     consumer_goods (the economy law's expected share), consumer_goods_factor (other ideas, stacking multiplicatively),
     construction_speed (production_speed_buildings_factor) and per building speed (production_speed_<b>_factor)."""
@@ -1685,9 +1688,13 @@ def write_country_economy(hoi4: Path, out: Path, tags):
             m = BUILDING_SPEED.fullmatch(k)
             if m and m.group(1) not in ("buildings", "buildings_powered", "facility") and round(v, 4) != 0:
                 speed[m.group(1)] = round(v, 4)
+        # research slots: the start's set_research_slots, else NCountry BASE_RESEARCH_SLOTS (2)
+        slots = [v for v in history_values(root, "set_research_slots", []) if str(v).isdigit()]
         e = {"consumer_goods": round(total["consumer_goods_expected_value"], 4),
              "consumer_goods_factor": round(cg_factor - 1.0, 4),
              "construction_speed": round(total["production_speed_buildings_factor"], 4),
+             "research_slots": int(slots[-1]) if slots else BASE_RESEARCH_SLOTS,
+             "research_speed": round(total["research_speed_factor"], 4),
              "speed": speed,
              "laws": sorted(i for i in own if ideas[i]["law"]),
              "unlocked": unlocked}
@@ -1726,7 +1733,7 @@ TOPBAR_KEEP = [
     "pause_button_date", "button_speeddown", "button_speedup",
     "button_speedstep1", "button_speedstep2", "button_speedstep3", "button_speedstep4", "button_speedstep5",
     "DateText", "menu_button", "help_button", "threat_button", "threat_value",
-    "production_button", "production_button_glow", "construction_button", "deployment_button",
+    "production_button", "production_button_glow", "construction_button", "deployment_button", "technology_button",
 ]
 # Sprite overrides: the extended background has room for DLC menu buttons we don't show
 TOPBAR_SPRITE = {"background": "GFX_topbar_background"}
@@ -2199,6 +2206,46 @@ def convert_production_gfx(hoi4: Path, out: Path, oob_countries):
         else:
             print(f"  production: no picture {spr}")
     print(f"Production sprites written ({len(pictures)} equipment pictures)")
+
+
+# Research screen (interface/countrytechnologyview.gui) sprites: file name -> GFX sprite (frames as name_N.png)
+RESEARCH_SPRITES = {
+    "plain_bg": "GFX_tiled_plain_bg", "header_bg": "GFX_header_bg", "close": "GFX_closebutton", "tab": "GFX_tab_large",
+    "slots_border": "GFX_tiled_window2_1b_border", "overlay_bg": "GFX_tiled_generic_overlay_bg1",
+    "top_win": "GFX_research_top_win", "focus_bonuses_icon": "GFX_focus_bonuses_icon",
+    "speed_icon": "GFX_research_speed_icon", "line_bg": "GFX_research_line_bg",
+    "empty_glow": "GFX_empty_research_slot_glow", "progress_frame": "GFX_research_progressbar_frame",
+    "win_bottom": "GFX_production_win_bottom",
+}
+# Gfx_research_progressbar (progressbartype, 377 x 4): file name -> texture (fill, background)
+RESEARCH_BARS = {
+    "progress_bar": "gfx/interface/research_progressbar.dds",
+    "progress_bar_bg": "gfx/interface/research_progressbar_bg.dds",
+}
+BASE_RESEARCH_SLOTS = 2  # defines NCountry BASE_RESEARCH_SLOTS
+
+
+def convert_research_gfx(hoi4: Path, out: Path):
+    """Sprites of the research screen under gfx/interface/research/ for Hoi4ResearchPanel.
+    Prototype: Tools/prototypes/research/render_research.py"""
+    import hoi4_gui as gui
+    dst = out / "gfx" / "interface" / "research"
+    dst.mkdir(parents=True, exist_ok=True)
+    sprites = gui.load_sprites(hoi4)
+    for name, spr in RESEARCH_SPRITES.items():
+        frames = gui.sprite_frames(hoi4, sprites, spr)
+        if not frames:
+            print(f"  research: no sprite {spr}")
+            continue
+        for i, fr in enumerate(frames):
+            fr.save(dst / (f"{name}.png" if len(frames) == 1 else f"{name}_{i}.png"))
+    for name, rel in RESEARCH_BARS.items():
+        img = gui.load_image(hoi4, rel)
+        if img is None:
+            print(f"  research: no texture {rel}")
+            continue
+        img.save(dst / f"{name}.png")
+    print("Research sprites written")
 
 
 # State view (interface/countrystateview.gui) sprites: name -> GFX sprite

@@ -263,6 +263,7 @@ namespace Hoi4.UI
             if (root == null || Player == 0) return;
             if (Hoi4ProductionPanel.IsOpen) Hoi4ProductionPanel.Instance.Toggle(); // they share the left side
             if (Hoi4ConstructionPanel.IsOpen) Hoi4ConstructionPanel.Instance.Close();
+            if (Hoi4ResearchPanel.IsOpen) Hoi4ResearchPanel.Instance.Close();
             open = true;
             root.style.display = DisplayStyle.Flex;
             Hoi4UnitSelection.Instance?.Clear(); // the division panel would sit over the screen

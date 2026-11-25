@@ -1,0 +1,43 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <!-- HOI4 research screen (interface/countrytechnologyview.gui), positions in HOI4 pixels.
+         Prototype: Tools/prototypes/research/render_research.py -->
+    <ui:VisualElement name="research-panel" class="rs-window" picking-mode="Position">
+        <ui:VisualElement class="spr rs-plain-bg" picking-mode="Ignore" />
+
+        <!-- research_slots: border, overlay (oak leaves at the bottom), research_win_top, the slot list -->
+        <ui:VisualElement name="rs-slots-page" class="rs-page" picking-mode="Ignore">
+            <ui:VisualElement class="spr rs-slots-border" picking-mode="Ignore" />
+            <ui:VisualElement class="spr rs-overlay" picking-mode="Ignore" />
+            <ui:VisualElement class="spr rs-top-win" picking-mode="Ignore" />
+            <ui:Label class="hoi4-label rs-limited-text" text="Limited bonuses:" picking-mode="Ignore" />
+            <ui:VisualElement class="spr rs-focus-icon" picking-mode="Ignore" />
+            <ui:Label name="rs-limited" class="hoi4-label gold rs-limited" text="0" picking-mode="Ignore" />
+            <ui:Label class="hoi4-label rs-speed-text" text="Research speed:" picking-mode="Ignore" />
+            <ui:VisualElement class="spr rs-speed-icon" picking-mode="Ignore" />
+            <ui:Label name="rs-speed" class="hoi4-label rs-speed" text="+0%" picking-mode="Ignore" />
+            <ui:ScrollView name="rs-slots" class="rs-slots" mode="Vertical" horizontal-scroller-visibility="Hidden" />
+        </ui:VisualElement>
+
+        <!-- facilities: placeholder until experimental facilities exist -->
+        <ui:VisualElement name="rs-facilities-page" class="rs-page rs-hidden" picking-mode="Ignore">
+            <ui:VisualElement class="spr rs-slots-border" picking-mode="Ignore" />
+            <ui:VisualElement class="spr rs-overlay" picking-mode="Ignore" />
+            <ui:Label class="hoi4-label center rs-placeholder" text="Experimental facilities are not in yet" picking-mode="Ignore" />
+        </ui:VisualElement>
+
+        <ui:VisualElement class="rs-bottom" picking-mode="Ignore">
+            <ui:VisualElement class="spr rs-bottom-img" picking-mode="Ignore" />
+        </ui:VisualElement>
+
+        <ui:VisualElement name="rs-tab-slots" class="spr hoi4-button rs-tab rs-tab-slots selected" picking-mode="Position">
+            <ui:Label class="hoi4-label center rs-tab-label" text="Research Slots" picking-mode="Ignore" />
+        </ui:VisualElement>
+        <ui:VisualElement name="rs-tab-facilities" class="spr hoi4-button rs-tab rs-tab-facilities" picking-mode="Position">
+            <ui:Label class="hoi4-label center rs-tab-label" text="Experimental Facilities" picking-mode="Ignore" />
+        </ui:VisualElement>
+
+        <ui:VisualElement class="spr rs-header-bg" picking-mode="Ignore" />
+        <ui:Label class="hoi4-label rs-title" text="RESEARCH" picking-mode="Ignore" />
+        <ui:VisualElement name="rs-close" class="spr hoi4-button rs-close" picking-mode="Position" />
+    </ui:VisualElement>
+</ui:UXML>

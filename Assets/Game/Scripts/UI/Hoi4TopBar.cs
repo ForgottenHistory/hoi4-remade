@@ -46,7 +46,7 @@ namespace Hoi4.UI
         TimeManager time;
         PlayerState player;
         UIDocument document;
-        VisualElement bar, flag, pill, productionButton, constructionButton, deploymentButton;
+        VisualElement bar, flag, pill, productionButton, constructionButton, deploymentButton, researchButton;
         Label politicalPower, stability, warSupport, manpower, date;
         readonly VisualElement[] steps = new VisualElement[5];
         readonly Dictionary<string, JObject> stats = new Dictionary<string, JObject>();
@@ -148,6 +148,8 @@ namespace Hoi4.UI
             constructionButton.RegisterCallback<ClickEvent>(_ => Hoi4ConstructionPanel.Instance?.Toggle());
             deploymentButton = bar.Q("deployment-button");
             deploymentButton.RegisterCallback<ClickEvent>(_ => Hoi4DeploymentPanel.Instance?.Toggle());
+            researchButton = bar.Q("research-button");
+            researchButton.RegisterCallback<ClickEvent>(_ => Hoi4ResearchPanel.Instance?.Toggle());
             bar.Q("speed-down").RegisterCallback<ClickEvent>(_ => StepSpeed(-1));
             bar.Q("speed-up").RegisterCallback<ClickEvent>(_ => StepSpeed(+1));
             for (int i = 0; i < steps.Length; i++)
@@ -164,6 +166,7 @@ namespace Hoi4.UI
             if (productionButton != null) productionButton.EnableInClassList("open", Hoi4ProductionPanel.IsOpen);
             if (constructionButton != null) constructionButton.EnableInClassList("open", Hoi4ConstructionPanel.IsOpen);
             if (deploymentButton != null) deploymentButton.EnableInClassList("open", Hoi4DeploymentPanel.IsOpen);
+            if (researchButton != null) researchButton.EnableInClassList("open", Hoi4ResearchPanel.IsOpen);
         }
 
         void LoadStats()

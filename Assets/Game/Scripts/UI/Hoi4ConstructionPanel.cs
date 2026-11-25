@@ -275,6 +275,7 @@ namespace Hoi4.UI
             if (panel == null || Player == 0) return;
             if (Hoi4ProductionPanel.IsOpen) Hoi4ProductionPanel.Instance.Toggle();
             if (Hoi4DeploymentPanel.IsOpen) Hoi4DeploymentPanel.Instance.Close(); // they share the left side
+            if (Hoi4ResearchPanel.IsOpen) Hoi4ResearchPanel.Instance.Close();
             if (Hoi4DiplomacyPanel.IsOpen) Hoi4DiplomacyPanel.Instance?.Close(); // construction takes the map
             open = true;
             panel.style.display = DisplayStyle.Flex;

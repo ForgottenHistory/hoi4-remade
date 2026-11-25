@@ -21,9 +21,9 @@ namespace Hoi4.Units
 
         // Timing, per day: [0] combat hourly, [1] plans hourly, [2] AI hourly (break-offs and that hour's
         // countries' attacks), [3] recorder, [4] combat daily, [5] equipment, [6] manpower, [7] plans daily,
-        // [8] war, [9] AI wars, [10] production, [11] AI production, [12] construction, [13] AI construction, [14] deployment, [15] AI deployment, [16] AI army, [17] railways, [18] supply; then the worst single hour of [0], [1], [2], and the plans' daily line refresh
+        // [8] war, [9] AI wars, [10] production, [11] AI production, [12] construction, [13] AI construction, [14] deployment, [15] AI deployment, [16] AI army, [17] railways, [18] supply, [19] weather, [20] research; then the worst single hour of [0], [1], [2], and the plans' daily line refresh
         static readonly string[] PerfNames =
-            { "combat_h", "plans_h", "ai_h", "recorder", "combat_d", "equipment", "manpower", "plans_d", "war", "ai_wars", "production", "ai_production", "construction", "ai_construction", "deployment", "ai_deployment", "ai_army", "railways", "supply", "weather" };
+            { "combat_h", "plans_h", "ai_h", "recorder", "combat_d", "equipment", "manpower", "plans_d", "war", "ai_wars", "production", "ai_production", "construction", "ai_construction", "deployment", "ai_deployment", "ai_army", "railways", "supply", "weather", "research" };
         static readonly string[] MaxNames = { "combat_h_max", "plans_h_max", "ai_h_max", "plans_refresh", "plans_distribute", "plans_ai" };
         readonly double[] perf = new double[PerfNames.Length];
         // One profiler marker per step, named like the perf.tsv columns: they show in a normal (not deep) capture
@@ -135,6 +135,7 @@ namespace Hoi4.Units
             Measure(12, () => Hoi4.Construction.Hoi4Construction.Instance?.SimulateDay()); // civilian factories build; new factories count from here
             Measure(10, () => Hoi4.Production.Hoi4Production.Instance?.SimulateDay()); // factories to lines, output into the stockpiles
             Measure(5, () => Hoi4Equipment.Instance?.SimulateDay()); // equipment deliveries from the stockpiles
+            Measure(20, () => Hoi4.Research.Hoi4Research.Instance?.SimulateDay()); // empty research slots save a day
             Measure(14, () => Hoi4.Deployment.Hoi4Deployment.Instance?.SimulateDay()); // training lines: men, the equipment the field left, training, deploying
             Measure(6, () => Hoi4Manpower.Instance?.SimulateDay()); // manpower growth, men delivered, strength follows
             Measure(7, () => Hoi4BattlePlans.Instance?.SimulateDay());
