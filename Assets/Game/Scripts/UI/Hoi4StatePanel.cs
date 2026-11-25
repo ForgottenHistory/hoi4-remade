@@ -137,6 +137,8 @@ namespace Hoi4.UI
         {
             if (id == 0 || panel == null || !HasCountry()) return;
             if (Hoi4ConstructionPanel.Placing != null) return; // the click queues construction instead
+            // a state click closes the left-side screens, then opens the state view (default map mode)
+            if (!Hoi4DiplomacyPanel.IsOpen) Hoi4LeftPanels.CloseAll();
             province = id;
             dirty = true;
         }

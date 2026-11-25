@@ -118,12 +118,18 @@ namespace Hoi4.UI
         /// <summary>The top bar's research button.</summary>
         public void Toggle()
         {
-            if (open) Close(); else Open();
+            // from the tech tree, the button goes back to this screen
+            if (open && Hoi4TechTreePanel.IsOpen) Hoi4TechTreePanel.Instance.Close();
+            else if (open) Close();
+            else Open();
         }
 
         void Open()
         {
             if (panel == null || Player == 0) return;
+            // the state view lives behind the left-side panels: drop the selected state (and its panel)
+            Engine.ArchonEngine.Instance?.ProvinceSelector?.ClearSelection();
+            if (Hoi4DiplomacyPanel.IsOpen) Hoi4DiplomacyPanel.Instance.Close(); // back to the map mode before diplomacy
             // they share the left side
             if (Hoi4ProductionPanel.IsOpen) Hoi4ProductionPanel.Instance.Toggle();
             if (Hoi4ConstructionPanel.IsOpen) Hoi4ConstructionPanel.Instance.Close();
@@ -189,7 +195,7 @@ namespace Hoi4.UI
             if (tech != null)
             {
                 string tag = Engine.ArchonEngine.Instance.GameState.Countries.GetCountryTag(shownCountry);
-                tex = Hoi4UiAssets.Texture($"gfx/interface/techtree/icons/{tag}_{id}.png")
+                tex = Hoi4UiAssets.Texture($"gfx/interface/techtree/icons/{tag}_{id}.png", optional: true)
                       ?? Hoi4UiAssets.Texture($"gfx/interface/techtree/icons/{id}.png");
             }
             icon.style.display = tex != null ? DisplayStyle.Flex : DisplayStyle.None;

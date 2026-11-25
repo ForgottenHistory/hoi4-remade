@@ -30,8 +30,9 @@ namespace Hoi4.UI
             fontTried = false;
         }
 
-        /// <summary>A PNG under the data directory (e.g. "gfx/interface/unitpanel/header.png"), or null when missing.</summary>
-        public static Texture2D Texture(string relativePath)
+        /// <summary>A PNG under the data directory (e.g. "gfx/interface/unitpanel/header.png"), or null when missing.
+        /// optional: a file that may well not exist (a country's own tech picture), so no warning when it doesn't.</summary>
+        public static Texture2D Texture(string relativePath, bool optional = false)
         {
             if (textures.TryGetValue(relativePath, out var t) && t != null) return t;
             t = null;
@@ -44,7 +45,7 @@ namespace Hoi4.UI
                 };
                 if (!t.LoadImage(File.ReadAllBytes(path))) { UnityEngine.Object.Destroy(t); t = null; }
             }
-            else ArchonLogger.LogWarning($"Hoi4UiAssets: missing {path} (run Tools/hoi4_convert.py)", "game_ui");
+            else if (!optional) ArchonLogger.LogWarning($"Hoi4UiAssets: missing {path} (run Tools/hoi4_convert.py)", "game_ui");
             textures[relativePath] = t;
             return t;
         }

@@ -146,6 +146,8 @@ namespace Hoi4.UI
         void OnRightClicked(ushort province)
         {
             if (panel == null || !HasCountry()) return;
+            // a right-click closes the left-side screens, then enters diplomacy
+            Hoi4LeftPanels.CloseAll();
             ushort owner = gameState.ProvinceQueries.GetOwner(province);
             selector.ClearSelection(); // right-click always deselects the state, even on empty land
             if (owner != 0) Open(owner);

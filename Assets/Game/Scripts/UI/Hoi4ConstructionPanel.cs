@@ -228,13 +228,12 @@ namespace Hoi4.UI
             return string.IsNullOrEmpty(name) || name == building ? building : name;
         }
 
-        /// <summary>From Hoi4UnitSelection's click interceptor. While the screen is open it owns right clicks (no
-        /// diplomacy) and, with a building selected, left clicks: left queues a level of it in the clicked state, right
-        /// takes one off the order for it there (Shift: 5). Without a building selected, left clicks pass (state view).</summary>
+        /// <summary>From Hoi4UnitSelection's click interceptor. With a building selected the screen owns map clicks:
+        /// left queues a level of it in the clicked state, right takes one off the order for it there (Shift: 5).
+        /// Without one, clicks pass (left: state view, right: diplomacy; both close this screen).</summary>
         public bool OnClick(int button, Vector2 screen)
         {
-            if (!open) return false;
-            if (placing == null) return button != 0;
+            if (!open || placing == null) return false;
             var cam = Camera.main;
             if (cam == null || selector == null || shownCountry == 0) return true;
             ushort province = selector.GetProvinceAtScreenPosition(screen, cam);
@@ -274,6 +273,9 @@ namespace Hoi4.UI
         void Open()
         {
             if (panel == null || Player == 0) return;
+            // the state view lives behind the left-side panels: drop the selected state (and its panel)
+            Engine.ArchonEngine.Instance?.ProvinceSelector?.ClearSelection();
+            if (Hoi4DiplomacyPanel.IsOpen) Hoi4DiplomacyPanel.Instance.Close(); // back to the map mode before diplomacy
             if (Hoi4ProductionPanel.IsOpen) Hoi4ProductionPanel.Instance.Toggle();
             if (Hoi4DeploymentPanel.IsOpen) Hoi4DeploymentPanel.Instance.Close(); // they share the left side
             if (Hoi4ResearchPanel.IsOpen) Hoi4ResearchPanel.Instance.Close();

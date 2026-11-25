@@ -13,7 +13,8 @@ namespace Hoi4.UI
 {
     /// <summary>
     /// GAME: HOI4's tech tree screen (interface/countrytechtreeview.gui), full screen under the top bar. Opened by
-    /// clicking a slot of the research screen; a tech picked here goes into that slot (SetResearchCommand, like the AI).
+    /// clicking a slot of the research screen; a tech picked here goes into that slot (SetResearchCommand, like the AI)
+    /// and the tree closes back to the research screen.
     /// Frame: Resources/Hoi4UI/TechTreePanel.uxml + TechTreePanelStyle.uss. Folder content from the converter's
     /// gfx/interface/techtree/techtree.json5, laid out as in the prototype (Tools/prototypes/research/render_techtree.py):
     /// - Techs sit on the gridbox of their first ancestor that has one (<root>_tree); position = gridbox + the tech's
@@ -343,7 +344,7 @@ namespace Hoi4.UI
                 item.Root = root;
                 item.Bg = bg;
 
-                var tex = Hoi4UiAssets.Texture($"{Dir}icons/{tag}_{t.Id}.png") ?? Hoi4UiAssets.Texture($"{Dir}icons/{t.Id}.png");
+                var tex = Hoi4UiAssets.Texture($"{Dir}icons/{tag}_{t.Id}.png", optional: true) ?? Hoi4UiAssets.Texture($"{Dir}icons/{t.Id}.png");
                 if (tex != null && it["icon"] is JObject ic)
                 {
                     var icon = new VisualElement { pickingMode = PickingMode.Ignore };
@@ -444,9 +445,9 @@ namespace Hoi4.UI
                 for (int i = 0; i < slots.Count; i++) if (slots[i].Empty) { slot = i; break; }
             }
             if (slot < 0 || !research.CanSet(player, slot, tech)) return;
-            Engine.ArchonEngine.Instance.GameState.TryExecuteCommand(
-                new SetResearchCommand { CountryId = player, Slot = slot, Tech = tech }, out _);
-            nextRefresh = 0f;
+            if (Engine.ArchonEngine.Instance.GameState.TryExecuteCommand(
+                    new SetResearchCommand { CountryId = player, Slot = slot, Tech = tech }, out _))
+                Close(); // back to the research screen, which shows it in the slot
         }
 
         // ---- update -------------------------------------------------------------------------------------
