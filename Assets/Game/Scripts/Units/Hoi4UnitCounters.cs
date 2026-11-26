@@ -152,6 +152,9 @@ namespace Hoi4.Units
 
         /// <summary>Re-compose counters (selection, organisation or strength changed).</summary>
         public void MarkDirty() => dirty = true;
+        /// <summary>Redraw, but not in this frame: for the daily tick, whose frame is already the heaviest.</summary>
+        public void MarkDirtyNextFrame() { dirty = true; holdFrame = Time.frameCount; }
+        int holdFrame = -1;
         int digitW = 9, digitH = 14;
         readonly Dictionary<string, Sprite> icons = new Dictionary<string, Sprite>();
         readonly Dictionary<string, Sprite> flags = new Dictionary<string, Sprite>();
@@ -245,7 +248,7 @@ namespace Hoi4.Units
         void LateUpdate()
         {
             if (material == null) return;
-            if (dirty && Time.unscaledTime - lastRebuild >= MinRebuildInterval)
+            if (dirty && Time.frameCount != holdFrame && Time.unscaledTime - lastRebuild >= MinRebuildInterval)
             {
                 dirty = false;
                 lastRebuild = Time.unscaledTime;

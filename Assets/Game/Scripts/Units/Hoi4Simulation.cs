@@ -91,14 +91,60 @@ namespace Hoi4.Units
             go.AddComponent<Hoi4Simulation>();
         }
 
+        // The engine's and the game's assemblies, compiled in the background while the game loads (Mono compiles a
+        // method on its first call: the first day used to pay about 90 ms for that in one frame)
+        static readonly string[] WarmAssemblies = { "Assembly-CSharp", "Core", "Engine", "MapAssembly", "StarterKit", "Utils" };
+
+        static void WarmUpJit()
+        {
+            var found = new System.Collections.Generic.List<System.Reflection.Assembly>();
+            var loaded = System.AppDomain.CurrentDomain.GetAssemblies();
+            foreach (string name in WarmAssemblies)
+                foreach (var a in loaded)
+                    if (a.GetName().Name == name) { found.Add(a); break; }
+            Core.Common.JitWarmup.Start(found.ToArray());
+        }
+
+        /// <summary>Everything the load-time preparation reads has loaded.</summary>
+        static bool AllLoaded(Engine.ArchonEngine engine) =>
+            engine.IsInitialized && engine.GameState != null
+            && Hoi4Divisions.Instance != null && Hoi4Divisions.Instance.IsLoaded
+            && Hoi4.Modifiers.Hoi4Modifiers.IsReady
+            && Hoi4.Research.Hoi4Research.Instance != null && Hoi4.Research.Hoi4Research.Instance.IsReady
+            && Hoi4.Production.Hoi4Production.Instance != null && Hoi4.Production.Hoi4Production.Instance.IsReady
+            && Hoi4.Construction.Hoi4Construction.Instance != null && Hoi4.Construction.Hoi4Construction.Instance.IsReady;
+
         IEnumerator Start()
         {
+            WarmUpJit();
             while (Engine.ArchonEngine.Instance == null || Engine.ArchonEngine.Instance.GameState == null
                    || Engine.ArchonEngine.Instance.GameState.Time == null)
                 yield return null;
             time = Engine.ArchonEngine.Instance.GameState.Time;
             time.OnHourlyTick += OnHour;
             time.OnDailyTick += OnDay;
+            // One-time work the first day would otherwise pay for in one frame, done while the game loads. None of
+            // it decides anything or touches a division: the same results, earlier. Each step is still done by its
+            // own SimulateDay if a day comes first.
+            while (true)
+            {
+                var engine = Engine.ArchonEngine.Instance;
+                if (engine == null) yield break; // the scene went away
+                if (AllLoaded(engine) && Hoi4.Weather.Hoi4Weather.Prepare(engine.GameState)) // the December before the start
+                {
+                    yield return null; // one step a frame
+                    Hoi4.Supply.Hoi4Supply.Prepare(engine.GameState); // hub connections and province supply
+                    yield return null;
+                    Hoi4.Research.Hoi4ResearchAI.Prepare(); // the AI's tech weights
+                    Hoi4.Production.Hoi4TankDesigns.Prepare(); // and its tank design triggers
+                    break;
+                }
+                yield return null;
+            }
+            while (Core.Common.JitWarmup.IsRunning) yield return null;
+            if (Core.Common.JitWarmup.Supported)
+                ArchonLogger.Log($"Hoi4Simulation: {Core.Common.JitWarmup.MethodCount} methods compiled ahead in "
+                                 + $"{Core.Common.JitWarmup.ElapsedMs:0} ms (background)", "game_units");
         }
 
         void OnDestroy()
@@ -119,7 +165,26 @@ namespace Hoi4.Units
                 var gs = Engine.ArchonEngine.Instance.GameState;
                 Hoi4EnemyAI.Instance?.DecideAttacks((int)(gs.Time.CurrentTick % 24));
             });
+            if (RunsAI) DailyAI();
             Measure(3, () => Hoi4Recorder.Instance?.AfterHour()); // reads only, after everything this hour did
+        }
+
+        /// <summary>The AI's once-a-day reviews, each at its own hour instead of all in the day's first frame (that
+        /// frame also runs every daily system). The order of a day is unchanged; a review a few hours later is
+        /// the same review. Their time is in the next day's perf row.</summary>
+        void DailyAI()
+        {
+            ulong tick = Engine.ArchonEngine.Instance.GameState.Time.CurrentTick;
+            int day = (int)(tick / 24);
+            switch ((int)(tick % 24))
+            {
+                case 3: Measure(16, () => Hoi4.Deployment.Hoi4ArmyAI.SimulateDay(day)); break; // army plans: role templates, mix, factory split
+                case 6: Measure(11, () => Hoi4.Production.Hoi4ProductionAI.SimulateDay(day)); break; // factories to lines, each country weekly
+                case 9: Measure(13, () => Hoi4.Construction.Hoi4ConstructionAI.SimulateDay(day)); break; // construction queue, each country weekly
+                case 12: Measure(21, () => Hoi4.Research.Hoi4ResearchAI.SimulateDay(day)); break; // fills empty research slots
+                case 15: Measure(22, () => Hoi4.Production.Hoi4TankDesigns.SimulateDay(day, PlayerCountry)); break; // tank designs (the player keeps its own)
+                case 18: Measure(15, () => Hoi4.Deployment.Hoi4DeploymentAI.SimulateDay(day)); break; // training orders, each country weekly
+            }
         }
 
         void OnDay(int day)
@@ -129,7 +194,7 @@ namespace Hoi4.Units
             Hoi4Occupation.SettleStanding(Engine.ArchonEngine.Instance.GameState); // a division left standing on enemy land takes it
             Hoi4ReturnHome.SimulateDay(Engine.ArchonEngine.Instance.GameState); // divisions on a non-enemy's land go home (cheap: no column)
             Measure(18, () => Hoi4.Supply.Hoi4Supply.SimulateDay(Engine.ArchonEngine.Instance.GameState, Hoi4Divisions.Instance)); // province supply, division supply ratios
-            Hoi4UnitCounters.Instance?.MarkDirty(); // the low supply crates follow the day's ratios
+            Hoi4UnitCounters.Instance?.MarkDirtyNextFrame(); // the low supply crates follow the day's ratios (drawn a frame later)
             Hoi4.Supply.Hoi4SupplyMapMode.Refresh(); // and the supply map mode, at once
             Measure(4, () => Hoi4Combat.Instance?.SimulateDay()); // entrenchment
             Hoi4.Modifiers.Hoi4Stability.SimulateDay(); // landmarks to their province's controller (cheap: only on control changes)
@@ -142,18 +207,6 @@ namespace Hoi4.Units
             Measure(7, () => Hoi4BattlePlans.Instance?.SimulateDay());
             Measure(8, () => Hoi4.War.Hoi4War.Instance?.SimulateDay()); // surrender progress and capitulation (may open the peace conference)
             if (RunsAI) Measure(9, () => Hoi4.War.Hoi4AiWars.Instance?.SimulateDay()); // AI war declarations (stress test, F8)
-            if (RunsAI) Measure(16, () => Hoi4.Deployment.Hoi4ArmyAI.SimulateDay(
-                (int)(Engine.ArchonEngine.Instance.GameState.Time.CurrentTick / 24))); // AI army plans: role templates, mix, factory split
-            if (RunsAI) Measure(11, () => Hoi4.Production.Hoi4ProductionAI.SimulateDay(
-                (int)(Engine.ArchonEngine.Instance.GameState.Time.CurrentTick / 24))); // AI factories to lines, each country weekly
-            if (RunsAI) Measure(13, () => Hoi4.Construction.Hoi4ConstructionAI.SimulateDay(
-                (int)(Engine.ArchonEngine.Instance.GameState.Time.CurrentTick / 24))); // AI construction queue, each country weekly
-            if (RunsAI) Measure(21, () => Hoi4.Research.Hoi4ResearchAI.SimulateDay(
-                (int)(Engine.ArchonEngine.Instance.GameState.Time.CurrentTick / 24))); // AI fills empty research slots
-            if (RunsAI) Measure(22, () => Hoi4.Production.Hoi4TankDesigns.SimulateDay(
-                (int)(Engine.ArchonEngine.Instance.GameState.Time.CurrentTick / 24), PlayerCountry)); // AI tank designs (the player keeps its own)
-            if (RunsAI) Measure(15, () => Hoi4.Deployment.Hoi4DeploymentAI.SimulateDay(
-                (int)(Engine.ArchonEngine.Instance.GameState.Time.CurrentTick / 24))); // AI training orders, each country weekly
             WritePerf();
         }
 

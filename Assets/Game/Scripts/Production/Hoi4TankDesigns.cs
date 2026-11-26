@@ -34,6 +34,7 @@ namespace Hoi4.Production
     {
         const string File_ = "common/hoi4_tank_designs.json5";
         const int CycleDays = 30;
+        const int FirstDays = 7; // the first designs, spread over the first week (all on day one was a hitch)
 
         /// <summary>A design's make-up.</summary>
         public sealed class Design
@@ -142,7 +143,8 @@ namespace Hoi4.Production
         static readonly Dictionary<JToken, Hoi4ResearchAI.Trigger> triggerCache = new Dictionary<JToken, Hoi4ResearchAI.Trigger>();
         static readonly HashSet<ushort> due = new HashSet<ushort>();      // a technology changed what it may use
         static readonly Dictionary<ushort, int> designCount = new Dictionary<ushort, int>();
-        static bool loaded, compiled, subscribed, started;
+        static bool loaded, compiled, subscribed;
+        static readonly HashSet<ushort> designed = new HashSet<ushort>(); // countries past their first design day
 
         public static bool IsLoaded => loaded;
 
@@ -151,7 +153,8 @@ namespace Hoi4.Production
         {
             types.Clear(); slots.Clear(); modules.Clear(); moduleOrder.Clear(); upgrades.Clear(); techModules.Clear();
             groups.Clear(); triggerCache.Clear(); due.Clear(); designCount.Clear();
-            loaded = compiled = subscribed = started = false;
+            loaded = compiled = subscribed = false;
+            designed.Clear();
         }
 
         static FP Num(JToken t) => t != null && t.Type != JTokenType.Null ? FP.FromDouble((double)t) : FP.Zero;
@@ -451,6 +454,15 @@ namespace Hoi4.Production
 
         /// <summary>Daily, host only (Hoi4Simulation): each country but the player's when one of its technologies
         /// unlocked a chassis or module, and every 30 days.</summary>
+        /// <summary>Compiles the AI designs' triggers at load instead of on the first day. From Hoi4Simulation once
+        /// research is ready. It decides nothing: the first designs are still made on the first day.</summary>
+        public static void Prepare()
+        {
+            var research = Hoi4Research.Instance;
+            if (!loaded || compiled || types.Count == 0 || research == null || !research.IsReady) return;
+            Compile();
+        }
+
         public static void SimulateDay(int day, ushort player)
         {
             var research = Hoi4Research.Instance;
@@ -464,10 +476,12 @@ namespace Hoi4.Production
             foreach (ushort c in countries)
             {
                 if (c == player) continue;
-                if (!started || due.Contains(c) || c % CycleDays == day % CycleDays) DesignFor(gameState, c, day);
+                // the first time on the country's day of the first week: until then it keeps its history designs
+                bool first = !designed.Contains(c) && c % FirstDays == day % FirstDays;
+                if (first) designed.Add(c);
+                if (first || due.Contains(c) || c % CycleDays == day % CycleDays) DesignFor(gameState, c, day);
             }
             due.Clear();
-            started = true;
         }
 
         static void OnResearched(ushort country, int tech)

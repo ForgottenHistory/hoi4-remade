@@ -253,6 +253,29 @@ namespace Hoi4.Supply
             if (gameState == null || divisions == null || !EnsureLoaded(gameState) || !Hoi4Railways.Available) return;
             DayVersion++;
             Hoi4Occupation.Snapshot(gameState, size, out var ctrl, out _);
+            UpdateFlows(gameState, ctrl);
+            Allocate(gameState, divisions, ctrl);
+        }
+
+        /// <summary>The first hub connections and province supply, at load: the first day then finds nothing changed
+        /// and only shares the supply out (the full search is its one expensive step, about 20 ms). From
+        /// Hoi4Simulation once everything the flows read has loaded; false while the data isn't there yet. No
+        /// division is touched: their supply still starts on the first day.</summary>
+        public static bool Prepare(GameState gameState)
+        {
+            if (gameState == null || !EnsureLoaded(gameState)) return loaded; // loaded without supply: nothing to do
+            if (!Hoi4Railways.Available) return true;
+            if (flowsReady && lastState == gameState) return true;
+            Hoi4Railways.SimulateDay(gameState);
+            Hoi4Occupation.Snapshot(gameState, size, out var ctrl, out _);
+            UpdateFlows(gameState, ctrl);
+            DayVersion++; // the supply map mode redraws
+            return true;
+        }
+
+        /// <summary>Province supply again when what it depends on changed (control, rail, buildings).</summary>
+        static void UpdateFlows(GameState gameState, ushort[] ctrl)
+        {
             var provinces = gameState.Provinces;
             if (!flowsReady || lastState != gameState || lastControl != provinces.ControlVersion
                 || lastRail != Hoi4Railways.Version || lastBuildings != Hoi4Buildings.Version)
@@ -277,7 +300,6 @@ namespace Hoi4.Supply
                 flowsReady = true;
                 FlowVersion++;
             }
-            Allocate(gameState, divisions, ctrl);
         }
 
         // what the last recompute saw: each province's controller, each state's infrastructure, each source's start

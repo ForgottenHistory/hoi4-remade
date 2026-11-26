@@ -156,6 +156,15 @@ namespace Hoi4.Research
         }
 
         /// <summary>Daily, on the host only (Hoi4Simulation); each country on its day of the cycle.</summary>
+        /// <summary>Compiles the technologies' AI weights at load instead of on the first day. From Hoi4Simulation
+        /// once research is ready. It decides nothing.</summary>
+        public static void Prepare()
+        {
+            var research = Hoi4Research.Instance;
+            if (research == null || !research.IsReady || research.Technologies.Count == 0) return;
+            if (compiledFor != research) Compile(research);
+        }
+
         public static void SimulateDay(int day)
         {
             var research = Hoi4Research.Instance;

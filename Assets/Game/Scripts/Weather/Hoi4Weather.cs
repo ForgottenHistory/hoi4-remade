@@ -183,11 +183,28 @@ namespace Hoi4.Weather
 
         // --- simulation ----------------------------------------------------------------------------------
 
+        /// <summary>Loads the data and runs the December before the start, so the first day's tick doesn't pay for
+        /// both (about 100 ms) and the map shows its snow before the clock runs. From Hoi4Simulation once the game
+        /// has loaded; false while something it reads is still loading (call again). The same steps in the same
+        /// order as when the first day ran them, so the weather is unchanged.</summary>
+        public static bool Prepare(GameState gameState)
+        {
+            if (gameState == null) return false;
+            if (!loaded && !Hoi4.Construction.Hoi4Buildings.Available) return false; // rain reads the infrastructure
+            if (!EnsureLoaded(gameState)) return loaded; // loaded without weather: nothing more to do
+            if (dayCount == 0)
+            {
+                for (int d = 1; d <= WarmupDays; d++) Step(gameState, 12, d);
+                Version++;
+            }
+            return true;
+        }
+
         public static void SimulateDay(GameState gameState)
         {
             if (gameState == null || !EnsureLoaded(gameState)) return;
             var time = gameState.Time;
-            if (dayCount == 0)
+            if (dayCount == 0) // Prepare didn't get to it
                 for (int d = 1; d <= WarmupDays; d++) Step(gameState, 12, d);
             Step(gameState, time.CurrentMonth, time.CurrentDay);
             Version++;
