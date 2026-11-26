@@ -9,7 +9,10 @@ namespace Hoi4.Weather
     ///
     ///   - Clouds, through the engine atmosphere's cloud mask (MapAtmosphereRenderer.SetCloudMask): a dark cloud mass
     ///     over thunderstorms, white clouds over a blizzard, lighter grey over rain and snow, sand over a sandstorm;
-    ///     a grey mist when zoomed in. Prototype: Tools/prototypes/weather/weather_clouds.py.
+    ///     a grey mist when zoomed in. Prototype: Tools/prototypes/weather/weather_clouds.py (where they gather) and
+    ///     cloud_volume.py (their volume and light, which the engine draws).
+    ///   - Lightning inside the thunderclouds (MapAtmosphereRenderer.SetCloudLights): now and then a spot of a storm
+    ///     in view flashes, twice in quick succession, and glows through the cloud around it.
     ///   - Falling weather when zoomed in (Hoi4/Precipitation on a map quad): rain streaks, snowflakes, lightning.
     ///
     /// Both masks have one texel per Texel map px, from the weather of the province under it (Hoi4Weather.KindAt;
@@ -26,15 +29,15 @@ namespace Hoi4.Weather
         const float FadeSeconds = 2f;
         const int PrecipQueue = 2946; // over the engine clouds (2945), under labels (2950)
 
-        // Hoi4Weather.Kind -> cloud colour (sRGB) and coverage
+        // Hoi4Weather.Kind -> cloud colour (sRGB) and coverage (the share of the sky under cloud there)
         static readonly Color[] WeatherCloud =
         {
             new Color(0f, 0f, 0f, 0f),             // None
-            new Color(0.62f, 0.64f, 0.68f, 0.55f), // RainLight
-            new Color(0.2f, 0.21f, 0.25f, 0.7f),   // RainHeavy (thunderstorm: the dark mass)
-            new Color(0.85f, 0.87f, 0.92f, 0.5f),  // Snow
-            new Color(0.97f, 0.97f, 1f, 0.85f),    // Blizzard (white clouds)
-            new Color(0.8f, 0.66f, 0.45f, 0.7f),   // Sandstorm
+            new Color(0.62f, 0.64f, 0.68f, 0.40f), // RainLight
+            new Color(0.2f, 0.21f, 0.25f, 0.60f),  // RainHeavy (thunderstorm: the dark mass)
+            new Color(0.85f, 0.87f, 0.92f, 0.25f), // Snow
+            new Color(0.97f, 0.97f, 1f, 0.55f),    // Blizzard (white clouds)
+            new Color(0.8f, 0.66f, 0.45f, 0.55f),  // Sandstorm
         };
         // Hoi4Weather.Kind -> rain, snow, thunderstorm
         static readonly Vector3[] WeatherPrecip =
@@ -58,6 +61,17 @@ namespace Hoi4.Weather
         bool fading;
         Material precipMaterial;
         Mesh quad;
+
+        // Lightning in the clouds. Real seconds, not game time: it is presentation and should flicker the same at
+        // every game speed and while paused, like the rain.
+        const float FlashSeconds = 0.4f;       // a flash: two strokes and an afterglow
+        const float FlashRadius = 55f;         // map px the glow reaches through the cloud
+        const float FlashIntensity = 0.9f;
+        static readonly Color FlashColor = new Color(0.75f, 0.82f, 1f, 1f);
+        readonly Vector4[] flashes = new Vector4[MapAtmosphereRenderer.MaxCloudLights]; // x, y (from the north), radius, start time
+        readonly Vector4[] lights = new Vector4[MapAtmosphereRenderer.MaxCloudLights];
+        float nextFlash;
+        bool lightsOn;
         Bounds mapBounds;
         float worldPerMapPx;
 
@@ -73,6 +87,7 @@ namespace Hoi4.Weather
         void OnDestroy()
         {
             MapAtmosphereRenderer.SetCloudMask(null);
+            MapAtmosphereRenderer.SetCloudLights(null, 0, Color.black);
             if (cloudTexture != null) Destroy(cloudTexture);
             if (precipTexture != null) Destroy(precipTexture);
             if (precipMaterial != null) Destroy(precipMaterial);
@@ -169,11 +184,49 @@ namespace Hoi4.Weather
                 precipTexture.Apply(false);
                 if (t >= 1f) fading = false;
             }
+            Vector4 view = View();
+            Lightning(view);
             if (precipMaterial != null)
             {
-                Shader.SetGlobalVector(PrecipViewId, View());
+                Shader.SetGlobalVector(PrecipViewId, view);
                 Graphics.DrawMesh(quad, Matrix4x4.identity, precipMaterial, 0, null, 0, null, ShadowCastingMode.Off, false);
             }
+        }
+
+        /// <summary>Starts a flash now and then at a thunderstorm spot in view, and hands the lit ones to the clouds.</summary>
+        void Lightning(Vector4 view)
+        {
+            float now = Time.unscaledTime;
+            if (now >= nextFlash && view.z > 0f)
+            {
+                nextFlash = now + Random.Range(0.3f, 1.6f);
+                // the view's rough extent on the map (it is wider at the far edge; near enough for picking a spot)
+                float halfX = 0.6f / view.z, halfY = 0.6f / view.w;
+                for (int attempt = 0; attempt < 12; attempt++)
+                {
+                    float x = view.x + Random.Range(-halfX, halfX), y = view.y + Random.Range(-halfY, halfY); // y from the south
+                    int tx = Mathf.FloorToInt(x / Texel), ty = Mathf.FloorToInt(y / Texel);
+                    if (tx < 0 || ty < 0 || tx >= width || ty >= height) continue;
+                    if (to[(ty * width + tx) * 8 + 6] < 0.5f) continue; // not a thunderstorm
+                    int slot = 0;
+                    for (int i = 1; i < flashes.Length; i++)
+                        if (flashes[i].w < flashes[slot].w) slot = i; // the oldest
+                    flashes[slot] = new Vector4(x, height * Texel - y, FlashRadius * Random.Range(0.7f, 1.3f), now);
+                    break;
+                }
+            }
+            int count = 0;
+            for (int i = 0; i < flashes.Length; i++)
+            {
+                float age = now - flashes[i].w;
+                if (flashes[i].z <= 0f || age < 0f || age > FlashSeconds) continue;
+                // two strokes, the second weaker, over a short afterglow
+                float strokes = Mathf.Clamp01(1f - age / 0.07f) + 0.7f * Mathf.Clamp01(1f - Mathf.Abs(age - 0.14f) / 0.04f);
+                float glow = 0.25f * Mathf.Clamp01(1f - age / FlashSeconds);
+                lights[count++] = new Vector4(flashes[i].x, flashes[i].y, flashes[i].z, (strokes + glow) * FlashIntensity);
+            }
+            if (count > 0 || lightsOn) MapAtmosphereRenderer.SetCloudLights(lights, count, FlashColor);
+            lightsOn = count > 0;
         }
 
         /// <summary>

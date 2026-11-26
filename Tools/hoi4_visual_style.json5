@@ -168,24 +168,41 @@
     hazeZoom: [0.3, 1.5],
     cloudColor: [0.95, 0.95, 0.97],
     cloudShade: [0.6, 0.64, 0.72],
-    cloudCoverage: 0.42,     // 0 clear .. 1 overcast
-    cloudSoftness: 0.22,
+    cloudCoverage: 0.22,     // the share of the sky under cloud banks: 0 clear .. 1 overcast
+    cloudSoftness: 0.8,      // how see-through: opacity = 1 - exp(-thickness / softness). 0.1 is nearly solid
     cloudOpacity: 0.8,
     cloudScale: 1400,        // noise tile size: bigger = bigger cloud banks
     cloudWind: [5, 1.5],     // map px per second
     cloudZoom: [0.35, 0.9],
     cloudHeight: 60,         // parallax height above the map
-    shadowStrength: 0.35,
+    shadowStrength: 0.3,
     shadowOffset: [-40, 30],
     // Weather clouds (GAME Hoi4WeatherSky paints the mask: dark over thunderstorms, white over blizzards,
     // grey over rain and snow). maskZoom: gone by unit level (the counters fade in at 3..5); closer in, the falling
     // weather (_Hoi4Precip) takes over. Prototype weather/weather_clouds.py
-    maskOpacity: 0.75,
+    maskVisible: false,      // OFF for now (the look is undecided): no weather clouds, their shadows or lightning in them
+    maskOpacity: 0.9,
     maskScale: 260,          // noise tile size, map px
-    maskShadow: 0.5,         // ground shadow (more under dark clouds)
+    maskShadow: 0.4,         // ground shadow (more under dark clouds)
     maskZoom: [2, 3],
-    maskSoftness: 0.45,      // wispy edges (the cloud banks use cloudSoftness)
+    maskSoftness: 0.6,       // as cloudSoftness, for the weather clouds (HOI4's are smoke: the map shows through)
     maskWarp: 60,            // map px: billowy outlines instead of the weather regions' shapes
+    // Volume (all clouds): the noise is a height field over a flat cloud base, with parallax and sun light. The sun
+    // is where the ground shadows come from (shadowOffset, cloudHeight). The banks part where the weather clouds are.
+    // Prototype weather/cloud_volume.py (--sheet zoom: every zoom level in one image; check it before changing these)
+    cloudThickness: 40,      // cloud banks, base to highest top, map px
+    maskThickness: 10,       // weather clouds
+    cloudSteps: 12,          // parallax steps: the clouds' cost (3 texture samples each). 0 = lit but no parallax
+    cloudRelief: 0.7,        // how strongly the billows show in the light
+    cloudBillows: 0.5,       // 0 smooth domes .. 1 lumpy, with a ragged edge
+    cloudVeil: 1,            // wisps of thin cloud around and beyond the towers (0 = none)
+    cloudChurn: 2,           // map px per second a swirling flow stirs the clouds (eddies, no common direction). Faster
+                             // also means each cloud forms and dissolves sooner. 0 = rigid shapes that only drift
+    maskWind: [0, 0],        // weather clouds don't ride the wind: they are stirred in place over their weather
+    cloudVariance: 0.6,      // colour variance inside a cloud: darker dense heart, lighter and darker patches, cooler
+                             // and warmer grey, lighter wisps (full on weather clouds, 40% on the banks; 0 = one colour)
+    // Weather clouds start only where the banks are fully gone (cloudZoom's second value) and are full at 1.6 times
+    // that zoom. To change where: maskZoomIn: [none at or below, full at or above], e.g. [0, 0] for every distance
   },
 
   // Day/night from game time. Toggle in game with toggleKey (Unity KeyCode name, "none" to disable).
