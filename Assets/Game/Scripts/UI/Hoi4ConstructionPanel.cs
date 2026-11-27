@@ -27,7 +27,8 @@ namespace Hoi4.UI
     ///   shut) and the map shows where it fits (Hoi4ConstructionMap); clicking the button again, Escape or closing
     ///   the screen drops the selection.
     /// - Supply buildings (naval base, supply hub, railway) are placed per province, over the supply map mode
-    ///   (selecting one switches to it, dropping the selection switches back): a click queues a level in that
+    ///   (selecting one switches to it, dropping the selection switches back, and switching to another map mode
+    ///   drops the selection): a click queues a level in that
     ///   province, a right click takes one off. Railways: clicking a stretch's level number orders the whole
     ///   stretch one level up; clicking an order's number raises the level it builds to, right clicking lowers it.
     ///   A new railway takes two clicks: its start, which must be on the network (rail, a hub, a naval base or
@@ -743,6 +744,14 @@ namespace Hoi4.UI
             }
             if (structureDirty) Rebuild(construction);
             Animate(construction);
+            // a supply building is placed over the supply map mode only: switching to another map mode (F1...) drops
+            // the tool, like HOI4, and the mode the player chose stays
+            if (tookMapMode && selected != null && Engine.ArchonEngine.Instance?.MapModeManager != null
+                && Engine.ArchonEngine.Instance.MapModeManager.CurrentMode != global::Map.MapModes.MapMode.Supply)
+            {
+                tookMapMode = false;
+                Select(selected);
+            }
             bool supply = placing != null && Hoi4Construction.IsProvinceBuilding(placing);
             if (placing != null && UpdateHover()) ShowMap(supply);
             if (Time.unscaledTime < nextRefresh) return;
