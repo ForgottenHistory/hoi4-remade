@@ -245,6 +245,11 @@ namespace Hoi4.Units
                 return 0;
             ushort country = player.PlayerCountryId;
 
+            if (Hoi4.Map.Hoi4Regions.IsWater(target)) // the sea is only crossed, between ports
+            {
+                Core.Recording.SessionRecorder.Note("player", "order_refused", country, 0, 0, target, $"{ordered.Count} selected: the target is sea");
+                return 0;
+            }
             if (Hoi4Combat.IsAttackedFrom(gameState, country, target))
             {
                 ArchonLogger.Log($"Hoi4UnitSelection: province {target} is attacking us, it can't be attacked back", "game_units");

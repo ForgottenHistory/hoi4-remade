@@ -13,8 +13,8 @@ using FP = Core.Data.FixedPoint64;
 namespace Hoi4.Supply
 {
     /// <summary>
-    /// GAME: HOI4 railways and supply hubs, and which hubs are connected to their country's capital (no supply flow
-    /// yet, no ports, no rivers as links).
+    /// GAME: HOI4 railways, supply hubs and ports, and which of them are connected to their country's capital (by
+    /// rail, or by sea between ports; no rivers as links).
     ///
     /// Data: map/hoi4_railways.json5 (hoi4_convert.py, from map/railways.txt and map/supply_nodes.txt): rail links
     /// between bordering provinces with a level (1-5), and the 1936 hubs. The links live in the engine's
@@ -32,6 +32,15 @@ namespace Hoi4.Supply
     ///     capital and a usable rail path joins them. Its connection level is the bottleneck: the best path's lowest
     ///     link level (ProvinceLinkNetwork.WidestPaths).
     ///   - A connected hub's capacity: RAILWAY_BASE_FLOW + RAILWAY_FLOW_PER_LEVEL * level (10 + 5 per level).
+    ///   - A naval base (Hoi4Ports) is a hub too, of its province's controller. One the capital reaches by rail is
+    ///     connected like any hub. One it doesn't is supplied by sea from another of the country's connected ports
+    ///     on the same body of water (no navy yet: nothing blocks the way, no convoys are needed). Its capacity is
+    ///     the smallest along the way: NAVAL_BASE_FLOW + NAVAL_FLOW_PER_LEVEL * level (5 + 3 per level: 8 at level
+    ///     1, 35 at 10) of both ports, and the source port's own capacity. Rail is preferred: one sea route opens
+    ///     at a time (the one that carries the most, then the shortest; a port takes the source nearest by sea that
+    ///     carries at least half of what its best one could), and the hubs and ports with rail to the
+    ///     port it reaches are connected through it, at most its capacity, before the next route is chosen. Their
+    ///     ports can supply further ports. A rail network across the sea so gets one route, not one per port.
     ///   - The capital's capacity: CAPITAL_SUPPLY_BASE + 0.3 per civilian factory + 0.6 per military factory + 0.4 per
     ///     dockyard, over the states whose buildings work for the country (Hoi4Buildings.UserOf).
     ///
@@ -53,6 +62,8 @@ namespace Hoi4.Supply
         static readonly FP CapitalPerCivilian = FP.FromFraction(3, 10);  // NSupply.CAPITAL_SUPPLY_CIVILIAN_FACTORIES
         static readonly FP CapitalPerMilitary = FP.FromFraction(6, 10);  // NSupply.CAPITAL_SUPPLY_MILITARY_FACTORIES
         static readonly FP CapitalPerDockyard = FP.FromFraction(4, 10);  // NSupply.CAPITAL_SUPPLY_DOCKYARDS
+        static readonly FP NavalBaseFlow = FP.FromInt(5);             // NSupply.NAVAL_BASE_FLOW
+        static readonly FP NavalFlowPerLevel = FP.FromInt(3);         // NSupply.NAVAL_FLOW_PER_LEVEL
 
         /// <summary>One supply hub as of the last recompute.</summary>
         public struct Hub
@@ -68,8 +79,15 @@ namespace Hoi4.Supply
             public int Level;
             /// <summary>Rail links from the capital on the path found (0 for the capital and when not connected).</summary>
             public int Distance;
-            /// <summary>Supply the hub can pass on: the capital's supply for the capital, else 10 + 5 * Level; 0 when not connected.</summary>
+            /// <summary>Supply the hub can pass on: the capital's supply for the capital, else 10 + 5 * Level, or what
+            /// its sea route carries; 0 when not connected.</summary>
             public FP Capacity;
+            /// <summary>A naval base and no supply hub of its own: supply spreads from it with the naval base numbers.</summary>
+            public bool IsPort;
+            /// <summary>Connected by sea (not by rail) from the port Source.</summary>
+            public bool BySea;
+            /// <summary>The port this hub hangs on: its sea source, or the sea-supplied port its rail starts at (0: the capital).</summary>
+            public ushort Source;
         }
 
         static ProvinceLinkNetwork network;
@@ -77,6 +95,8 @@ namespace Hoi4.Supply
         static ushort[] railProvinces = System.Array.Empty<ushort>();
         static ushort[] hubProvinces = System.Array.Empty<ushort>(); // sorted: supply_nodes.txt hubs and every capital
         static bool[] listedHub = System.Array.Empty<bool>();        // per hubProvinces entry: in supply_nodes.txt
+        static readonly HashSet<ushort> listed = new HashSet<ushort>(); // supply_nodes.txt
+        static int hubListPorts = -1;                                // Hoi4Ports.Version the hub list was built at
 
         // conversion as of the last daily check, by province id (true: its controller can use its rail)
         static bool[] converted = System.Array.Empty<bool>();
@@ -89,6 +109,9 @@ namespace Hoi4.Supply
         static readonly Dictionary<ushort, int> hubSlot = new Dictionary<ushort, int>(); // province -> index in hubs
         static Hub[] hubs = System.Array.Empty<Hub>();
         static readonly Dictionary<ushort, FP> capitalSupply = new Dictionary<ushort, FP>();
+        // the factories behind each country's capital supply, as of the last recompute
+        static readonly Dictionary<ushort, int> civ = new Dictionary<ushort, int>(), mil = new Dictionary<ushort, int>(),
+                                                dock = new Dictionary<ushort, int>();
         static readonly Dictionary<ushort, List<int>> hubsByCountry = new Dictionary<ushort, List<int>>();
         static readonly WidestPathResult paths = new WidestPathResult();
 
@@ -108,12 +131,14 @@ namespace Hoi4.Supply
             network = null;
             railProvinces = hubProvinces = System.Array.Empty<ushort>();
             listedHub = System.Array.Empty<bool>();
+            listed.Clear(); hubListPorts = -1;
             converted = System.Array.Empty<bool>();
             converting = 0;
             points.Clear();
             ConversionVersion = 0;
             hubSlot.Clear(); hubs = System.Array.Empty<Hub>();
             capitalSupply.Clear(); hubsByCountry.Clear();
+            civ.Clear(); mil.Clear(); dock.Clear();
             loaded = available = started = false;
             lastState = null;
             lastControl = lastOwnership = lastBuildings = lastUsers = lastNetwork = -1;
@@ -133,7 +158,7 @@ namespace Hoi4.Supply
         /// <summary>The best rail level through a province (0: no railway).</summary>
         public static int RailLevel(ushort province) => EnsureLoaded() ? network.BestLevel(province) : 0;
 
-        /// <summary>Every province that is or can be a hub (supply_nodes.txt and every capital), sorted.</summary>
+        /// <summary>Every province that is or can be a hub (supply_nodes.txt, every capital, every naval base), sorted.</summary>
         public static IReadOnlyList<ushort> HubProvinces => EnsureLoaded() ? hubProvinces : (IReadOnlyList<ushort>)System.Array.Empty<ushort>();
 
         /// <summary>The hub in this province as of the last recompute (false when there is none: a capital-only province
@@ -155,6 +180,19 @@ namespace Hoi4.Supply
 
         /// <summary>The country's capital supply (0 when it doesn't hold its capital).</summary>
         public static FP CapitalSupply(ushort country) => capitalSupply.TryGetValue(country, out FP v) ? v : FP.Zero;
+
+        /// <summary>What the country's capital supply is made of (HOI4's capital hub tooltip): the base, and the
+        /// shares from its civilian factories, military factories and dockyards.</summary>
+        public static void CapitalSupplyParts(ushort country, out FP fromBase, out FP fromCivilian, out FP fromMilitary, out FP fromDockyards)
+        {
+            civ.TryGetValue(country, out int nc);
+            mil.TryGetValue(country, out int nm);
+            dock.TryGetValue(country, out int nd);
+            fromBase = CapitalSupplyBase;
+            fromCivilian = CapitalPerCivilian * FP.FromInt(nc);
+            fromMilitary = CapitalPerMilitary * FP.FromInt(nm);
+            fromDockyards = CapitalPerDockyard * FP.FromInt(nd);
+        }
 
         /// <summary>Where rail runs through the province, map px (y down): its HOI4 supply_node spot. Presentation only.</summary>
         public static bool TryGetRailPoint(ushort province, out UnityEngine.Vector2 point)
@@ -188,7 +226,9 @@ namespace Hoi4.Supply
             Hoi4Occupation.Snapshot(gameState, converted.Length, out var ctrl, out _);
             ulong now = gameState.Time.CurrentTick;
 
-            bool dirty = !started || lastState != gameState
+            bool portsChanged = Hoi4Ports.Available && hubListPorts != Hoi4Ports.Version;
+            if (portsChanged) BuildHubList(); // a naval base built or lost
+            bool dirty = !started || lastState != gameState || portsChanged
                          || lastControl != provinces.ControlVersion || lastOwnership != provinces.OwnershipVersion
                          || lastNetwork != network.Version;
             started = true;
@@ -237,9 +277,7 @@ namespace Hoi4.Supply
         static void Recompute(GameState gameState, ushort[] ctrl)
         {
             // capital supply from the factories each country's states give it
-            var civ = new Dictionary<ushort, int>();
-            var mil = new Dictionary<ushort, int>();
-            var dock = new Dictionary<ushort, int>();
+            civ.Clear(); mil.Clear(); dock.Clear();
             foreach (var kv in Hoi4Buildings.Users(gameState))
             {
                 Add(civ, kv.Value, Hoi4Buildings.Level(kv.Key, "industrial_complex"));
@@ -254,8 +292,9 @@ namespace Hoi4.Supply
             {
                 ushort p = hubProvinces[i];
                 ushort c = p < ctrl.Length ? ctrl[p] : (ushort)0;
-                if (c != 0 && !listedHub[i] && Hoi4Regions.Capital(gameState.Countries.GetCountryTag(c)) != p) c = 0;
-                next[i] = new Hub { Province = p, Country = c };
+                int portLevel = Hoi4Ports.Level(p);
+                if (c != 0 && !listedHub[i] && portLevel == 0 && Hoi4Regions.Capital(gameState.Countries.GetCountryTag(c)) != p) c = 0;
+                next[i] = new Hub { Province = p, Country = c, IsPort = !listedHub[i] && portLevel > 0 };
                 if (c == 0) continue;
                 if (!hubsByCountry.TryGetValue(c, out var list)) hubsByCountry[c] = list = new List<int>();
                 list.Add(i);
@@ -285,6 +324,7 @@ namespace Hoi4.Supply
                     if (p == capital)
                     {
                         next[i].IsCapital = true;
+                        next[i].IsPort = false;
                         next[i].Connected = true;
                         next[i].Capacity = supply;
                         continue;
@@ -296,6 +336,7 @@ namespace Hoi4.Supply
                     next[i].Distance = paths.Hops(p);
                     next[i].Capacity = RailwayBaseFlow + RailwayFlowPerLevel * FP.FromInt(level);
                 }
+                ConnectBySea(gameState, country, next, usable);
             }
 
             bool changed = next.Length != hubs.Length;
@@ -304,10 +345,132 @@ namespace Hoi4.Supply
                 var a = next[i];
                 var b = hubs[i];
                 changed = a.Country != b.Country || a.Connected != b.Connected || a.Level != b.Level
-                          || a.IsCapital != b.IsCapital || a.Capacity != b.Capacity || a.Distance != b.Distance;
+                          || a.IsCapital != b.IsCapital || a.Capacity != b.Capacity || a.Distance != b.Distance
+                          || a.IsPort != b.IsPort || a.BySea != b.BySea || a.Source != b.Source;
             }
             hubs = next;
             if (changed) Version++;
+        }
+
+        static readonly List<int> seaSources = new List<int>(), seaRoots = new List<int>();
+
+        /// <summary>The throughput a naval base of this level can take or give by sea.</summary>
+        public static FP PortFlow(int level) => NavalBaseFlow + NavalFlowPerLevel * FP.FromInt(level);
+
+        /// <summary>The country's ports no rail reached, by sea. Rail comes first, as in HOI4 (its tooltip for Toulon:
+        /// one transfer to Bizerte, with Algiers and Oran fed from Bizerte by rail): each round opens one sea route
+        /// and connects everything that has rail to the port it reaches before the next route is chosen. A port's
+        /// route comes from the connected port with the shortest way by sea (Hoi4Ports.SailingDistance) among those
+        /// that carry at least half of what the best one could: Dakar hangs on Casablanca, not on bigger Bizerte far
+        /// away, and a small port next door doesn't throttle a big one. The round's route is the one
+        /// that carries the most, then the shortest, then the lower province. So a rail network across
+        /// the sea gets one route, not one per port.</summary>
+        static void ConnectBySea(GameState gameState, ushort country, Hub[] next, System.Func<ushort, bool> usable)
+        {
+            if (!Hoi4Ports.Available) return;
+            var mine = hubsByCountry[country];
+            seaSources.Clear();
+            seaRoots.Clear(); // here: the ports still waiting
+            foreach (int i in mine)
+            {
+                if (Hoi4Ports.Level(hubProvinces[i]) <= 0) continue;
+                if (next[i].Connected) seaSources.Add(i); else seaRoots.Add(i);
+            }
+            while (seaRoots.Count > 0 && seaSources.Count > 0)
+            {
+                int best = -1, bestSource = -1;
+                FP bestFlow = FP.Zero;
+                long bestDist = 0;
+                foreach (int i in seaRoots) // province order
+                {
+                    if (next[i].Connected) continue; // rail reached it in an earlier round
+                    ushort p = hubProvinces[i];
+                    FP own = PortFlow(Hoi4Ports.Level(p));
+                    // the most any source can give it, then the source nearest by sea giving at least half of it
+                    FP most = FP.Zero;
+                    bool any = false;
+                    foreach (int s in seaSources)
+                    {
+                        ushort sp = hubProvinces[s];
+                        FP flow = FP.Min(next[s].Capacity, FP.Min(PortFlow(Hoi4Ports.Level(sp)), own));
+                        if ((any && flow <= most) || !Hoi4Ports.SameWater(gameState, sp, p)) continue;
+                        most = flow; any = true;
+                    }
+                    if (!any) continue;
+                    int source = -1;
+                    FP sourceFlow = FP.Zero;
+                    long sourceDist = 0;
+                    foreach (int s in seaSources)
+                    {
+                        ushort sp = hubProvinces[s];
+                        FP flow = FP.Min(next[s].Capacity, FP.Min(PortFlow(Hoi4Ports.Level(sp)), own));
+                        if (flow * 2 < most) continue;
+                        long dist = Hoi4Ports.SailingDistance(gameState, sp, p);
+                        if (dist < 0) continue;
+                        if (source >= 0 && (dist > sourceDist || (dist == sourceDist && sp >= hubProvinces[source]))) continue;
+                        source = s; sourceFlow = flow; sourceDist = dist;
+                    }
+                    if (best >= 0 && (sourceFlow < bestFlow || (sourceFlow == bestFlow && sourceDist >= bestDist))) continue; // ties: the lower province
+                    best = i; bestSource = source; bestFlow = sourceFlow; bestDist = sourceDist;
+                }
+                if (best < 0) return;
+                next[best].Connected = true;
+                next[best].BySea = true;
+                next[best].Source = hubProvinces[bestSource];
+                next[best].Capacity = bestFlow;
+                seaSources.Add(best);
+                network.WidestPaths(hubProvinces[best], usable, paths);
+                foreach (int i in mine)
+                {
+                    ushort p = hubProvinces[i];
+                    if (next[i].Connected || !paths.Reached(p)) continue;
+                    int level = paths.Level(p);
+                    next[i].Connected = true;
+                    next[i].Level = level;
+                    next[i].Distance = paths.Hops(p);
+                    next[i].Source = hubProvinces[best];
+                    next[i].Capacity = FP.Min(bestFlow, RailwayBaseFlow + RailwayFlowPerLevel * FP.FromInt(level));
+                    if (Hoi4Ports.Level(p) > 0) seaSources.Add(i);
+                }
+            }
+        }
+
+        /// <summary>The hub provinces: supply_nodes.txt, every capital and every naval base, sorted. Rebuilt when a
+        /// naval base appears or goes; the hubs found so far are dropped (the caller recomputes).</summary>
+        static void BuildHubList()
+        {
+            var hubList = new SortedSet<ushort>(listed);
+            foreach (var cap in Hoi4Regions.Capitals)
+                if (cap.Value != 0) hubList.Add(cap.Value);
+            if (Hoi4Ports.Available)
+            {
+                foreach (ushort p in Hoi4Ports.Ports) hubList.Add(p);
+                hubListPorts = Hoi4Ports.Version;
+            }
+            hubProvinces = new ushort[hubList.Count];
+            hubList.CopyTo(hubProvinces);
+            listedHub = new bool[hubProvinces.Length];
+            hubSlot.Clear();
+            int size = converted.Length;
+            for (int i = 0; i < hubProvinces.Length; i++)
+            {
+                hubSlot[hubProvinces[i]] = i;
+                listedHub[i] = listed.Contains(hubProvinces[i]);
+                size = System.Math.Max(size, hubProvinces[i] + 1);
+            }
+            hubs = System.Array.Empty<Hub>();
+            hubsByCountry.Clear();
+
+            var rail = new SortedSet<ushort>(hubProvinces);
+            foreach (ushort p in network.Provinces()) rail.Add(p);
+            railProvinces = new ushort[rail.Count];
+            rail.CopyTo(railProvinces);
+            if (converted.Length < size)
+            {
+                int old = converted.Length;
+                System.Array.Resize(ref converted, size);
+                for (int i = old; i < size; i++) converted[i] = true;
+            }
         }
 
         static void Add(Dictionary<ushort, int> d, ushort key, int n)
@@ -343,36 +506,19 @@ namespace Hoi4.Supply
                         if (network.SetLevel(a, b, System.Math.Max(1, (int)l[2])) >= 0)
                             size = System.Math.Max(size, System.Math.Max(a, b) + 1);
                     }
-                var hubList = new List<ushort>();
                 if (root["hubs"] is JObject hubObj)
-                    foreach (var h in hubObj.Properties()) hubList.Add(ushort.Parse(h.Name));
-                var listed = new HashSet<ushort>(hubList);
-                foreach (var cap in Hoi4Regions.Capitals)
-                    if (cap.Value != 0 && !listed.Contains(cap.Value) && !hubList.Contains(cap.Value)) hubList.Add(cap.Value);
-                hubList.Sort();
-                hubProvinces = hubList.ToArray();
-                listedHub = new bool[hubProvinces.Length];
-                for (int i = 0; i < hubProvinces.Length; i++)
-                {
-                    hubSlot[hubProvinces[i]] = i;
-                    listedHub[i] = listed.Contains(hubProvinces[i]);
-                    size = System.Math.Max(size, hubProvinces[i] + 1);
-                }
+                    foreach (var h in hubObj.Properties()) listed.Add(ushort.Parse(h.Name));
 
                 if (root["points"] is JObject pts)
                     foreach (var pt in pts.Properties())
                         if (pt.Value is JArray xy && xy.Count == 2)
                             points[ushort.Parse(pt.Name)] = new UnityEngine.Vector2((float)xy[0], (float)xy[1]);
 
-                var rail = new SortedSet<ushort>(hubProvinces);
-                foreach (ushort p in network.Provinces()) rail.Add(p);
-                railProvinces = new ushort[rail.Count];
-                rail.CopyTo(railProvinces);
-
                 converted = new bool[size];
                 for (int i = 0; i < converted.Length; i++) converted[i] = true;
+                BuildHubList();
                 lastNetwork = network.Version;
-                ArchonLogger.Log($"Hoi4Railways: {network.LinkCount} rail links, {listed.Count} supply hubs, {hubProvinces.Length - listed.Count} capital-only", "map_initialization");
+                ArchonLogger.Log($"Hoi4Railways: {network.LinkCount} rail links, {listed.Count} supply hubs, {hubProvinces.Length - listed.Count} capitals and naval bases besides", "map_initialization");
                 return available = true;
             }
             catch (System.Exception e)

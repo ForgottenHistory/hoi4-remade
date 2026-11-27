@@ -18,6 +18,11 @@ namespace Hoi4.Units
     /// down to -80% at none (LOW_ORG_FOR_ATTACK, ZERO_ORG_MOVEMENT_MODIFIER). Checked against daily division snapshots of a real
     /// 1936 game: infantry marching unopposed covers about 4 km of distance x cost an hour.
     /// At least an hour; at most MaxSpeedFactor slower than the base (modifiers never stop a division).
+    /// At sea (naval transfer between ports, Hoi4MovementRules): every leg into or out of a sea province takes its
+    /// distance at SeaSpeedKmh, whatever the division: NAVAL_TRANSFER_BASE_SPEED 6, in the navy's speed unit, which
+    /// moves a ship twice as far as a land unit's (NAVAL_SPEED_MODIFIER 0.1 against LAND_SPEED_MODIFIER 0.05), so 12
+    /// of our km/h. Our reading of the defines, not measured in HOI4. Distances run between the sea provinces'
+    /// centres and the ports' spots (Hoi4Ports).
     /// Centres come from map/hoi4_province_centres.csv (Tools/hoi4_convert.py); without it, or for a unit that
     /// isn't a division, the caller's time stands.
     /// </summary>
@@ -31,6 +36,7 @@ namespace Hoi4.Units
         static readonly FP MinFactor = FP.FromFraction(1, 10);                  // speed never below 10% of the base
         static readonly FP LowOrgForAttack = FP.FromFraction(3, 10);            // LOW_ORG_FOR_ATTACK
         static readonly FP ZeroOrgMovement = FP.FromFraction(-8, 10);           // ZERO_ORG_MOVEMENT_MODIFIER
+        static readonly FP SeaSpeedKmh = FP.FromInt(12);                        // NAVAL_TRANSFER_BASE_SPEED 6 x 0.1 / 0.05
 
         static readonly Dictionary<ushort, (int x, int y)> centres = new Dictionary<ushort, (int, int)>();
         static bool loaded;
@@ -46,7 +52,16 @@ namespace Hoi4.Units
         public static int LegHours(GameState gameState, ushort unitId, ushort from, ushort to)
         {
             var division = Hoi4Divisions.Instance?.Get(unitId);
-            if (division == null || !TryDistanceKm(from, to, out FP km)) return 0;
+            if (division == null) return 0;
+            if (Hoi4Regions.IsWater(from) || Hoi4Regions.IsWater(to))
+            {
+                if (!Hoi4.Supply.Hoi4Ports.TryGetPoint(from, out int ax, out int ay) || !Hoi4.Supply.Hoi4Ports.TryGetPoint(to, out int bx, out int by))
+                    return 0;
+                long sx = bx - ax, sy = by - ay; // tenths of a map px
+                FP seaKm = FP.Sqrt(FP.FromInt((int)System.Math.Min(int.MaxValue, (sx * sx + sy * sy) / 100))) * KmPerPixel;
+                return System.Math.Max(1, FP.Ceiling(seaKm / SeaSpeedKmh).ToInt());
+            }
+            if (!TryDistanceKm(from, to, out FP km)) return 0;
             string terrain = Hoi4CombatTerrain.TerrainKey(gameState, to);
             FP speed = division.SpeedKmh > FP.Zero ? division.SpeedKmh : FP.FromInt(4);
             FP factor = FP.Max(MinFactor, FP.One + division.TerrainModifier(terrain).Movement);

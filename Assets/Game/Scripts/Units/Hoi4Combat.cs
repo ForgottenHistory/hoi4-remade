@@ -147,6 +147,7 @@ namespace Hoi4.Units
         {
             var diplomacy = gameState.Diplomacy;
             if (diplomacy == null || !gameState.Units.HasUnit(unitId) || retreating.Contains(unitId)) return false;
+            if (Hoi4Regions.IsWater(province)) return false; // divisions at sea (naval transfer) pass each other: no navy yet
             ushort country = gameState.Units.GetUnit(unitId).countryID;
             foreach (ushort other in gameState.Units.GetUnitsInProvince(province))
             {

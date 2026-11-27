@@ -8,19 +8,23 @@ using FP = Core.Data.FixedPoint64;
 namespace Hoi4.Supply
 {
     /// <summary>
-    /// GAME: HOI4 supply in every land province and each division's supply ratio (no ports, convoys, air supply,
-    /// weather, motorization or allies' hubs yet). Low supply weakens divisions through Lack: combat (Hoi4Combat),
+    /// GAME: HOI4 supply in every land province and each division's supply ratio (no convoys, air supply,
+    /// motorization or allies' hubs yet). Low supply weakens divisions through Lack: combat (Hoi4Combat),
     /// max organisation and recovery (Hoi4Combat), speed (Hoi4Movement), manpower reinforcement (Hoi4Manpower) and
     /// equipment attrition below 35% (here).
     /// Prototypes: Tools/prototypes/supply/supply_flow.py (province supply, checked against HOI4 tooltips in the
     /// Ruhr) and supply_demand.py (allocation). Numbers are NSupply defines unless said otherwise.
     ///
-    /// HUB SUPPLY. Every connected hub (Hoi4Railways: the capital and the hubs with a rail path to it) sends supply
-    /// over the land provinces its controller controls, losing some on every step:
+    /// HUB SUPPLY. Every connected hub (Hoi4Railways: the capital, the hubs with a rail path to it, and the naval
+    /// bases reached by rail or by sea) sends supply over the land provinces its controller controls, losing some
+    /// on every step:
     ///     start   = INITIAL + NODE_FLOW_BONUS_PER_RAIL_LEVEL (0.34) * rail level
-    ///               (capital 5.0, at its best rail level; hub 2.8, at its bottleneck level to the capital)
-    ///     step d  = (STARTING (0.5) + ADDED (capital 1.2, hub 0.7) * falloff(d) + terrain penalty of the province
-    ///               entered) * (1 - 0.3 * infrastructure of the state left / 5) + 0.2 over a river
+    ///               (capital 5.0, at its best rail level; hub 2.8, at its bottleneck level to the capital; naval
+    ///               base 3.3, at its rail bottleneck, none when it is supplied by sea)
+    ///     step d  = (STARTING (0.5; naval base 0.84) + ADDED (capital 1.2, hub 0.7, naval base 1.1) * falloff(d)
+    ///               + terrain penalty of the province entered) * (1 - 0.3 * infrastructure of the state left / 5)
+    ///               + 0.2 over a river
+    /// A province with both a supply hub and a naval base spreads as a hub.
     ///     falloff = the defines' logistics curve: max(0.25, 0.9 / (1 + e^(-1.3 (d - 2.3)))), a table below
     /// It stops once below SUPPLY_FLOW_REDUCTION_THRESHOLD (0.1). A province's hub supply is the sum of its three
     /// best sources (HOI4's tooltip lists three flow sources; the sum matched Dortmund's 7.06 where the best source
@@ -52,6 +56,9 @@ namespace Hoi4.Supply
         static readonly FP NodeInitial = FP.FromFraction(28, 10);         // NODE_INITIAL_SUPPLY_FLOW
         static readonly FP NodeStarting = FP.FromFraction(5, 10);         // NODE_STARTING_PENALTY_PER_PROVINCE
         static readonly FP NodeAdded = FP.FromFraction(7, 10);            // NODE_ADDED_PENALTY_PER_PROVINCE
+        static readonly FP NavalInitial = FP.FromFraction(33, 10);        // NAVAL_BASE_INITIAL_SUPPLY_FLOW
+        static readonly FP NavalStarting = FP.FromFraction(84, 100);      // NAVAL_BASE_STARTING_PENALTY_PER_PROVINCE
+        static readonly FP NavalAdded = FP.FromFraction(11, 10);          // NAVAL_BASE_ADDED_PENALTY_PER_PROVINCE
         static readonly FP BonusPerRailLevel = FP.FromFraction(34, 100);  // NODE_FLOW_BONUS_PER_RAIL_LEVEL
         static readonly FP InfraReduction = FP.FromFraction(3, 10);       // SUPPLY_FLOW_DROP_REDUCTION_AT_MAX_INFRA
         static readonly FP RiverPenalty = FP.FromFraction(2, 10);         // SUPPLY_FLOW_PENALTY_CROSSING_RIVERS
@@ -332,13 +339,11 @@ namespace Hoi4.Supply
             foreach (ushort p in Hoi4Railways.HubProvinces) // sorted
             {
                 if (!Hoi4Railways.TryGetHub(p, out var hub) || !hub.Connected || p >= size) continue;
-                FP start = hub.IsCapital
-                    ? CapitalInitial + BonusPerRailLevel * FP.FromInt(Hoi4Railways.RailLevel(p))
-                    : NodeInitial + BonusPerRailLevel * FP.FromInt(hub.Level);
+                FP start = Start(hub, p);
                 capacity[p] = hub.Capacity;
                 sourceOrder.Add(p);
                 seen.Add(p);
-                long sig = start.RawValue ^ ((long)hub.Country << 48) ^ (hub.IsCapital ? 1L << 47 : 0);
+                long sig = start.RawValue ^ ((long)hub.Country << 48) ^ (hub.IsCapital ? 1L << 47 : 0) ^ (hub.IsPort ? 1L << 46 : 0);
                 if (!prevStart.TryGetValue(p, out long before) || before != sig) { dirty.Add(hub.Country); prevStart[p] = sig; }
             }
             var lost = new List<ushort>();
@@ -364,11 +369,9 @@ namespace Hoi4.Supply
                 Hoi4Railways.TryGetHub(p, out var hub);
                 if (!full && !dirty.Contains(hub.Country)) continue;
                 searched++;
-                FP start = hub.IsCapital
-                    ? CapitalInitial + BonusPerRailLevel * FP.FromInt(Hoi4Railways.RailLevel(p))
-                    : NodeInitial + BonusPerRailLevel * FP.FromInt(hub.Level);
-                Spread(gameState, ctrl, p, hub.Country, start, hub.IsCapital ? CapitalStarting : NodeStarting,
-                       hub.IsCapital ? CapitalAdded : NodeAdded);
+                Spread(gameState, ctrl, p, hub.Country, Start(hub, p),
+                       hub.IsCapital ? CapitalStarting : hub.IsPort ? NavalStarting : NodeStarting,
+                       hub.IsCapital ? CapitalAdded : hub.IsPort ? NavalAdded : NodeAdded);
             }
             for (int p = 0; p < size; p++)
             {
@@ -384,6 +387,11 @@ namespace Hoi4.Supply
             if (prevInfra == null || prevInfra.Length <= maxState) prevInfra = new int[maxState + 1];
             foreach (int s in Hoi4Regions.States) prevInfra[s] = Hoi4Buildings.Level(s, "infrastructure");
         }
+
+        /// <summary>The flow a source starts with: the capital's, a hub's or a naval base's, plus the rail bonus.</summary>
+        static FP Start(Hoi4Railways.Hub hub, ushort province) =>
+            hub.IsCapital ? CapitalInitial + BonusPerRailLevel * FP.FromInt(Hoi4Railways.RailLevel(province))
+            : (hub.IsPort ? NavalInitial : NodeInitial) + BonusPerRailLevel * FP.FromInt(hub.Level);
 
         /// <summary>Best remaining flow from the source to every province its country controls. Flow only falls (every
         /// step costs at least 0.5 x 0.7 - 0.2 > 0), so taking the province with the most flow left first is exact.</summary>

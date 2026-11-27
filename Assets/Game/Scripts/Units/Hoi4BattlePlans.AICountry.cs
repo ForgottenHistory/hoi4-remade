@@ -608,7 +608,8 @@ namespace Hoi4.Units
             foreach (int a in new List<int>(mine.Keys)) if (!alive.Contains(a)) mine.Remove(a);
 
             // --- Main effort and budgets, per landmass ----------------------------------------------------
-            // Divisions can't cross the sea (no naval transfer), so each walkable landmass (walk label) shares
+            // The AI doesn't plan naval transfers (divisions can sail between ports, Hoi4MovementRules, but the
+            // budgets don't count on it), so each walkable landmass (walk label) shares
             // its own divisions among its own theatres, with its own main effort: land held across the sea is
             // budgeted from the divisions there, and an encircled pocket is a small landmass of its own
             var byLabel = new SortedDictionary<int, List<int>>();

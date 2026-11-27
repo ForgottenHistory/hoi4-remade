@@ -122,6 +122,12 @@
     rail_supply_3: { texture: "gfx/map/rails/supply_medium.png", width: 1.2,  minScreenWidth: 5, tile: 1.25, color: [1, 1, 1, 1], order: 3 },
     rail_supply_4: { texture: "gfx/map/rails/supply_thick.png",  width: 1.35, minScreenWidth: 6, tile: 1.25, color: [1, 1, 1, 1], order: 4 },
     rail_supply_5: { texture: "gfx/map/rails/supply_thick.png",  width: 1.5,  minScreenWidth: 7, tile: 1.25, color: [1, 1, 1, 1], order: 5 },
+    // Supply map mode: the sea supply routes between ports (Hoi4SeaRoutes), HOI4's traderoute map arrow: white
+    // ships 3 map px apart, sailing towards the port supplied (scroll: ships per second; HOI4 texture_anim_speed
+    // 0.2). Prototype Tools/prototypes/ports/sea_supply.py (scale checked against an HOI4 screenshot of Bornholm).
+    sea_supply: { texture: "gfx/map/ports/convoy.png", width: 0.95, minScreenWidth: 6, tile: 0.333, scroll: 0.2, color: [1, 1, 1, 0.92], order: 6 },
+    // the same route with nothing drawn over it today: faint, the ships at half speed
+    sea_supply_idle: { texture: "gfx/map/ports/convoy.png", width: 0.8, minScreenWidth: 5, tile: 0.333, scroll: 0.1, color: [1, 1, 1, 0.4], order: 5 },
     rail_converting: { width: 0.7, minScreenWidth: 1, softness: 0.3, color: [0.3, 0.3, 0.3, 0.6], fade: [3.0, 5.0], order: 0 },
   },
 

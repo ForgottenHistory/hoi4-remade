@@ -23,7 +23,7 @@ namespace Hoi4.Supply
     /// A palette mode (shader mode 6): one colour per province in the engine's province palette, alpha 0 for terrain.
     /// The shader (Hoi4MapModes.hlsl, Hoi4SupplyColor) smooths the colours across provinces like HOI4's heatmap but
     /// stops them at the province's own edge. While active, Hoi4RailRenderer draws the railways as HOI4's white
-    /// supply-mode map arrows. Recoloured once a game day while shown (and on activation).
+    /// supply-mode map arrows and Hoi4SeaRoutes the sea supply routes between ports as white convoy ships. Recoloured once a game day while shown (and on activation).
     /// Prototype: Tools/prototypes/supply/supply_mapmode.py.
     /// </summary>
     public sealed class Hoi4SupplyMapMode : BaseMapModeHandler
@@ -138,6 +138,29 @@ namespace Hoi4.Supply
             engine.MapModeManager.UpdateProvinceColors(paletteIndex, colours);
         }
 
+        /// <summary>The hub in the province, like HOI4's hub tooltips: the capital hub's supply cap and what it is
+        /// made of; a supply hub's or naval base's connection from the capital (its throughput, the rail bottleneck
+        /// level or the port that ships it); and the supply demanded of it today. Empty when there is no hub.</summary>
+        static string HubText(ushort province)
+        {
+            if (!Hoi4Railways.TryGetHub(province, out var hub)) return "";
+            int port = Hoi4Ports.Level(province);
+            string demanded = $"\nDemanded supplies: {Hoi4Supply.Drawn(province).ToFloat():0.0}";
+            if (hub.IsCapital)
+            {
+                Hoi4Railways.CapitalSupplyParts(hub.Country, out FP b, out FP c, out FP m, out FP d);
+                return $"\nCapital hub. Supply cap: {hub.Capacity.ToFloat():0.0}"
+                       + $"\n  From base: {b.ToFloat():0.0}\n  From civilian factories: {c.ToFloat():0.0}"
+                       + $"\n  From military factories: {m.ToFloat():0.0}\n  From dockyards: {d.ToFloat():0.0}" + demanded;
+            }
+            string name = port > 0 ? $"Naval base, level {port}" : "Supply hub";
+            if (!hub.Connected) return $"\n{name}: not connected to the capital";
+            string how = hub.BySea ? $"by sea from the port in province {hub.Source}"
+                : hub.Source != 0 ? $"rail level {hub.Level} from the port in province {hub.Source}"
+                : $"rail level {hub.Level}";
+            return $"\n{name}." + demanded + $"\nSupply connection from capital: {hub.Capacity.ToFloat():0.0} ({how})";
+        }
+
         static FP Supply(GameState gs, ushort p) => Hoi4Supply.HubSupply(p) + Hoi4Supply.StateSupply(gs, p);
 
         static Color32 Gradient(float[,] stops, float t)
@@ -160,6 +183,7 @@ namespace Hoi4.Supply
             if (gs == null) return "";
             string text = $"Supply {Supply(gs, provinceId).ToFloat():0.0} (hubs {Hoi4Supply.HubSupply(provinceId).ToFloat():0.0}, " +
                           $"state {Hoi4Supply.StateSupply(gs, provinceId).ToFloat():0.0})";
+            text += HubText(provinceId);
             if (!Hoi4.Weather.Hoi4Weather.Available) return text;
             var parts = new List<string> { $"{Hoi4.Weather.Hoi4Weather.Temperature(provinceId).ToFloat():0} C" };
             var kind = Hoi4.Weather.Hoi4Weather.KindAt(provinceId);

@@ -16,6 +16,14 @@ namespace Hoi4.Units
     /// Cost = the destination terrain's movement cost (map/terrain.json5), so paths prefer plains
     /// over mountains and marshes.
     ///
+    /// Naval transfer: a division may also go by sea between ports (Hoi4Ports). It goes to sea only from a province
+    /// with a naval base that its country or an ally controls, into that base's sea province; it sails any water
+    /// from there; it lands only at such a port, from the port's sea province (an enemy's port can't be landed at:
+    /// no naval invasions). There is no navy yet, so the sea is open and nothing needs convoys. Going to sea costs
+    /// EmbarkCost and every sea province SeaCost, far more than land provinces (HOI4 weighs sea distance by
+    /// NAVAL_TRANSFER_BASE_NAVAL_DIST_MULT 20 and adds 100 when it picks a route): a division sails only where
+    /// walking is impossible or a very long way round, and a search over land looks only a few provinces out to sea.
+    ///
     /// Cost: A* calls CanTraverse and GetMovementCost for every province it looks at, so they are array reads.
     /// Water, impassable and terrain cost never change in HOI4 and are read once. Owners are a snapshot
     /// rebuilt when ProvinceSystem.OwnershipVersion changes; access per (country, owner) is cached until
@@ -29,6 +37,9 @@ namespace Hoi4.Units
 
         // Static per province (by id): not enterable whatever the owner (water, impassable), terrain cost
         private bool[] blocked;
+        private bool[] water;
+        static readonly FixedPoint64 EmbarkCost = FixedPoint64.FromInt(40);
+        static readonly FixedPoint64 SeaCost = FixedPoint64.FromInt(10);
         private FixedPoint64[] cost;
         // Owner per province, as of ownershipVersion
         private ushort[] owner;
@@ -47,7 +58,11 @@ namespace Hoi4.Units
         public bool CanTraverse(ushort province, PathContext context)
         {
             EnsureStatic();
-            if (province >= blocked.Length || blocked[province])
+            if (province >= blocked.Length)
+                return false;
+            if (water[province]) // the sea: whether this step may be taken is the edge's question (GetMovementCost)
+                return context.UnitOwnerCountryId != 0 && Hoi4.Supply.Hoi4Ports.Available;
+            if (blocked[province])
                 return false;
             ushort country = context.UnitOwnerCountryId;
             if (country == 0) return true; // no owner given: terrain rules only
@@ -105,7 +120,24 @@ namespace Hoi4.Units
         public FixedPoint64 GetMovementCost(ushort from, ushort to, PathContext context)
         {
             EnsureStatic();
-            return to < cost.Length ? cost[to] : FixedPoint64.One;
+            if (to >= cost.Length) return FixedPoint64.One;
+            bool seaFrom = from < water.Length && water[from], seaTo = water[to];
+            if (!seaFrom && !seaTo) return cost[to];
+            if (seaFrom && seaTo) return SeaCost;
+            // between land and sea: only through a port of the division's side, to or from the port's own sea province
+            ushort port = seaFrom ? to : from, sea = seaFrom ? from : to;
+            if (!CanUsePort(context.UnitOwnerCountryId, port) || Hoi4.Supply.Hoi4Ports.Sea(port) != sea)
+                return FixedPoint64.MaxValue;
+            return seaTo ? EmbarkCost : cost[to];
+        }
+
+        /// <summary>May the country's divisions go to sea from, or land at, this province: it has a naval base, held
+        /// by the country or an ally.</summary>
+        public bool CanUsePort(ushort country, ushort province)
+        {
+            if (country == 0 || Hoi4.Supply.Hoi4Ports.Level(province) <= 0) return false;
+            ushort holder = Hoi4Occupation.ControllerOf(gameState, province);
+            return holder == country || (holder != 0 && gameState.Diplomacy != null && gameState.Diplomacy.AreAllied(country, holder));
         }
 
         public FixedPoint64 GetHeuristic(ushort from, ushort goal) => FixedPoint64.Zero;
@@ -129,11 +161,13 @@ namespace Hoi4.Units
             for (int i = 0; i < data.activeProvinceIds.Length; i++)
                 size = System.Math.Max(size, data.activeProvinceIds[i] + 1);
             blocked = new bool[size];
+            water = new bool[size];
             cost = new FixedPoint64[size];
             for (int i = 0; i < data.activeProvinceIds.Length; i++)
             {
                 ushort p = data.activeProvinceIds[i];
-                blocked[p] = Hoi4Regions.IsWater(p) || (terrain != null && terrain.IsProvinceWater(p)) || Hoi4Regions.IsImpassable(p);
+                water[p] = Hoi4Regions.IsWater(p);
+                blocked[p] = water[p] || (terrain != null && terrain.IsProvinceWater(p)) || Hoi4Regions.IsImpassable(p);
                 cost[p] = terrain != null ? terrain.GetMovementCost(0, p, default) : FixedPoint64.One;
             }
             blocked[0] = true;
