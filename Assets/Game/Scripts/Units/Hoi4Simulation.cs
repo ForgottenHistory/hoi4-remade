@@ -26,6 +26,8 @@ namespace Hoi4.Units
             { "combat_h", "plans_h", "ai_h", "recorder", "combat_d", "equipment", "manpower", "plans_d", "war", "ai_wars", "production", "ai_production", "construction", "ai_construction", "deployment", "ai_deployment", "ai_army", "railways", "supply", "weather", "research", "ai_research", "ai_tanks" };
         static readonly string[] MaxNames = { "combat_h_max", "plans_h_max", "ai_h_max", "plans_refresh", "plans_distribute", "plans_ai" };
         readonly double[] perf = new double[PerfNames.Length];
+        // managed memory each step allocated that day, bytes (alloc.tsv): what feeds the garbage collector
+        readonly long[] alloc = new long[PerfNames.Length];
         // One profiler marker per step, named like the perf.tsv columns: they show in a normal (not deep) capture
         static readonly Unity.Profiling.ProfilerMarker[] Markers = System.Array.ConvertAll(PerfNames, n => new Unity.Profiling.ProfilerMarker("Hoi4." + n));
         readonly double[] perfMax = new double[3];
@@ -35,9 +37,14 @@ namespace Hoi4.Units
 
         void Measure(int slot, System.Action step)
         {
+            // heap growth over the step (Unity's Mono doesn't count allocated bytes per thread: that call returns 0).
+            // A collection during the step shrinks the heap: such a step counts as nothing, so the sums run a little low
+            long before = System.GC.GetTotalMemory(false);
             watch.Restart();
             using (Markers[slot].Auto()) step();
             double ms = watch.Elapsed.TotalMilliseconds;
+            long grown = System.GC.GetTotalMemory(false) - before;
+            if (grown > 0) alloc[slot] += grown;
             perf[slot] += ms;
             if (slot < perfMax.Length && ms > perfMax[slot]) perfMax[slot] = ms;
         }
@@ -76,6 +83,16 @@ namespace Hoi4.Units
                 sb.Append(wars).Append('\t').Append(divisions);
                 recorder.Table("perf", string.Join("\t", PerfNames) + "\t" + string.Join("\t", MaxNames) + "\tsim_ms\tframes\tframe_ms_avg\tframe_ms_max\twars\tdivisions").Row(sb.ToString());
             }
+            if (recorder != null && !recorder.Stopped)
+            {
+                // alloc.tsv, one row per day: kilobytes of managed memory each system allocated (same columns as perf.tsv's systems)
+                var sb = new System.Text.StringBuilder();
+                long total = 0;
+                foreach (long b in alloc) { total += b; sb.Append(b / 1024).Append('	'); }
+                sb.Append(total / 1024);
+                recorder.Table("alloc", string.Join("	", PerfNames) + "	total_kb").Row(sb.ToString());
+            }
+            System.Array.Clear(alloc, 0, alloc.Length);
             System.Array.Clear(perf, 0, perf.Length);
             System.Array.Clear(perfMax, 0, perfMax.Length);
             frameSum = frameMax = 0;

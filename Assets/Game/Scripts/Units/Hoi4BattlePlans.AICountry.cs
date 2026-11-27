@@ -993,10 +993,14 @@ namespace Hoi4.Units
         /// </summary>
         int[] Landmasses(ushort country)
         {
+            // once per country an hour (a plan asks twice, ShipReserves again), into the country's array of the hour before
+            if (landmasses.TryGetValue(country, out var label)) return label;
             movementRules ??= new Hoi4MovementRules(gameState);
             SnapshotHour();
             var diplomacy = gameState.Diplomacy;
-            var label = new int[landNeighbours.Length];
+            if (!landmassBuffers.TryGetValue(country, out label) || label.Length != landNeighbours.Length)
+                landmassBuffers[country] = label = new int[landNeighbours.Length];
+            landmasses[country] = label;
             System.Array.Fill(label, -1);
             // Only land reachable from the country's own: every caller looks at its fronts, sections and the
             // divisions that can walk to them (labelling the whole map for every country was 3 ms a frame).
@@ -1356,7 +1360,7 @@ namespace Hoi4.Units
             using var _ = RouteCostsMarker.Auto();
             var result = new Dictionary<ushort, FP>();
             routes[enemy] = result;
-            if (!LandByController().TryGetValue(enemy, out var landList)) return result;
+            if (!LandByController().TryGetValue(enemy, out var landList) || landList.Count == 0) return result; // (lists are kept empty between hours)
             var land = new HashSet<ushort>();
             foreach (ushort p in landList) if (!Hoi4.Map.Hoi4Regions.IsImpassable(p)) land.Add(p);
             var war = Hoi4.War.Hoi4War.Instance;

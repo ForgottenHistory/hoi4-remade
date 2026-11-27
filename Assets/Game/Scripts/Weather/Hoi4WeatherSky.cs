@@ -156,10 +156,16 @@ namespace Hoi4.Weather
             return m;
         }
 
+        const float FadeStepSeconds = 0.1f;
+        const float RepaintSeconds = 1f;
+        float nextFadeStep;
+
         void Update()
         {
             if (!Ready()) return;
-            if (Hoi4Weather.Version != shownVersion)
+            // A new day's weather is painted (two blur passes over the map: 8 ms) at most once a real second: at high
+            // game speed the days come several a second, and the sky fades over FadeSeconds anyway
+            if (Hoi4Weather.Version != shownVersion && (shownVersion < 0 || Time.unscaledTime - fadeStart >= RepaintSeconds))
             {
                 bool first = shownVersion < 0;
                 shownVersion = Hoi4Weather.Version;
@@ -170,8 +176,11 @@ namespace Hoi4.Weather
                 fadeStart = Time.unscaledTime;
                 fading = true;
             }
-            if (fading)
+            // The fade rewrites and uploads both textures: 4 ms a frame, and at high game speed a new day's weather
+            // starts the next fade as the last one ends. Ten steps a second look the same (clouds drift slowly)
+            if (fading && Time.unscaledTime >= nextFadeStep)
             {
+                nextFadeStep = Time.unscaledTime + FadeStepSeconds;
                 float t = Smooth(Mathf.Clamp01((Time.unscaledTime - fadeStart) / FadeSeconds));
                 for (int i = 0, p = 0; p < cloudPixels.Length; p++, i += 8)
                 {

@@ -139,6 +139,7 @@ namespace Hoi4.Supply
             hubSlot.Clear(); hubs = System.Array.Empty<Hub>();
             capitalSupply.Clear(); hubsByCountry.Clear();
             civ.Clear(); mil.Clear(); dock.Clear();
+            seaCache.Clear(); railSig.Clear();
             loaded = available = started = false;
             lastState = null;
             lastControl = lastOwnership = lastBuildings = lastUsers = lastNetwork = -1;
@@ -328,6 +329,17 @@ namespace Hoi4.Supply
             var countries = new List<ushort>(hubsByCountry.Keys);
             countries.Sort();
 
+            // each country's usable rail, as one number: the rail provinces it controls and whether each is converted
+            railSig.Clear();
+            for (int i = 0; i < railProvinces.Length; i++)
+            {
+                ushort p = railProvinces[i];
+                ushort c = p < ctrl.Length ? ctrl[p] : (ushort)0;
+                if (c == 0) continue;
+                railSig.TryGetValue(c, out long h);
+                railSig[c] = Mix(h, ((long)p << 1) | (converted[p] ? 1L : 0L));
+            }
+
             capitalSupply.Clear();
             ushort current = 0;
             System.Func<ushort, bool> usable = p => p < ctrl.Length && ctrl[p] == current && converted[p];
@@ -362,7 +374,18 @@ namespace Hoi4.Supply
                     next[i].Distance = paths.Hops(p);
                     next[i].Capacity = RailwayBaseFlow + RailwayFlowPerLevel * FP.FromInt(level);
                 }
-                ConnectBySea(gameState, country, next, usable);
+                // By sea: only when what it depends on changed for this country (most countries, most days, it didn't)
+                long sig = SeaSignature(country, next, railSig.TryGetValue(country, out long rs) ? rs : 0);
+                var mine = hubsByCountry[country];
+                if (seaCache.TryGetValue(country, out var cached) && cached.sig == sig && cached.hubs.Length == mine.Count)
+                    for (int k = 0; k < mine.Count; k++) next[mine[k]] = cached.hubs[k];
+                else
+                {
+                    ConnectBySea(gameState, country, next, usable);
+                    var keep = new Hub[mine.Count];
+                    for (int k = 0; k < mine.Count; k++) keep[k] = next[mine[k]];
+                    seaCache[country] = (sig, keep);
+                }
             }
 
             bool changed = next.Length != hubs.Length;
@@ -379,6 +402,27 @@ namespace Hoi4.Supply
         }
 
         static readonly List<int> seaSources = new List<int>(), seaRoots = new List<int>();
+        // ConnectBySea's result per country and what it was worked out from (SeaSignature): reused while that is the
+        // same. Its cost grows with ports squared (Britain: 75), and every control change anywhere recomputes all hubs
+        static readonly Dictionary<ushort, (long sig, Hub[] hubs)> seaCache = new Dictionary<ushort, (long, Hub[])>();
+        static readonly Dictionary<ushort, long> railSig = new Dictionary<ushort, long>();
+
+        static long Mix(long h, long v) => unchecked((h ^ v) * 1099511628211L + (long)0x9E3779B97F4A7C15UL);
+
+        /// <summary>Everything ConnectBySea reads for a country, as one number: its hubs after the rail pass from the
+        /// capital (which, connected, level, capacity, port level), its usable rail, the rail network and the ports.</summary>
+        static long SeaSignature(ushort country, Hub[] next, long rail)
+        {
+            long h = Mix(Mix(rail, network.Version), Hoi4Ports.Available ? Hoi4Ports.Version : -1);
+            foreach (int i in hubsByCountry[country])
+            {
+                var hub = next[i];
+                h = Mix(h, hub.Province);
+                h = Mix(h, (hub.Connected ? 1L : 0L) | (hub.IsCapital ? 2L : 0L) | ((long)hub.Level << 2) | ((long)Hoi4Ports.Level(hub.Province) << 8));
+                h = Mix(h, hub.Capacity.RawValue);
+            }
+            return h;
+        }
 
         /// <summary>The throughput a naval base of this level can take or give by sea.</summary>
         public static FP PortFlow(int level) => NavalBaseFlow + NavalFlowPerLevel * FP.FromInt(level);

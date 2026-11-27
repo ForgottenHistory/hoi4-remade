@@ -135,6 +135,13 @@ namespace Hoi4.Units
         ushort[] ctrl;                                                     // controller per province id, snapshot during a refresh
         readonly Dictionary<ushort, HashSet<ushort>> enemyLand = new Dictionary<ushort, HashSet<ushort>>(); // per country, this hour
         readonly Dictionary<ushort, List<ushort>> landByController = new Dictionary<ushort, List<ushort>>(); // this hour
+        bool landByControllerBuilt;                                            // ... (its lists are kept, emptied, between hours)
+        readonly Stack<HashSet<ushort>> spareSets = new Stack<HashSet<ushort>>(); // enemy-land sets of earlier hours, emptied
+        readonly Dictionary<ushort, int[]> walkLabelBuffers = new Dictionary<ushort, int[]>(); // per country, reused every hour
+        bool[] walkScratch;
+        readonly List<ushort> walkQueue = new List<ushort>();
+        readonly Dictionary<ushort, int[]> landmasses = new Dictionary<ushort, int[]>();       // Landmasses per country, this hour
+        readonly Dictionary<ushort, int[]> landmassBuffers = new Dictionary<ushort, int[]>();  // ... reused every hour
         // Owner and controller of every land province, read once per hour (on first use) and shared by every
         // country's EnemyLand and WalkLabels: each used to read the whole map itself (two hash lookups per
         // province per country per hour)
@@ -683,9 +690,15 @@ namespace Hoi4.Units
         public void SimulateHour()
         {
             if (!simReady) return;
+            // The hour's caches start over, but their memory is kept: a province-sized label array per country, an
+            // enemy-land set per country and the land lists were allocated anew every hour (most of the plans'
+            // 16 MB of garbage a game day in a world war)
+            foreach (var set in enemyLand.Values) { set.Clear(); spareSets.Push(set); }
             enemyLand.Clear();
-            landByController.Clear();
+            foreach (var list in landByController.Values) list.Clear();
+            landByControllerBuilt = false;
             walkLabels.Clear();
+            landmasses.Clear();
             pieceReach.Clear();
             hourOwner = hourCtrl = null;
             arcPairs = null;
@@ -780,8 +793,12 @@ namespace Hoi4.Units
                 impassable = new bool[landNeighbours.Length];
                 foreach (ushort p in landProvinces) impassable[p] = Hoi4Regions.IsImpassable(p);
             }
-            label = new int[landNeighbours.Length];
-            var walk = new bool[landNeighbours.Length];
+            // the country's array from the hour before (callers use the labels within the hour) and one scratch array
+            if (!walkLabelBuffers.TryGetValue(country, out label) || label.Length != landNeighbours.Length)
+                walkLabelBuffers[country] = label = new int[landNeighbours.Length];
+            if (walkScratch == null || walkScratch.Length != landNeighbours.Length) walkScratch = new bool[landNeighbours.Length];
+            else Array.Clear(walkScratch, 0, walkScratch.Length);
+            var walk = walkScratch;
             var access = new Dictionary<ushort, bool>(); // by owner: access depends on the owner, not the province
             foreach (ushort p in landProvinces)
             {
@@ -792,7 +809,7 @@ namespace Hoi4.Units
                 walk[p] = ok;
             }
             int next = 0;
-            var queue = new List<ushort>();
+            var queue = walkQueue;
             foreach (ushort s in landProvinces)
             {
                 if (!walk[s] || label[s] >= 0) continue;
@@ -2161,7 +2178,8 @@ namespace Hoi4.Units
         /// <summary>Land provinces grouped by controller, this hour (one pass over the map for every EnemyLand).</summary>
         Dictionary<ushort, List<ushort>> LandByController()
         {
-            if (landByController.Count > 0) return landByController;
+            if (landByControllerBuilt) return landByController;
+            landByControllerBuilt = true;
             SnapshotHour();
             foreach (ushort p in landProvinces)
             {
@@ -2177,7 +2195,7 @@ namespace Hoi4.Units
         HashSet<ushort> EnemyLand(ushort country)
         {
             if (enemyLand.TryGetValue(country, out var set)) return set;
-            set = new HashSet<ushort>();
+            set = spareSets.Count > 0 ? spareSets.Pop() : new HashSet<ushort>();
             var diplomacy = gameState.Diplomacy;
             if (diplomacy != null)
             {

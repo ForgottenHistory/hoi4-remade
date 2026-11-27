@@ -97,7 +97,14 @@ namespace Hoi4.Units
         IDisposable[] subscriptions;
         bool dirty;
         float lastRebuild = -1f;
-        const float MinRebuildInterval = 0.1f; // hourly ticks at high speed would otherwise rebuild every frame
+        // Hourly ticks at high speed would otherwise rebuild every frame. A rebuild in a large war takes tens of
+        // milliseconds (a thousand counters: 37 ms measured), so the wait grows with what the last one took: the
+        // counters get at most about a sixth of the frame time, between 10 and 2 redraws a second. What the player
+        // did (MarkDirty: a selection, an order) redraws without the wait.
+        const float MinRebuildInterval = 0.1f, MaxRebuildInterval = 0.5f, RebuildShare = 6f;
+        float rebuildInterval = MinRebuildInterval;
+        bool urgent;
+        readonly System.Diagnostics.Stopwatch rebuildWatch = new System.Diagnostics.Stopwatch();
         // Composed counters by content: a counter that did not change is copied, not re-composed
         readonly Dictionary<CounterKey, Color32[]> composed = new Dictionary<CounterKey, Color32[]>();
         int atlasH; // atlas.height, kept here: Over() runs per pixel and the Texture getter is a native call
@@ -151,7 +158,7 @@ namespace Hoi4.Units
         public float WorldPerMapPixel => worldPerMapPixel;
 
         /// <summary>Re-compose counters (selection, organisation or strength changed).</summary>
-        public void MarkDirty() => dirty = true;
+        public void MarkDirty() { dirty = true; urgent = true; }
         /// <summary>Redraw, but not in this frame: for the daily tick, whose frame is already the heaviest.</summary>
         public void MarkDirtyNextFrame() { dirty = true; holdFrame = Time.frameCount; }
         int holdFrame = -1;
@@ -248,11 +255,14 @@ namespace Hoi4.Units
         void LateUpdate()
         {
             if (material == null) return;
-            if (dirty && Time.frameCount != holdFrame && Time.unscaledTime - lastRebuild >= MinRebuildInterval)
+            if (dirty && Time.frameCount != holdFrame && Time.unscaledTime - lastRebuild >= (urgent ? MinRebuildInterval * 0.5f : rebuildInterval))
             {
                 dirty = false;
+                urgent = false;
                 lastRebuild = Time.unscaledTime;
+                rebuildWatch.Restart();
                 Rebuild();
+                rebuildInterval = Mathf.Clamp((float)rebuildWatch.Elapsed.TotalSeconds * RebuildShare, MinRebuildInterval, MaxRebuildInterval);
             }
 
             material.SetVector(ParamsId, new Vector4(pixelScale, fadeHiddenZoom, Mathf.Max(fadeVisibleZoom, fadeHiddenZoom + 0.01f), liftAboveTerrain));
@@ -555,12 +565,19 @@ namespace Hoi4.Units
 
         // --- Build ---------------------------------------------------------------------------
 
+        // in a normal (not deep) profiler capture: which part of a rebuild costs
+        static readonly Unity.Profiling.ProfilerMarker CollectMarker = new Unity.Profiling.ProfilerMarker("Hoi4.counters.collect"),
+            ComposeMarker = new Unity.Profiling.ProfilerMarker("Hoi4.counters.compose"),
+            UploadMarker = new Unity.Profiling.ProfilerMarker("Hoi4.counters.upload");
+
         void Rebuild()
         {
-            stacks = CollectStacks();
+            using (CollectMarker.Auto()) stacks = CollectStacks();
             int cols = AtlasWidth / SlotW;
             int rows = Mathf.Max(1, (stacks.Count + cols - 1) / cols);
-            int atlasHeight = Mathf.NextPowerOfTwo(rows * SlotH);
+            // as tall as the counters need, in steps of 256 rows (not the next power of two: the whole atlas is
+            // uploaded on every rebuild, and 1,000 counters need 1,300 rows, not 2,048)
+            int atlasHeight = Mathf.Max(256, (rows * SlotH + 255) / 256 * 256);
             if (atlas == null || atlas.height != atlasHeight)
             {
                 if (atlas != null) Destroy(atlas);
@@ -573,12 +590,11 @@ namespace Hoi4.Units
                 atlasPixels = new Color32[AtlasWidth * atlasHeight];
                 material.SetTexture(AtlasId, atlas);
             }
-            else
-            {
-                Array.Clear(atlasPixels, 0, atlasPixels.Length);
-            }
+            // not cleared: every slot in use is written whole (a cached counter is copied over it, a new one is
+            // composed on a slot cleared for it), and slots past the last counter aren't drawn
             atlasH = atlasHeight;
 
+            ComposeMarker.Begin();
             var verts = new Vector3[stacks.Count * 4];
             var uvs = new Vector2[stacks.Count * 4];
             var offsets = new Vector2[stacks.Count * 4];
@@ -610,8 +626,12 @@ namespace Hoi4.Units
                 tris[t + 3] = v; tris[t + 4] = v + 2; tris[t + 5] = v + 3;
             }
 
-            atlas.SetPixelData(atlasPixels, 0);
-            atlas.Apply(false);
+            ComposeMarker.End();
+            using (UploadMarker.Auto())
+            {
+                atlas.SetPixelData(atlasPixels, 0);
+                atlas.Apply(false);
+            }
 
             mesh.Clear();
             mesh.vertices = verts;
@@ -632,10 +652,11 @@ namespace Hoi4.Units
             int best = -1;
             foreach (var kv in s.Types)
                 if (kv.Value > best) { best = kv.Value; type = kv.Key; }
-            int org = Mathf.RoundToInt(barOrg.Width * Mathf.Clamp01(s.MaxOrg > 0 ? s.Org / s.MaxOrg : 1f));
-            int str = Mathf.RoundToInt(barStr.Width * Mathf.Clamp01(s.MaxStr > 0 ? s.Str / s.MaxStr : 1f));
+            // without the organisation and strength bars: they change by the hour in a war, so with them in the key
+            // nearly every counter was composed anew on every rebuild (10 ms for a thousand). The bars are drawn
+            // onto the cached counter instead (ComposeCached)
             return new CounterKey(false, s.Tag, s.Color.r << 16 | s.Color.g << 8 | s.Color.b, type, s.Action, s.ArmyId,
-                                  s.Count, org, str, s.Selected, s.NoOrders, s.Supply);
+                                  s.Count, 0, 0, s.Selected, s.NoOrders, s.Supply);
         }
 
         void ComposeCached(Stack s, int ox, int oy)
@@ -646,8 +667,10 @@ namespace Hoi4.Units
             {
                 for (int y = 0; y < SlotH; y++)
                     Array.Copy(block, y * SlotW, atlasPixels, (h - 1 - (oy + y)) * AtlasWidth + ox, SlotW);
+                Bars(s, ox + LeftMargin, oy + TopMargin);
                 return;
             }
+            for (int y = 0; y < SlotH; y++) Array.Clear(atlasPixels, (h - 1 - (oy + y)) * AtlasWidth + ox, SlotW);
             if (s.IsBattle) ComposeBattle(s, ox + LeftMargin, oy + TopMargin);
             else ComposeCounter(s, ox + LeftMargin, oy + TopMargin);
             if (composed.Count > 5000) composed.Clear();
@@ -655,6 +678,15 @@ namespace Hoi4.Units
             for (int y = 0; y < SlotH; y++)
                 Array.Copy(atlasPixels, (h - 1 - (oy + y)) * AtlasWidth + ox, block, y * SlotW, SlotW);
             composed[key] = block;
+            Bars(s, ox + LeftMargin, oy + TopMargin);
+        }
+
+        /// <summary>The organisation and strength bars, onto a composed counter (nothing else is drawn over them).</summary>
+        void Bars(Stack s, int ox, int oy)
+        {
+            if (s.IsBattle) return;
+            Bar(barOrg, s.MaxOrg > 0 ? s.Org / s.MaxOrg : 1f, ox + 16, oy + 16);
+            Bar(barStr, s.MaxStr > 0 ? s.Str / s.MaxStr : 1f, ox + 16, oy + 19);
         }
 
         void ComposeCounter(Stack s, int ox, int oy)
@@ -700,8 +732,7 @@ namespace Hoi4.Units
             // mapicons.gui low_supply: a crate over the top edge (x 24, y -4, scale 0.75), into the slot's top strip
             var crate = s.Supply > 0 ? supplyCrates[s.Supply - 1] : null;
 
-            Bar(barOrg, s.MaxOrg > 0 ? s.Org / s.MaxOrg : 1f, ox + 16, oy + 16);
-            Bar(barStr, s.MaxStr > 0 ? s.Str / s.MaxStr : 1f, ox + 16, oy + 19);
+            // (the organisation and strength bars come last, from ComposeCached: they aren't part of the cached image)
 
             // Division count, centred in the dark box (centre x 46, y 13)
             string text = s.Count.ToString();
