@@ -90,6 +90,15 @@ namespace Hoi4.Units
             return System.Math.Max(1, FP.Ceiling(hours).ToInt());
         }
 
+        /// <summary>A land province's centre, map px (y down).</summary>
+        public static bool TryGetCentre(ushort province, out int x, out int y)
+        {
+            Load();
+            bool ok = centres.TryGetValue(province, out var c);
+            x = c.x; y = c.y;
+            return ok;
+        }
+
         /// <summary>Km between two provinces' centres.</summary>
         public static bool TryDistanceKm(ushort a, ushort b, out FP km)
         {

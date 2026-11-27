@@ -25,8 +25,16 @@ namespace Hoi4.UI
     ///   off. With a building selected, clicking a province queues a level of it in that state, right clicking takes one
     ///   off the order there (the state panel stays
     ///   shut) and the map shows where it fits (Hoi4ConstructionMap); clicking the button again, Escape or closing
-    ///   the screen drops the selection. Only civilian and military
-    ///   factories and infrastructure can be built so far; the rest select but never queue.
+    ///   the screen drops the selection.
+    /// - Supply buildings (naval base, supply hub, railway) are placed per province, over the supply map mode
+    ///   (selecting one switches to it, dropping the selection switches back): a click queues a level in that
+    ///   province, a right click takes one off. Railways: clicking a stretch's level number orders the whole
+    ///   stretch one level up; clicking an order's number raises the level it builds to, right clicking lowers it.
+    ///   A new railway takes two clicks: its start, which must be on the network (rail, a hub, a naval base or
+    ///   another order), and its end, anywhere in the player's land; while the end is being picked the line
+    ///   follows the cursor province by province, in yellow (Shift on the second click starts the next line from there; a right click drops the start, or
+    ///   the order running through the province). Orders show in orange, with a roadblock where one ends nowhere. The map shows the
+    ///   orders in bands (Hoi4ConstructionMap.ShowProvinces) and the rail levels as badges (Hoi4PortIcons).
     /// Values refresh four times a real second and the animation runs on real time (presentation, not game time);
     /// the list is rebuilt only when the country's queue changes.
     /// </summary>
@@ -69,6 +77,13 @@ namespace Hoi4.UI
         int boxUsers = int.MinValue;
         string placing;
         int hoverState; // the state under the cursor while placing (its outline glows)
+        readonly List<ushort> railTrail = new List<ushort>(); // the railway being laid out: the provinces the cursor went through
+        ushort hoverProvince, railStart; // province buildings: the province under the cursor; a railway's first click
+        global::Map.MapModes.MapMode modeBefore;
+        bool tookMapMode; // the supply map mode is on because a supply building is selected
+
+        /// <summary>The province building being placed (naval base, supply hub, railway), null otherwise.</summary>
+        public static string PlacingSupply => Placing != null && Hoi4Construction.IsProvinceBuilding(Placing) ? Placing : null;
         bool open, structureDirty = true;
         float nextRefresh;
         ushort shownCountry;
@@ -213,7 +228,25 @@ namespace Hoi4.UI
             selected = selected == button ? null : button;
             selected?.AddToClassList("selected");
             placing = selected?.userData as string;
-            global::Map.Rendering.Labels.MapRegionLabels.Shown = placing != null; // state names while placing
+            // a supply building is placed over the supply map mode, like HOI4; back to the mode before when it is dropped
+            bool supply = placing != null && Hoi4Construction.IsProvinceBuilding(placing);
+            var modes = Engine.ArchonEngine.Instance?.MapModeManager;
+            if (modes != null && supply && !tookMapMode)
+            {
+                modeBefore = modes.CurrentMode;
+                tookMapMode = true;
+                modes.SetMapMode(global::Map.MapModes.MapMode.Supply);
+            }
+            else if (modes != null && !supply && tookMapMode)
+            {
+                tookMapMode = false;
+                modes.SetMapMode(modeBefore);
+            }
+            railStart = 0;
+            hoverProvince = 0;
+            Hoi4.Supply.Hoi4RailRenderer.SetPreview(null);
+            if (supply) ClearBoxes();
+            global::Map.Rendering.Labels.MapRegionLabels.Shown = placing != null && !supply; // state names while placing
             // HOI4 drops the borders between provinces of a state while placing a state-wide building
             string section = placing != null ? Hoi4StateData.Def(placing)?.Section : null;
             global::Map.Rendering.Border.BorderClassStyles.SetHidden(ProvinceBorderClass, section == "state" || section == "shared");
@@ -240,6 +273,12 @@ namespace Hoi4.UI
             int state = province != 0 ? Hoi4Regions.State(province) : -1;
             if (state < 0) return true;
             int count = ShiftOr(1, 5);
+            if (Hoi4Construction.IsProvinceBuilding(placing))
+            {
+                if (placing != Hoi4Construction.Railway || !ClickBadge(button, screen)) ClickProvince(button, province, count);
+                nextRefresh = 0f;
+                return true;
+            }
             if (button == 0)
             {
                 for (int i = 0; i < count; i++)
@@ -260,6 +299,143 @@ namespace Hoi4.UI
             }
             nextRefresh = 0f;
             return true;
+        }
+
+        /// <summary>The railway tool on a rail level number: on a stretch of railway, the left button orders the
+        /// whole stretch one level up; on an order, left raises the level it builds to and right lowers it (the order
+        /// goes when nothing is left to build). False when no number is under the cursor.</summary>
+        bool ClickBadge(int button, Vector2 screen)
+        {
+            var icons = Hoi4.Supply.Hoi4PortIcons.Instance;
+            if (icons == null || !icons.TryPickBadge(screen, out bool order, out int id)) return false;
+            if (order)
+            {
+                var item = Hoi4Construction.Instance.Item(shownCountry, id);
+                if (item != null)
+                    gameState.TryExecuteCommand(new SetRailOrderLevelCommand { CountryId = shownCountry, ItemId = id, Level = item.RailLevel + (button == 0 ? 1 : -1) }, out _);
+            }
+            else if (button == 0 && id < Hoi4.Supply.Hoi4RailRenderer.Chains.Count)
+                gameState.TryExecuteCommand(new QueueRailwayCommand { CountryId = shownCountry, Path = new List<ushort>(Hoi4.Supply.Hoi4RailRenderer.Chains[id].Provinces) }, out _);
+            return true;
+        }
+
+        /// <summary>A new railway starts where one can join the network: a province with rail, a supply hub or a
+        /// naval base, or one a railway order of the player runs through.</summary>
+        bool CanStartRail(ushort province)
+        {
+            if (Hoi4.Supply.Hoi4Railways.RailLevel(province) > 0 || Hoi4.Supply.Hoi4Railways.IsHubSite(province)
+                || Hoi4.Supply.Hoi4Ports.Level(province) > 0) return true;
+            foreach (var item in Hoi4Construction.Instance.Queue(shownCountry))
+                if (item.Path != null && item.Path.Contains(province)) return true;
+            return false;
+        }
+
+        /// <summary>The line being laid out, in yellow on the map: it follows the cursor province by province from the
+        /// start (railTrail), like HOI4; moving back over it shortens it.</summary>
+        void UpdateRailPreview()
+        {
+            if (placing != Hoi4Construction.Railway || railStart == 0) { railTrail.Clear(); Hoi4.Supply.Hoi4RailRenderer.SetPreview(null); return; }
+            if (railTrail.Count == 0 || railTrail[0] != railStart) { railTrail.Clear(); railTrail.Add(railStart); }
+            ushort at = hoverProvince;
+            if (at != 0 && Hoi4.Units.Hoi4Occupation.ControllerOf(gameState, at) == shownCountry && !Hoi4Regions.IsImpassable(at))
+            {
+                int seen = railTrail.IndexOf(at);
+                if (seen >= 0) railTrail.RemoveRange(seen + 1, railTrail.Count - seen - 1); // moved back along the line
+                else
+                {
+                    // the next province the cursor entered; when it jumped (a fast move, over the screen), the
+                    // shortest way there from the line's end
+                    var step = RailPath(railTrail[railTrail.Count - 1], at);
+                    if (step != null)
+                        for (int k = 1; k < step.Count; k++)
+                        {
+                            int back = railTrail.IndexOf(step[k]);
+                            if (back >= 0) railTrail.RemoveRange(back + 1, railTrail.Count - back - 1);
+                            else railTrail.Add(step[k]);
+                        }
+                }
+            }
+            Hoi4.Supply.Hoi4RailRenderer.SetPreview(railTrail.Count >= 2 ? new List<ushort>(railTrail) : null);
+        }
+
+        /// <summary>A map click while a supply building is selected (see the class summary).</summary>
+        void ClickProvince(int button, ushort province, int count)
+        {
+            var construction = Hoi4Construction.Instance;
+            if (placing == Hoi4Construction.Railway)
+            {
+                if (button != 0)
+                {
+                    if (railStart != 0) { railStart = 0; return; }
+                    foreach (var item in construction.Queue(shownCountry))
+                        if (item.Path != null && item.Path.Contains(province)) { Remove(item.Id); break; }
+                    return;
+                }
+                if (Hoi4Regions.IsWater(province) || Hoi4Regions.IsImpassable(province)
+                    || Hoi4.Units.Hoi4Occupation.ControllerOf(gameState, province) != shownCountry) return;
+                if (railStart == 0 || railStart == province)
+                {
+                    if (CanStartRail(province)) railStart = province;
+                    return;
+                }
+                UpdateRailPreview(); // the line as the cursor drew it, ending here
+                var path = railTrail.Count >= 2 && railTrail[railTrail.Count - 1] == province ? new List<ushort>(railTrail) : RailPath(railStart, province);
+                railTrail.Clear();
+                if (path != null)
+                    gameState.TryExecuteCommand(new QueueRailwayCommand { CountryId = shownCountry, Path = path }, out _);
+                railStart = ShiftOr(0, province) != 0 ? province : (ushort)0;
+                return;
+            }
+            if (button == 0)
+            {
+                for (int i = 0; i < count; i++)
+                    if (!gameState.TryExecuteCommand(new QueueProvinceConstructionCommand { CountryId = shownCountry, Province = province, Building = placing }, out _))
+                        break;
+                return;
+            }
+            foreach (var item in construction.Queue(shownCountry))
+            {
+                if (item.Province != province || item.Building != placing) continue;
+                if (item.Count > count)
+                    gameState.TryExecuteCommand(new SetConstructionCountCommand { CountryId = shownCountry, ItemId = item.Id, Count = item.Count - count }, out _);
+                else
+                    Remove(item.Id);
+                break;
+            }
+        }
+
+        /// <summary>The shortest way between two provinces through passable land the player controls (fewest
+        /// provinces): how the line being laid out bridges a jump of the cursor. Null when there is none. Presentation: the command checks the path it is given.</summary>
+        List<ushort> RailPath(ushort from, ushort to)
+        {
+            const int RailStep = 1, NewStep = 1; // every step alike: the line goes where the cursor leads it
+            var dist = new Dictionary<ushort, int> { [from] = 0 };
+            var prev = new Dictionary<ushort, ushort>();
+            var open = new SortedSet<(int d, ushort p)> { (0, from) };
+            var neighbours = new List<ushort>();
+            while (open.Count > 0)
+            {
+                var (d, u) = open.Min;
+                open.Remove(open.Min);
+                if (u == to) break;
+                if (d > dist[u]) continue;
+                neighbours.Clear();
+                gameState.Adjacencies.GetNeighborsWhere(u, p => !Hoi4Regions.IsWater(p) && !Hoi4Regions.IsImpassable(p)
+                    && Hoi4.Units.Hoi4Occupation.ControllerOf(gameState, p) == shownCountry, neighbours);
+                foreach (ushort v in neighbours)
+                {
+                    int nd = d + (Hoi4.Supply.Hoi4Railways.RailLevel(u, v) > 0 ? RailStep : NewStep);
+                    if (dist.TryGetValue(v, out int had) && had <= nd) continue;
+                    dist[v] = nd;
+                    prev[v] = u;
+                    open.Add((nd, v));
+                }
+            }
+            if (!prev.ContainsKey(to)) return null;
+            var path = new List<ushort> { to };
+            while (path[path.Count - 1] != from) path.Add(prev[path[path.Count - 1]]);
+            path.Reverse();
+            return path;
         }
 
         // ---- open / close -----------------------------------------------------------------------------
@@ -397,7 +573,7 @@ namespace Hoi4.UI
                 var item = queue[k];
                 var e = entries[k];
                 e.Q<Label>("cl-count").text = item.Count.ToString();
-                e.Q("cl-add").EnableInClassList("disabled", construction.Room(item.State, item.Building) <= 0);
+                e.Q("cl-add").EnableInClassList("disabled", construction.RoomOf(item) <= 0);
                 e.Q<Label>("cl-factories").text = $"{item.Factories}/{Hoi4Construction.MaxFactoriesPerItem}";
                 float progress = item.Cost > Core.Data.FixedPoint64.Zero ? Mathf.Clamp01((item.Progress / item.Cost).ToFloat()) : 0f;
                 e.Q("cl-progress").style.width = Mathf.Round(60 * progress);
@@ -504,15 +680,24 @@ namespace Hoi4.UI
         bool UpdateHover()
         {
             int state = 0;
+            ushort province = 0;
             var cam = Camera.main;
             if (cam != null && selector != null && !global::Map.CameraControllers.BaseCameraController.ScrollCaptured)
             {
                 ushort p = selector.GetProvinceAtScreenPosition(Input.mousePosition, cam);
-                if (p != 0 && !Hoi4Regions.IsWater(p)) state = Mathf.Max(0, Hoi4Regions.State(p));
+                if (p != 0 && !Hoi4Regions.IsWater(p)) { state = Mathf.Max(0, Hoi4Regions.State(p)); province = p; }
             }
-            if (state == hoverState) return false;
+            if (state == hoverState && province == hoverProvince) return false;
             hoverState = state;
+            hoverProvince = province;
             return true;
+        }
+
+        void ShowMap(bool supply)
+        {
+            UpdateRailPreview();
+            if (supply) Hoi4ConstructionMap.ShowProvinces(gameState, shownCountry, placing, hoverProvince, railStart);
+            else Hoi4ConstructionMap.Show(gameState, shownCountry, placing, hoverState);
         }
 
         void LateUpdate()
@@ -558,14 +743,15 @@ namespace Hoi4.UI
             }
             if (structureDirty) Rebuild(construction);
             Animate(construction);
-            if (placing != null && UpdateHover()) Hoi4ConstructionMap.Show(gameState, shownCountry, placing, hoverState);
+            bool supply = placing != null && Hoi4Construction.IsProvinceBuilding(placing);
+            if (placing != null && UpdateHover()) ShowMap(supply);
             if (Time.unscaledTime < nextRefresh) return;
             nextRefresh = Time.unscaledTime + RefreshSeconds;
             Refresh(construction);
             if (placing != null)
             {
-                Hoi4ConstructionMap.Show(gameState, shownCountry, placing, hoverState);
-                UpdateBoxes(construction);
+                ShowMap(supply);
+                if (!supply) UpdateBoxes(construction);
             }
         }
     }

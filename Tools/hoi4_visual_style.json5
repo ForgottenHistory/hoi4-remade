@@ -128,6 +128,9 @@
     sea_supply: { texture: "gfx/map/ports/convoy.png", width: 0.95, minScreenWidth: 6, tile: 0.333, scroll: 0.2, color: [1, 1, 1, 0.92], order: 6 },
     // the same route with nothing drawn over it today: faint, the ships at half speed
     sea_supply_idle: { texture: "gfx/map/ports/convoy.png", width: 0.8, minScreenWidth: 5, tile: 0.333, scroll: 0.1, color: [1, 1, 1, 0.4], order: 5 },
+    // Railway construction (supply map mode): a railway on order in orange, the line being laid out in yellow
+    rail_planned: { texture: "gfx/map/rails/supply_medium.png", width: 1.05, minScreenWidth: 4, tile: 1.25, color: [1.0, 0.62, 0.25, 1], order: 7 },
+    rail_preview: { texture: "gfx/map/rails/supply_medium.png", width: 1.05, minScreenWidth: 4, tile: 1.25, color: [1.0, 0.93, 0.3, 1], order: 8 },
     rail_converting: { width: 0.7, minScreenWidth: 1, softness: 0.3, color: [0.3, 0.3, 0.3, 0.6], fade: [3.0, 5.0], order: 0 },
   },
 

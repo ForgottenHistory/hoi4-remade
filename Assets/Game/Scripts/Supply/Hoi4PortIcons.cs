@@ -22,11 +22,20 @@ namespace Hoi4.Supply
     /// (Hoi4Railways.Hub.Capacity), both rounded up ("1/20"). With nothing demanded the crates are grey and there
     /// is no text. Other countries' ports keep the grey anchor.
     ///
+    /// Construction, also in the supply map mode: a naval base or supply hub the player has on order shows HOI4's
+    /// crossed hammers over its icon (grey crates where nothing stands yet). While a supply building is being
+    /// placed from the construction screen (Hoi4ConstructionPanel.PlacingSupply) every stretch of railway carries
+    /// its level on a dark disc at its middle (mapicons.gui railway_map_icon; Hoi4RailRenderer.Chains), in white,
+    /// and every railway order the level it builds to, in orange under the hammers (Hoi4RailRenderer.Plans; it
+    /// stands in for the badge of a stretch it is raising). The badges can be clicked (TryPickBadge: the
+    /// construction screen's railway tool). An order whose line ends nowhere has a roadblock at its end.
+    ///
     /// Drawn like the division counters: one mesh of camera-facing quads through the Hoi4/UnitCounter shader (a
     /// screen-space size at the anchor, shrinking and fading with the zoom), under the counters. The sprites and
     /// the digits come from gfx/map/ports/ (hoi4_convert.py write_ports) in one small atlas.
     /// Rebuilt when a port changes hands or level, the player's country or the map mode changes, and in the supply
-    /// map mode when the hubs or the day's draw change. Reads only.
+    /// map mode when the hubs, the day's draw, the construction queues, the building being placed or the drawn
+    /// railways change. Reads only.
     /// Prototype: Tools/prototypes/ports/sea_supply.py.
     /// </summary>
     public sealed class Hoi4PortIcons : MonoBehaviour
@@ -55,7 +64,7 @@ namespace Hoi4.Supply
         Material material;
         Mesh mesh;
         Texture2D atlas;
-        RectInt blueRect, greyRect, textRect, hubRect, hubGreyRect, anchorRect, cutRect, bubbleRect, hexRect, textBgRect; // atlas pixels, y up
+        RectInt blueRect, greyRect, textRect, hubRect, hubGreyRect, anchorRect, cutRect, bubbleRect, hexRect, textBgRect, hammersRect, badgeRect, orangeRect, blockRect; // atlas pixels, y up
         int cellW;
         int mapWidth, mapHeight;
         Vector4 bounds;
@@ -63,7 +72,42 @@ namespace Hoi4.Supply
         int builtControl = -1, builtPorts = -1;
         ushort builtViewer = ushort.MaxValue;
         bool builtSupply;
-        int builtHubs = -1, builtDay = -1;
+        int builtHubs = -1, builtDay = -1, builtOrders = -1, builtChains = -1, builtPlans = -1;
+        // the rail level badges drawn, for clicks: where, and the railway order (order) or chain (index) behind it
+        readonly List<(Vector3 anchor, bool order, int id)> badges = new List<(Vector3, bool, int)>();
+
+        public static Hoi4PortIcons Instance { get; private set; }
+        void Awake() => Instance = this;
+
+        /// <summary>The rail level badge under a screen position (the construction screen's railway tool): a railway
+        /// order's (id = the order) or a stretch of railway's (id = its index in Hoi4RailRenderer.Chains). Mirrors
+        /// the Hoi4/UnitCounter shader's size and placement.</summary>
+        public bool TryPickBadge(Vector2 screen, out bool order, out int id)
+        {
+            order = false; id = -1;
+            var cam = Camera.main;
+            var counters = Hoi4UnitCounters.Instance;
+            if (cam == null || counters == null || material == null) return false;
+            float p11 = Mathf.Abs(cam.projectionMatrix[1, 1]);
+            float bestDist = float.MaxValue;
+            foreach (var b in badges)
+            {
+                var anchor = b.anchor;
+                anchor.y = counters.TerrainHeight(anchor);
+                var sp = cam.WorldToScreenPoint(anchor);
+                if (sp.z <= 0f) continue;
+                float worldPerScreenPx = 2f * Mathf.Max(sp.z, 1e-3f) / (p11 * Screen.height);
+                float zoom = worldPerMapPixel / worldPerScreenPx;
+                if (zoom < fadeHiddenZoom) continue;
+                float scale = pixelScale * Mathf.Clamp(zoom / Mathf.Max(fullSizeZoom, 0.01f), Mathf.Clamp01(minSizeFraction), 1f);
+                float reach = Mathf.Max(9f, badgeRect.width * 0.5f * scale + 3f);
+                float d = Vector2.Distance(screen, new Vector2(sp.x, sp.y));
+                if (d > reach || d >= bestDist) continue;
+                bestDist = d; order = b.order; id = b.id;
+            }
+            return id >= 0;
+        }
+        string builtPlacing;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Spawn()
@@ -117,8 +161,14 @@ namespace Hoi4.Supply
             ushort viewer = player != null && player.HasPlayerCountry ? player.PlayerCountryId : (ushort)0;
             bool supply = Hoi4SupplyMapMode.Active;
             if (builtControl != gs.Provinces.ControlVersion || builtPorts != Hoi4Ports.Version || builtViewer != viewer
-                || builtSupply != supply || (supply && (builtHubs != Hoi4Railways.Version || builtDay != Hoi4Supply.DayVersion)))
+                || builtSupply != supply || (supply && (builtHubs != Hoi4Railways.Version || builtDay != Hoi4Supply.DayVersion
+                    || builtOrders != Hoi4.Construction.Hoi4Construction.Version || builtChains != Hoi4RailRenderer.ChainsVersion
+                    || builtPlacing != Hoi4.UI.Hoi4ConstructionPanel.PlacingSupply || builtPlans != Hoi4RailRenderer.PlansVersion)))
             {
+                builtPlans = Hoi4RailRenderer.PlansVersion;
+                builtOrders = Hoi4.Construction.Hoi4Construction.Version;
+                builtChains = Hoi4RailRenderer.ChainsVersion;
+                builtPlacing = Hoi4.UI.Hoi4ConstructionPanel.PlacingSupply;
                 builtControl = gs.Provinces.ControlVersion;
                 builtPorts = Hoi4Ports.Version;
                 builtViewer = viewer;
@@ -129,8 +179,7 @@ namespace Hoi4.Supply
             }
             material.SetVector(ParamsId, new Vector4(pixelScale, fadeHiddenZoom, Mathf.Max(fadeVisibleZoom, fadeHiddenZoom + 0.01f), 0f));
             material.SetVector(SizeId, new Vector4(Mathf.Max(fullSizeZoom, 0.01f), Mathf.Clamp01(minSizeFraction), worldPerMapPixel, 0f));
-            var counters = Hoi4UnitCounters.Instance;
-            if (mesh.vertexCount > 0 && (counters == null || !counters.Hidden))
+            if (mesh.vertexCount > 0) // also while the construction screen hides the division counters
                 Graphics.DrawMesh(mesh, Matrix4x4.identity, material, 0);
         }
 
@@ -192,12 +241,84 @@ namespace Hoi4.Supply
                     tx += cellW - 1;
                 }
             }
+            badges.Clear();
+            if (supplyMode && viewer != 0) Construction(gs, viewer, hubHere, verts, uvs, offsets, tris);
             mesh.Clear();
             mesh.SetVertices(verts);
             mesh.SetUVs(0, uvs);
             mesh.SetUVs(1, offsets);
             mesh.SetTriangles(tris, 0);
             mesh.bounds = new Bounds(Vector3.zero, Vector3.one * 1e6f); // the shader moves the quads in screen space: never cull
+        }
+
+        Vector3 World(Vector2 spot) =>
+            new Vector3(bounds.x + spot.x / mapWidth * bounds.z, 0f, bounds.y + (mapHeight - spot.y) / mapHeight * bounds.w);
+
+        /// <summary>The player's supply construction: hammers over the naval bases and hubs on order, and while a
+        /// supply building is being placed the level badge on every stretch of railway.</summary>
+        void Construction(Core.GameState gs, ushort viewer, HashSet<ushort> hubHere, List<Vector3> verts, List<Vector2> uvs,
+                          List<Vector2> offsets, List<int> tris)
+        {
+            var construction = Hoi4.Construction.Hoi4Construction.Instance;
+            if (construction == null) return;
+            float x0 = -hubRect.width * 0.5f, y0 = HubLiftPx;
+            var marked = new HashSet<ushort>();
+            foreach (var item in construction.Queue(viewer))
+            {
+                if (item.Province == 0 || !marked.Add(item.Province)) continue;
+                bool naval = item.Building == Hoi4.Construction.Hoi4Construction.NavalBase;
+                if (!(naval && Hoi4Ports.TryGetSpot(item.Province, out var spot)) && !Hoi4Railways.TryGetRailPoint(item.Province, out spot)) continue;
+                var anchor = World(spot);
+                if (!hubHere.Contains(item.Province)) // nothing stands here yet: the grey crates it will be
+                {
+                    Quad(verts, uvs, offsets, tris, anchor, bubbleRect, x0, y0);
+                    Quad(verts, uvs, offsets, tris, anchor, hubGreyRect, x0, y0);
+                    if (naval) Quad(verts, uvs, offsets, tris, anchor, anchorRect, x0, y0);
+                }
+                Quad(verts, uvs, offsets, tris, anchor, hammersRect, x0 + 8f, y0 + hubRect.height - 4f); // mapicons.gui: x 8, y -16
+            }
+
+            // a railway order that leads nowhere: the roadblock at its end
+            foreach (var plan in Hoi4RailRenderer.Plans)
+                if (plan.DeadEnd) Quad(verts, uvs, offsets, tris, World(plan.End), blockRect, -blockRect.width * 0.5f, -blockRect.height * 0.5f);
+
+            if (Hoi4.UI.Hoi4ConstructionPanel.PlacingSupply == null) return;
+            // the orders' own badges: the level they build to, orange, under the hammers
+            foreach (var plan in Hoi4RailRenderer.Plans)
+            {
+                var at = World(plan.Mid);
+                float h = badgeRect.width * 0.5f;
+                Quad(verts, uvs, offsets, tris, at, badgeRect, -h, -h);
+                Quad(verts, uvs, offsets, tris, at, new RectInt(orangeRect.x + Mathf.Clamp(plan.Level, 0, 9) * cellW, orangeRect.y, cellW, orangeRect.height),
+                     -cellW * 0.5f, -orangeRect.height * 0.5f);
+                Quad(verts, uvs, offsets, tris, at, hammersRect, -hammersRect.width * 0.5f, h - 2f);
+                badges.Add((at, true, plan.OrderId));
+            }
+            var building = new HashSet<uint>();
+            construction.RailLinksQueued(viewer, building);
+            var network = Hoi4Railways.Network;
+            for (int ci = 0; ci < Hoi4RailRenderer.Chains.Count; ci++)
+            {
+                var chain = Hoi4RailRenderer.Chains[ci];
+                if (chain.Links.Length == 0 || network == null) continue;
+                // the player's railways: the chain's first link lies in land it controls
+                ushort first = network.From(chain.Links[0]);
+                if (Hoi4Occupation.ControllerOf(gs, first) != viewer) continue;
+                bool raising = false;
+                foreach (int link in chain.Links)
+                {
+                    ushort a = network.From(link), b = network.To(link);
+                    if (building.Contains(a < b ? (uint)a << 16 | b : (uint)b << 16 | a)) { raising = true; break; }
+                }
+                if (raising) continue; // the order's own badge stands for it
+                var anchor = World(chain.Mid);
+                float half = badgeRect.width * 0.5f;
+                Quad(verts, uvs, offsets, tris, anchor, badgeRect, -half, -half);
+                int i = Mathf.Clamp(chain.Level, 0, 9);
+                Quad(verts, uvs, offsets, tris, anchor, new RectInt(textRect.x + i * cellW, textRect.y, cellW, textRect.height),
+                     -cellW * 0.5f, -textRect.height * 0.5f);
+                badges.Add((anchor, false, ci));
+            }
         }
 
         /// <summary>One sprite: four vertices at the anchor, offsets in sprite pixels (x right, y up) from it.</summary>
@@ -228,10 +349,14 @@ namespace Hoi4.Supply
             var hex = Load("gfx/map/ports/hub_hex.png");
             var hubGrey = Load("gfx/map/ports/hub_grey.png");
             var textBg = Load("gfx/map/ports/hub_text_bg.png");
-            if (textBg == null) return false;
+            var hammers = Load("gfx/map/ports/hammers.png");
+            var badge = Load("gfx/map/ports/rail_badge.png");
+            var orange = Load("gfx/map/ports/text_orange.png");
+            var block = Load("gfx/map/ports/rail_block.png");
+            if (textBg == null || hammers == null || badge == null || orange == null || block == null) return false;
             if (blue == null || grey == null || text == null || hub == null || anchor == null || cut == null || bubble == null
                 || hex == null || hubGrey == null) return false;
-            int w = Pad * 11 + textBg.width + blue.width + grey.width + text.width + hub.width + anchor.width + cut.width + bubble.width + hex.width + hubGrey.width;
+            int w = Pad * 15 + block.width + textBg.width + hammers.width + badge.width + orange.width + blue.width + grey.width + text.width + hub.width + anchor.width + cut.width + bubble.width + hex.width + hubGrey.width;
             int h = Pad * 2 + Mathf.Max(Mathf.Max(blue.height, grey.height), Mathf.Max(text.height, Mathf.Max(hub.height, Mathf.Max(anchor.height, cut.height))));
             atlas = new Texture2D(w, h, TextureFormat.RGBA32, false)
             {
@@ -249,9 +374,13 @@ namespace Hoi4.Supply
             hexRect = Place(hex, ref x);
             hubGreyRect = Place(hubGrey, ref x);
             textBgRect = Place(textBg, ref x);
+            hammersRect = Place(hammers, ref x);
+            badgeRect = Place(badge, ref x);
+            orangeRect = Place(orange, ref x);
+            blockRect = Place(block, ref x);
             cellW = text.width / Chars.Length;
             atlas.Apply(false);
-            Destroy(blue); Destroy(grey); Destroy(text); Destroy(hub); Destroy(anchor); Destroy(cut); Destroy(bubble); Destroy(hex); Destroy(hubGrey); Destroy(textBg);
+            Destroy(blue); Destroy(grey); Destroy(text); Destroy(hub); Destroy(anchor); Destroy(cut); Destroy(bubble); Destroy(hex); Destroy(hubGrey); Destroy(textBg); Destroy(hammers); Destroy(badge); Destroy(orange); Destroy(block);
             return true;
         }
 

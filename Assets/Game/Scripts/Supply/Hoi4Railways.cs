@@ -131,7 +131,7 @@ namespace Hoi4.Supply
             network = null;
             railProvinces = hubProvinces = System.Array.Empty<ushort>();
             listedHub = System.Array.Empty<bool>();
-            listed.Clear(); hubListPorts = -1;
+            listed.Clear(); hubListPorts = -1; hubListDirty = false;
             converted = System.Array.Empty<bool>();
             converting = 0;
             points.Clear();
@@ -178,6 +178,27 @@ namespace Hoi4.Supply
             foreach (int i in list) yield return hubs[i];
         }
 
+        /// <summary>A supply hub from supply_nodes.txt or built since stands in the province.</summary>
+        public static bool IsHubSite(ushort province) => EnsureLoaded() && listed.Contains(province);
+
+        /// <summary>A supply hub is built in the province (construction). The hubs are worked out again on the next day.</summary>
+        public static void AddHub(ushort province)
+        {
+            if (!EnsureLoaded() || !listed.Add(province)) return;
+            hubListDirty = true;
+        }
+
+        /// <summary>Set a rail link's level (construction). A province new to the rail network joins the daily
+        /// conversion check.</summary>
+        public static void SetRailLevel(ushort a, ushort b, int level)
+        {
+            if (!EnsureLoaded()) return;
+            network.SetLevel(a, b, System.Math.Max(0, System.Math.Min(MaxLevel, level)));
+            hubListDirty = true;
+        }
+
+        static bool hubListDirty;
+
         /// <summary>The country's capital supply (0 when it doesn't hold its capital).</summary>
         public static FP CapitalSupply(ushort country) => capitalSupply.TryGetValue(country, out FP v) ? v : FP.Zero;
 
@@ -198,7 +219,12 @@ namespace Hoi4.Supply
         public static bool TryGetRailPoint(ushort province, out UnityEngine.Vector2 point)
         {
             point = default;
-            return EnsureLoaded() && points.TryGetValue(province, out point);
+            if (!EnsureLoaded()) return false;
+            if (points.TryGetValue(province, out point)) return true;
+            // a province that had no rail in 1936 (rail built since): its centre
+            if (!Hoi4Movement.TryGetCentre(province, out int x, out int y)) return false;
+            points[province] = point = new UnityEngine.Vector2(x + 0.5f, y + 0.5f);
+            return true;
         }
 
         /// <summary>The province's controller can't use its rail yet (as of the last daily check).</summary>
@@ -226,7 +252,7 @@ namespace Hoi4.Supply
             Hoi4Occupation.Snapshot(gameState, converted.Length, out var ctrl, out _);
             ulong now = gameState.Time.CurrentTick;
 
-            bool portsChanged = Hoi4Ports.Available && hubListPorts != Hoi4Ports.Version;
+            bool portsChanged = (Hoi4Ports.Available && hubListPorts != Hoi4Ports.Version) || hubListDirty;
             if (portsChanged) BuildHubList(); // a naval base built or lost
             bool dirty = !started || lastState != gameState || portsChanged
                          || lastControl != provinces.ControlVersion || lastOwnership != provinces.OwnershipVersion
@@ -439,6 +465,7 @@ namespace Hoi4.Supply
         /// naval base appears or goes; the hubs found so far are dropped (the caller recomputes).</summary>
         static void BuildHubList()
         {
+            hubListDirty = false;
             var hubList = new SortedSet<ushort>(listed);
             foreach (var cap in Hoi4Regions.Capitals)
                 if (cap.Value != 0) hubList.Add(cap.Value);
@@ -465,6 +492,7 @@ namespace Hoi4.Supply
             foreach (ushort p in network.Provinces()) rail.Add(p);
             railProvinces = new ushort[rail.Count];
             rail.CopyTo(railProvinces);
+            if (railProvinces.Length > 0) size = System.Math.Max(size, railProvinces[railProvinces.Length - 1] + 1);
             if (converted.Length < size)
             {
                 int old = converted.Length;

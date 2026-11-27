@@ -60,6 +60,39 @@ namespace Hoi4.UI
             Upload(hoverState);
         }
 
+        /// <summary>Placing a province building (naval base, supply hub, railway) over the supply map mode: no fill;
+        /// the provinces with an order for it in bands, yellow while the province has room for more levels and blue
+        /// once the orders fill it (a supply hub has one level: blue at once); the hovered province glows, in blue
+        /// bands when it is already full. For a railway the hovered province and the one the line starts from glow.</summary>
+        public static void ShowProvinces(GameState gameState, ushort country, string building, ushort hover, ushort railStart)
+        {
+            var construction = Hoi4Construction.Instance;
+            if (construction == null || building == null) { Hide(); return; }
+            Ensure();
+            System.Array.Clear(pixels, 0, pixels.Length);
+            bool rail = building == Hoi4Construction.Railway;
+            if (!rail)
+                foreach (var item in construction.Queue(country))
+                    if (item.Province != 0 && item.Building == building && item.Province < pixels.Length)
+                        pixels[item.Province] = new Color32(0, construction.ProvinceRoom(item.Province, building) > 0 ? Half : Full, 0, 255);
+            bool glow = false;
+            if (hover != 0 && hover < pixels.Length && !Hoi4Regions.IsWater(hover)
+                && Hoi4.Units.Hoi4Occupation.ControllerOf(gameState, hover) == country
+                && (rail ? !Hoi4Regions.IsImpassable(hover) : construction.ProvinceMax(hover, building) > 0))
+            {
+                var c = pixels[hover];
+                if (!rail && c.g == 0 && construction.ProvinceRoom(hover, building) == 0) c.g = Full; // nothing more fits
+                pixels[hover] = new Color32(c.r, c.g, Full, 255);
+                glow = true;
+            }
+            if (rail && railStart != 0 && railStart < pixels.Length)
+            {
+                pixels[railStart] = new Color32(0, Half, Full, 255);
+                glow = true;
+            }
+            Upload(glow ? 1 : 0);
+        }
+
         /// <summary>Picking a deploy location (recruit screen): plain terrain, green bands over the states the player may
         /// deploy to (g = GreenBand), the hovered state glowing.</summary>
         public static void ShowStates(System.Collections.Generic.ICollection<int> states, int hoverState)

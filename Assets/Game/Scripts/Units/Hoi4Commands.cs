@@ -55,8 +55,33 @@ namespace Hoi4.Units
             {
                 if (ReleasePlan) Hoi4BattlePlans.Instance?.Unassign(id);
                 queue.CancelMovement(id);
+                if (gameState.Units.HasUnit(id) && Hoi4.Map.Hoi4Regions.IsWater(gameState.Units.GetUnit(id).provinceID))
+                    SailToNearestPort(gameState, id); // a division can't wait at sea
             }
             Hoi4UnitCounters.Instance?.MarkDirty();
+        }
+
+        /// <summary>A division halted at sea (in a naval transfer) makes for the nearest port its side holds: the
+        /// one with the shortest way by sea from where it is (Hoi4Ports.SailingDistanceFrom), ties to the lower
+        /// province. With no such port on these waters it stays where it is.</summary>
+        static void SailToNearestPort(GameState gameState, ushort id)
+        {
+            var unit = gameState.Units.GetUnit(id);
+            var rules = new Hoi4MovementRules(gameState);
+            ushort best = 0;
+            long bestDist = 0;
+            foreach (ushort port in Hoi4.Supply.Hoi4Ports.Ports) // sorted
+            {
+                if (!rules.CanUsePort(unit.countryID, port)) continue;
+                long d = Hoi4.Supply.Hoi4Ports.SailingDistanceFrom(gameState, unit.provinceID, port);
+                if (d < 0 || (best != 0 && d >= bestDist)) continue;
+                best = port; bestDist = d;
+            }
+            if (best == 0 || gameState.Pathfinding == null) return;
+            var path = gameState.Pathfinding.FindPath(unit.provinceID, best, unit.countryID);
+            if (path == null || path.Count < 2) return;
+            gameState.Units.MovementQueue.StartMovement(id, path[1], 1, path);
+            Core.Recording.SessionRecorder.Note("naval", "halt_to_port", unit.countryID, id, unit.provinceID, best, "halted at sea: sails to the nearest port");
         }
 
         public override void Undo(GameState gameState) { }

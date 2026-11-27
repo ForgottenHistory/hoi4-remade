@@ -730,7 +730,9 @@ def write_ports(hoi4: Path, out: Path, all_ids, land_ids, province_state):
     (mapicons.gui supply_node_map_icon, 36x36): hub.png and hub_grey.png (GFX_supply_hub_icon_strip frames 1 and 2,
     the orange and grey crates), hub_bubble.png and hub_hex.png (GFX_supply_hub_button_bg_strip frames 2 and 4:
     the bubble behind a hub's crates and the hexagon behind the capital's), hub_text_bg.png
-    (GFX_on_map_supply_values_bg, the dark box behind the "demand/capacity" text), hub_anchor.png (GFX_naval_supply_anchor_icon, laid over a port's crates) and
+    (GFX_on_map_supply_values_bg, the dark box behind the "demand/capacity" text), hammers.png (GFX_under_construction,
+    over a hub, port or rail level being built), rail_badge.png and rail_block.png (GFX_railway_mapicon_bg frames 1 and 4: the dark disc
+    behind a railway's level, and the roadblock at the end of a railway that leads nowhere) and text_orange.png (text.png in orange, for a rail level being built), hub_anchor.png (GFX_naval_supply_anchor_icon, laid over a port's crates) and
     hub_cut.png (GFX_supply_hub_disconnected, the red cross). Prototype: Tools/prototypes/ports/sea_supply.py."""
     from scipy import ndimage
     from PIL import ImageDraw, ImageFont, ImageFilter
@@ -807,6 +809,10 @@ def write_ports(hoi4: Path, out: Path, all_ids, land_ids, province_state):
     bubbles.crop((cell, 0, 2 * cell, cell)).save(dst / "hub_bubble.png")
     bubbles.crop((3 * cell, 0, 4 * cell, cell)).save(dst / "hub_hex.png")
     Image.open(sup.parent / "on_map_supply_values_bg.dds").convert("RGBA").save(dst / "hub_text_bg.png")
+    Image.open(sup / "under_construction_overlay.dds").convert("RGBA").save(dst / "hammers.png")
+    badge = Image.open(sup / "railway_mapicon_bg.dds").convert("RGBA")
+    badge.crop((0, 0, badge.height, badge.height)).save(dst / "rail_badge.png")
+    badge.crop((3 * badge.height, 0, 4 * badge.height, badge.height)).save(dst / "rail_block.png")
     Image.open(sup / "supply_hub_disconnected_small.dds").convert("RGBA").save(dst / "hub_cut.png")
     try:
         font = ImageFont.truetype("arialbd.ttf", 12)
@@ -821,6 +827,10 @@ def write_ports(hoi4: Path, out: Path, all_ids, land_ids, province_state):
     halo = np.clip(np.asarray(glyphs.filter(ImageFilter.MaxFilter(3)), np.float32) / 255, 0, 1)
     rgba = np.dstack([g * 255, g * 255, g * 255, np.maximum(g, halo * 0.85) * 255]).astype(np.uint8)
     Image.fromarray(rgba, "RGBA").save(dst / "text.png")
+    orange = rgba.copy()  # a rail level being built
+    orange[..., 1] = (g * 150).astype(np.uint8)
+    orange[..., 2] = (g * 40).astype(np.uint8)
+    Image.fromarray(orange, "RGBA").save(dst / "text_orange.png")
     # the traderoute arrow: its first variant (the top half) is the ship shape; white, the mask's green as alpha
     src = hoi4 / "gfx" / "maparrows"
     pat = np.asarray(Image.open(src / "trade_line.dds").convert("RGBA"), np.uint8).copy()

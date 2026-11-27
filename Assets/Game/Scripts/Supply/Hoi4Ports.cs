@@ -128,6 +128,16 @@ namespace Hoi4.Supply
             return ((long)dist[b] << 32) | (uint)System.Math.Min(uint.MaxValue, dx * dx + dy * dy);
         }
 
+        /// <summary>Whole map px over water from a sea province to a port's sea province (-1: no way).</summary>
+        public static long SailingDistanceFrom(GameState gameState, ushort seaProvince, ushort port)
+        {
+            if (!EnsureWater(gameState)) return -1;
+            ushort b = Sea(port);
+            if (b == 0 || seaProvince >= body.Length || b >= body.Length || body[seaProvince] == 0 || body[seaProvince] != body[b]) return -1;
+            if (!seaDistance.TryGetValue(seaProvince, out int[] dist)) seaDistance[seaProvince] = dist = SeaDistances(seaProvince);
+            return dist[b];
+        }
+
         static readonly Dictionary<ushort, int[]> seaDistance = new Dictionary<ushort, int[]>(); // sea province -> px to every water province (-1: none)
         static readonly List<(int d, ushort p)> seaHeap = new List<(int, ushort)>();
 
