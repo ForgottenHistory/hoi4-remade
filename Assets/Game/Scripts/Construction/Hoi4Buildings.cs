@@ -17,6 +17,7 @@ namespace Hoi4.Construction
         public const int MaxSharedSlots = 25; // NDefines.NBuildings.MAX_SHARED_SLOTS
 
         static readonly Dictionary<int, Dictionary<string, int>> levels = new Dictionary<int, Dictionary<string, int>>();
+        static readonly Dictionary<int, int> addedSlots = new Dictionary<int, int>();   // shared slots added in play (focus rewards)
         static bool loaded;
 
         // state -> country its buildings work for (0: none), refreshed when ownership or control changes
@@ -30,7 +31,7 @@ namespace Hoi4.Construction
         [UnityEngine.RuntimeInitializeOnLoadMethod(UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]
         static void Reset()
         {
-            levels.Clear(); loaded = false; Version = 0;
+            levels.Clear(); addedSlots.Clear(); loaded = false; Version = 0;
             user.Clear(); userState = null; userOwnership = userControl = -1;
         }
 
@@ -66,12 +67,23 @@ namespace Hoi4.Construction
             Version++;
         }
 
-        /// <summary>Shared slots the state has (its category's plus extra ones from its history, at most 25) and those
-        /// its shared buildings use.</summary>
+        /// <summary>Shared slots the state has (its category's plus extra ones from its history and those added in
+        /// play, at most 25) and those its shared buildings use.</summary>
         public static int SharedSlots(int state)
         {
             var info = Hoi4StateData.Get(state);
-            return info == null ? 0 : System.Math.Min(MaxSharedSlots, Hoi4StateData.Slots(info.Category) + info.ExtraSlots);
+            if (info == null) return 0;
+            addedSlots.TryGetValue(state, out int added);
+            return System.Math.Min(MaxSharedSlots, Hoi4StateData.Slots(info.Category) + info.ExtraSlots + added);
+        }
+
+        /// <summary>More shared slots for the state (add_extra_state_shared_building_slots).</summary>
+        public static void AddSlots(int state, int n)
+        {
+            if (n == 0 || !EnsureLoaded() || Hoi4StateData.Get(state) == null) return;
+            addedSlots.TryGetValue(state, out int added);
+            addedSlots[state] = added + n;
+            Version++;
         }
 
         public static int SharedUsed(int state)

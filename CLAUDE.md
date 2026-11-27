@@ -52,6 +52,17 @@ The default `--hoi4` path is the Steam install under `C:\Program Files (x86)`. T
 
 Rerun the converter after changing it. The engine caches decoded images next to them as `*.pixels` and `*.adjacency` files.
 
+The formats `Hoi4Data` uses (JSON5 for data, Lua for logic, PNG, CSV), why, and where each HOI4 source ends up are in `Docs/data-formats.md`. Add a row there when the converter writes a new kind of file.
+
+### Scripted content is Lua
+
+HOI4's scripted content (focus trees so far; events and decisions later) is not kept as Paradox script. The converter translates it to Lua, and the game runs it with the engine's script engine (`Assets/Archon-Engine/Docs/Engine/scripting.md`).
+
+- `Tools/hoi4_focus.py` translates `common/national_focus` to `Hoi4Data/common/focus/*.lua` (the converter calls it; `python Tools/hoi4_focus.py generic --stats` runs it alone and lists the triggers and effects the scripts call). Its docstring has the translation rules.
+- `Assets/Game/Scripts/Scripting/Hoi4Script*.cs` is the game's script world: the country and state objects and their methods (HOI4's trigger and effect names). A method the game lacks is reported once (a `script` / `missing` note in the recording) and returns false, so content can be ahead of the game. Growing HOI4 support mostly means adding methods here.
+- `Assets/Game/Scripts/Focus/` holds the focus system on top of it (trees, progress, `SelectFocusCommand`, the AI's pick).
+- Effects change game state, so effect functions run only inside a command or the daily tick (`Hoi4Script.RunEffect`). No game state lives in Lua: flags and the like go through methods into C# state.
+
 ### Visual style tuning
 
 - `Tools/hoi4_visual_style.json5` is the **master** copy of the shader parameters. The converter copies it to `Hoi4Data/map/visual_style.json5`.

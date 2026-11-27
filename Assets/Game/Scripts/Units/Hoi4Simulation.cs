@@ -21,9 +21,9 @@ namespace Hoi4.Units
 
         // Timing, per day: [0] combat hourly, [1] plans hourly, [2] AI hourly (break-offs and that hour's
         // countries' attacks), [3] recorder, [4] combat daily, [5] equipment, [6] manpower, [7] plans daily,
-        // [8] war, [9] AI wars, [10] production, [11] AI production, [12] construction, [13] AI construction, [14] deployment, [15] AI deployment, [16] AI army, [17] railways, [18] supply, [19] weather, [20] research, [21] AI research; then the worst single hour of [0], [1], [2], and the plans' daily line refresh
+        // [8] war, [9] AI wars, [10] production, [11] AI production, [12] construction, [13] AI construction, [14] deployment, [15] AI deployment, [16] AI army, [17] railways, [18] supply, [19] weather, [20] research, [21] AI research, [22] AI tank designs, [23] focuses and political power, [24] AI focus picks; then the worst single hour of [0], [1], [2], and the plans' daily line refresh
         static readonly string[] PerfNames =
-            { "combat_h", "plans_h", "ai_h", "recorder", "combat_d", "equipment", "manpower", "plans_d", "war", "ai_wars", "production", "ai_production", "construction", "ai_construction", "deployment", "ai_deployment", "ai_army", "railways", "supply", "weather", "research", "ai_research", "ai_tanks" };
+            { "combat_h", "plans_h", "ai_h", "recorder", "combat_d", "equipment", "manpower", "plans_d", "war", "ai_wars", "production", "ai_production", "construction", "ai_construction", "deployment", "ai_deployment", "ai_army", "railways", "supply", "weather", "research", "ai_research", "ai_tanks", "focus", "ai_focus" };
         static readonly string[] MaxNames = { "combat_h_max", "plans_h_max", "ai_h_max", "plans_refresh", "plans_distribute", "plans_ai" };
         readonly double[] perf = new double[PerfNames.Length];
         // managed memory each step allocated that day, bytes (alloc.tsv): what feeds the garbage collector
@@ -110,7 +110,7 @@ namespace Hoi4.Units
 
         // The engine's and the game's assemblies, compiled in the background while the game loads (Mono compiles a
         // method on its first call: the first day used to pay about 90 ms for that in one frame)
-        static readonly string[] WarmAssemblies = { "Assembly-CSharp", "Core", "Engine", "MapAssembly", "StarterKit", "Utils" };
+        static readonly string[] WarmAssemblies = { "Assembly-CSharp", "Core", "Engine", "MapAssembly", "Scripting", "StarterKit", "Utils" };
 
         static void WarmUpJit()
         {
@@ -201,6 +201,7 @@ namespace Hoi4.Units
                 case 12: Measure(21, () => Hoi4.Research.Hoi4ResearchAI.SimulateDay(day)); break; // fills empty research slots
                 case 15: Measure(22, () => Hoi4.Production.Hoi4TankDesigns.SimulateDay(day, PlayerCountry)); break; // tank designs (the player keeps its own)
                 case 18: Measure(15, () => Hoi4.Deployment.Hoi4DeploymentAI.SimulateDay(day)); break; // training orders, each country weekly
+                case 21: Measure(24, () => Hoi4.Focus.Hoi4FocusAI.SimulateDay(day)); break; // national focus picks, each country weekly
             }
         }
 
@@ -221,6 +222,12 @@ namespace Hoi4.Units
             Measure(10, () => Hoi4.Production.Hoi4Production.Instance?.SimulateDay()); // factories to lines, output into the stockpiles
             Measure(5, () => Hoi4Equipment.Instance?.SimulateDay()); // equipment deliveries from the stockpiles
             Measure(20, () => Hoi4.Research.Hoi4Research.Instance?.SimulateDay()); // empty research slots save a day
+            Measure(23, () =>
+            {
+                var research = Hoi4.Research.Hoi4Research.Instance;
+                if (research != null && research.IsReady) Hoi4.Modifiers.Hoi4PoliticalPower.SimulateDay(research.Countries); // the day's political power
+                Hoi4.Focus.Hoi4Focus.Instance?.SimulateDay(); // a day on each country's focus; finished ones run their reward script
+            });
             Measure(14, () => Hoi4.Deployment.Hoi4Deployment.Instance?.SimulateDay()); // training lines: men, the equipment the field left, training, deploying
             Measure(6, () => Hoi4Manpower.Instance?.SimulateDay()); // manpower growth, men delivered, strength follows
             Measure(7, () => Hoi4BattlePlans.Instance?.SimulateDay());

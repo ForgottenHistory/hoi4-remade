@@ -100,6 +100,7 @@ namespace Hoi4.Research
         sealed class CountryResearch
         {
             public readonly List<ResearchSlot> Slots = new List<ResearchSlot>();
+            public int StartSlots;       // slots at the start of the game (original_research_slots)
             public FP Speed;
             public bool[] Known;
             public readonly Dictionary<int, FP> Progress = new Dictionary<int, FP>(); // started, not finished
@@ -261,6 +262,7 @@ namespace Hoi4.Research
         {
             var c = new CountryResearch { Known = new bool[techs.Count] };
             for (int i = 0; i < Mathf.Max(0, slots); i++) c.Slots.Add(new ResearchSlot { EmptySince = today });
+            c.StartSlots = c.Slots.Count;
             countries[country] = c;
             return c;
         }
@@ -294,6 +296,18 @@ namespace Hoi4.Research
         {
             var k = Of(country).Known;
             return tech >= 0 && tech < k.Length && k[tech];
+        }
+
+        /// <summary>Research slots the country started the game with.</summary>
+        public int StartSlots(ushort country) => Of(country).StartSlots;
+
+        /// <summary>More research slots (a focus reward), empty from today. Part of the simulation: call it from a
+        /// command or the daily tick only.</summary>
+        public void AddSlots(ushort country, int n)
+        {
+            if (n <= 0 || !countries.TryGetValue(country, out var c)) return;
+            for (int i = 0; i < n && c.Slots.Count < 255; i++) c.Slots.Add(new ResearchSlot { EmptySince = today }); // 255: a booking keys the slot in a byte
+            Changed?.Invoke(country);
         }
 
         public int EmptySlots(ushort country)

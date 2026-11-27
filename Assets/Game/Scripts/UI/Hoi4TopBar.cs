@@ -33,9 +33,6 @@ namespace Hoi4.UI
         public int[] speeds = { 1, 2, 5, 15, 50 };
         [Tooltip("Game hours per real second at speed 1 (24 = a day per second)")]
         public float baseHoursPerSecond = 6f;
-        /// <summary>HOI4 base political power gain per day.</summary>
-        public float politicalPowerPerDay = 2f;
-
         static readonly string[] MonthNames =
             { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
 
@@ -51,8 +48,7 @@ namespace Hoi4.UI
         int shownStability = -1;
         readonly VisualElement[] steps = new VisualElement[5];
         readonly Dictionary<string, JObject> stats = new Dictionary<string, JObject>();
-        IDisposable[] subscriptions;
-        float pp;
+        int shownPower = int.MinValue;
         ushort shownCountry;
         long shownManpower = -1;
         int lastLevel = -1;
@@ -119,17 +115,7 @@ namespace Hoi4.UI
             root.Add(bar);
             Wire();
 
-            subscriptions = new[]
-            {
-                gameState.EventBus.Subscribe<DailyTickEvent>(_ => pp += politicalPowerPerDay),
-            };
             ArchonLogger.Log("Hoi4TopBar: ready", "game_ui");
-        }
-
-        void OnDestroy()
-        {
-            if (subscriptions != null)
-                foreach (var s in subscriptions) s?.Dispose();
         }
 
         void Wire()
@@ -194,7 +180,8 @@ namespace Hoi4.UI
 
             if (shownCountry != player.PlayerCountryId) ShowCountry(player.PlayerCountryId);
             UpdateProductionButton();
-            politicalPower.text = Mathf.FloorToInt(pp).ToString();
+            int power = Hoi4.Modifiers.Hoi4PoliticalPower.Of(shownCountry).ToInt(); // live (Hoi4PoliticalPower)
+            if (power != shownPower) { shownPower = power; politicalPower.text = power.ToString(); }
             var pools = Hoi4.Units.Hoi4Manpower.Instance;
             if (pools != null && pools.IsReady)
             {
@@ -231,7 +218,7 @@ namespace Hoi4.UI
             shownCountry = country;
             shownManpower = -1;
             shownStability = -1;
-            pp = 0f;
+            shownPower = int.MinValue;
             string tag = gameState.Countries.GetCountryTag(country);
             Hoi4Sprites.Apply(flag, string.IsNullOrEmpty(tag) ? null : $"{FlagDir}{tag}.png");
             if (stats.TryGetValue(tag ?? "", out var s))

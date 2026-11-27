@@ -39,6 +39,7 @@ def main():
         s = re.sub(r'<Compile Include="Assets\\Game\\[^"]*"\s*/>', "", s)
     s = s.replace('<Compile Include="Assets', f'<Compile Include="{ROOT}\\Assets')
     s = s.replace('<HintPath>Library\\', f'<HintPath>{ROOT}\\Library\\')  # relative to the csproj, which moves
+    s = s.replace('<HintPath>Assets\\', f'<HintPath>{ROOT}\\Assets\\')    # plugin DLLs in the project (Lua.dll)
     extra = "".join(f'<Compile Include="{p}" />' for p in sorted((ROOT / "Assets" / "Game").rglob("*.cs"))) if game else ""
     newtonsoft = next(iter(sorted((ROOT / "Library" / "PackageCache").glob("com.unity.nuget.newtonsoft-json@*/Runtime/Newtonsoft.Json.dll"))), None)
     for name in ("Unity.Collections", "Unity.Mathematics", "Unity.Burst"):

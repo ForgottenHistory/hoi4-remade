@@ -21,7 +21,8 @@ namespace Hoi4.Modifiers
     /// - Values: HOI4 sums a key's values across its sources, so each is stored additive and read as the sum
     ///   (Sum). consumer_goods_factor stacks multiplicatively, product of (1 + value) (Product).
     /// - Other sources: stability's scaled static modifier and landmarks (Hoi4Stability, through SetSource).
-    /// Changed fires with the country when its modifiers change (a tech, its stability, a landmark).
+    /// - Ideas come and go in play through AddIdea / RemoveIdea (focus rewards).
+    /// Changed fires with the country when its modifiers change (a tech, an idea, its stability, a landmark).
     /// </summary>
     public static class Hoi4Modifiers
     {
@@ -40,9 +41,11 @@ namespace Hoi4.Modifiers
         public const string EfficiencyGain = "production_factory_efficiency_gain_factor";     // x (1 + value) growth
         public const string StabilityFactor = "stability_factor";                             // + stability (Hoi4Stability)
         public const string LineChange = "line_change_production_efficiency_factor";         // retention bonus
+        public const string PoliticalPowerGain = "political_power_gain";                      // + a day (Hoi4PoliticalPower)
+        public const string PoliticalPowerFactor = "political_power_factor";                  // x (1 + value) of the day's gain
         static readonly string[] Keys = { ConsumerGoods, ConsumerGoodsFactor, ConstructionSpeed, ResearchSpeed,
                                           FactoryOutput, MaxEfficiency, StartEfficiency, EfficiencyGain, StabilityFactor,
-                                          LineChange };
+                                          LineChange, PoliticalPowerGain, PoliticalPowerFactor };
 
         static readonly Dictionary<string, ushort> ids = new Dictionary<string, ushort>();
         static readonly List<string> ideaNames = new List<string>();
@@ -149,6 +152,38 @@ namespace Hoi4.Modifiers
         {
             if (!countryIdeas.TryGetValue(country, out var own)) yield break;
             foreach (int i in own) yield return ideaNames[i];
+        }
+
+        public static bool HasIdea(ushort country, string idea) =>
+            idea != null && ideaIndex.TryGetValue(idea, out int i) && countryIdeas.TryGetValue(country, out var own) && own.Contains(i);
+
+        /// <summary>Give the country an idea (a focus, an event). An idea the ideas file lacks is still held, without
+        /// modifiers, so has_idea sees it. False when it had it already.</summary>
+        public static bool AddIdea(ushort country, string idea)
+        {
+            if (system == null || country == 0 || string.IsNullOrEmpty(idea)) return false;
+            if (!ideaIndex.TryGetValue(idea, out int i))
+            {
+                ideaIndex[idea] = i = ideaNames.Count;
+                ideaNames.Add(idea);
+                ideaModifiers.Add(new List<(ushort, FP)>());
+            }
+            if (!countryIdeas.TryGetValue(country, out var own)) countryIdeas[country] = own = new List<int>();
+            if (own.Contains(i)) return false;
+            own.Add(i);
+            AddIdea(country, i);
+            if (ideaModifiers[i].Count > 0) Touch(country, quiet: false);
+            return true;
+        }
+
+        /// <summary>Take an idea from the country. False when it didn't have it.</summary>
+        public static bool RemoveIdea(ushort country, string idea)
+        {
+            if (system == null || idea == null || !ideaIndex.TryGetValue(idea, out int i)) return false;
+            if (!countryIdeas.TryGetValue(country, out var own) || !own.Remove(i)) return false;
+            if (system.RemoveCountryModifiersBySource(country, ModifierSource.SourceType.Policy, (uint)i) > 0)
+                Touch(country, quiet: false);
+            return true;
         }
 
         // ---- sources ------------------------------------------------------------------------------------
