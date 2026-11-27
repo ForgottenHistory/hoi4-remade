@@ -21,7 +21,11 @@ namespace Hoi4.Units
         public ushort Owner;                        // the country whose divisions hold the line
         public bool IsAI;                           // made by the war AI: drawn only with ShowAIPlans, not the player's tools'
         public int ArmyId;                          // the army holding it
-        public ushort Country;                      // the country the line is drawn against
+        public ushort Country;                      // the country the line is drawn against (0: a fallback line)
+        // A fallback line (Hoi4BattlePlans.Fallback): the provinces it was drawn through, in drag order. It holds
+        // those (its one front: the ones no enemy has taken) and follows no border. Null: a front line.
+        public List<ushort> Line;
+        public bool IsFallback => Line != null;
         // Presentation only (the player's plans): the traced border the line is drawn along
         public List<BorderArc> Arcs;                // the border arcs the line follows
         public List<List<Vector3>> Chains;          // the arcs joined into continuous polylines, enemy side on the left of travel
@@ -64,7 +68,8 @@ namespace Hoi4.Units
     }
 
     /// <summary>
-    /// GAME: battle plans, HOI4's way of ordering a front. Only offensive lines for now. The tool (button in
+    /// GAME: battle plans, HOI4's way of ordering a front: front lines here, offensives in
+    /// Hoi4BattlePlans.Offensives.cs, fallback lines in Hoi4BattlePlans.Fallback.cs. The front line tool (button in
     /// Hoi4BattlePlanPanel) follows the cursor: hovering a country shows its border with the player as a green
     /// dashed line and stripes the player's provinces along it; a left click places the line in the colour
     /// of the army of the selected divisions, which get assigned to it unless they already follow another
@@ -298,6 +303,16 @@ namespace Hoi4.Units
             material.SetTexture("_PatternTex", pattern);
             var umask = LoadTexture("gfx/maparrows/front_unassigned_mask.png");
             material.SetTexture("_UnassignedMaskTex", umask != null ? umask : mask); // older data: drawn like a held front
+            var fmask = LoadTexture("gfx/maparrows/fallback_mask.png");
+            var fpattern = LoadTexture("gfx/maparrows/fallback_pattern.png");
+            var fumask = LoadTexture("gfx/maparrows/fallback_unassigned_mask.png");
+            if (fmask != null && fpattern != null)
+            {
+                material.SetTexture("_FallbackMaskTex", fmask);
+                material.SetTexture("_FallbackPatternTex", fpattern);
+                material.SetTexture("_FallbackUnassignedMaskTex", fumask != null ? fumask : fmask);
+            }
+            else ArchonLogger.LogWarning("Hoi4BattlePlans: gfx/maparrows/fallback_mask.png missing (rerun Tools/hoi4_convert.py), fallback lines drawn plain", "game_units");
             material.SetVector(BoundsId, bounds);
             if (counters.Heightmap != null) material.SetTexture(HeightmapId, counters.Heightmap);
             material.SetFloat(HeightScaleId, counters.HeightScale);
@@ -468,13 +483,14 @@ namespace Hoi4.Units
 
         /// <summary>A plan tool is on, or one was closed with Escape this frame (so Escape does not also clear the
         /// selection).</summary>
-        public bool ToolOn => Active || OffensiveActive || DeleteActive || AssignActive || toolEscapeFrame == Time.frameCount;
+        public bool ToolOn => Active || OffensiveActive || FallbackActive || DeleteActive || AssignActive || toolEscapeFrame == Time.frameCount;
 
         public void BeginDelete()
         {
             if (!ready) return;
             if (Active) Cancel();
             if (OffensiveActive) CancelOffensive();
+            CancelFallback();
             CancelAssign();
             DeleteActive = true;
             if (Hoi4UnitCounters.Instance != null) Hoi4UnitCounters.Instance.Hidden = true;
@@ -510,6 +526,7 @@ namespace Hoi4.Units
             if (!ready || !HasArmySelection) return;
             CancelDelete();
             CancelAssign();
+            CancelFallback();
             if (OffensiveActive) CancelOffensive();
             Active = true;
             lineDrag = false;
@@ -575,6 +592,7 @@ namespace Hoi4.Units
         public bool OnClick(int button, Vector2 screen)
         {
             if (OffensiveActive) return OnOffensiveClick(button);
+            if (FallbackActive) return OnFallbackClick(button);
             if (DeleteActive) return OnDeleteClick(button);
             if (AssignActive) return OnAssignClick(button);
             if (!Active) return false;
@@ -649,6 +667,7 @@ namespace Hoi4.Units
             UpdateHover();
             if (dirtyMesh) { dirtyMesh = false; Rebuild(); }
             if (OffensiveActive) { UpdateOffensiveTool(); return; }
+            if (FallbackActive) { UpdateFallbackTool(); return; }
             if (DeleteActive || AssignActive)
             {
                 if (global::Utils.KeyboardFocus.KeyDown(KeyCode.Escape)) { toolEscapeFrame = Time.frameCount; CancelDelete(); CancelAssign(); }
@@ -886,9 +905,11 @@ namespace Hoi4.Units
                 foreach (ushort u in army.Units)
                 {
                     if (planOf.ContainsKey(u) || manualOrders.ContainsKey(u) || unassigned.Contains(u)) continue;
+                    // A front line before a fallback line: that one only when the army has no front line
                     Hoi4BattlePlan best = null;
                     foreach (var plan in plans)
-                        if (plan.ArmyId == army.Id && (best == null || LessLoaded(plan, best))) best = plan;
+                        if (plan.ArmyId == army.Id
+                            && (best == null || (best.IsFallback && !plan.IsFallback) || (best.IsFallback == plan.IsFallback && LessLoaded(plan, best)))) best = plan;
                     if (best == null) break; // this army has no plan
                     best.Units.Add(u);
                     planOf[u] = best;
@@ -1441,6 +1462,7 @@ namespace Hoi4.Units
         void TraceLine(Hoi4BattlePlan plan)
         {
             if (!ready) { plan.Arcs = new List<BorderArc>(); plan.Chains = new List<List<Vector3>>(); return; }
+            if (plan.IsFallback) { TraceFallback(plan); return; }
             plan.Arcs = BorderWith(plan.Owner, plan.Country, new HashSet<ushort>(), plan.Section);
             plan.Chains = new List<List<Vector3>>();
             plan.ChainFront.Clear();
@@ -1507,6 +1529,19 @@ namespace Hoi4.Units
             bool any = false;
             foreach (var plan in new List<Hoi4BattlePlan>(plans))
             {
+                if (plan.IsFallback)
+                {
+                    // It stays where it was drawn; only the provinces an enemy took (or lost again) change
+                    var held = FallbackFronts(plan);
+                    if (held.Count == 0) { RemovePlan(plan); any = true; continue; }
+                    if (SameFronts(held, plan.Fronts)) continue;
+                    string was = FrontSizes(plan);
+                    SetFronts(plan, held);
+                    Core.Recording.SessionRecorder.Note("plans", "line_moved", plan.Owner, 0, 0, 0, $"plan {plan.Id} (fallback): provinces held {was} -> {FrontSizes(plan)} of {plan.Line.Count}");
+                    moved++;
+                    Distribute(plan);
+                    continue;
+                }
                 // Only a country that gained or lost land can move this line (all of them on the daily pass)
                 if (changedCountries.Count > 0 && !changedCountries.Contains(plan.Owner) && !changedCountries.Contains(plan.Country)) continue;
                 looked++;
@@ -1549,7 +1584,7 @@ namespace Hoi4.Units
             dirtyTex = false;
             Array.Clear(planPixels, 0, planPixels.Length);
             bool show = Active && previewArcs != null;
-            if (OffensiveActive)
+            if (OffensiveActive || FallbackActive)
             {
                 PaintOffensiveTargets();
                 show = offensiveTargets.Count > 0;
@@ -1619,7 +1654,7 @@ namespace Hoi4.Units
             Hoi4Offensive offensive = null;
             var cam = Camera.main;
             var selector = Engine.ArchonEngine.Instance.ProvinceSelector;
-            if (!Active && !OffensiveActive && cam != null && selector != null
+            if (!Active && !OffensiveActive && !FallbackActive && cam != null && selector != null
                 && !global::Map.CameraControllers.BaseCameraController.ScrollCaptured
                 && selector.TryGetMapPointAtScreenPosition(Input.mousePosition, cam, out var world, out _))
             {
@@ -1636,10 +1671,10 @@ namespace Hoi4.Units
                 }
                 if (offensive == null)
                 {
-                    float r = Mathf.Max(lineWidthPx * worldPerPxX * 0.75f, minR);
                     foreach (var p in plans)
                     {
                         if (p.IsAI || p.Chains == null) continue;
+                        float r = Mathf.Max((p.IsFallback ? fallbackWidthPx * 0.5f : lineWidthPx * 0.75f) * worldPerPxX, minR);
                         for (int c = 0; c < p.Chains.Count; c++)
                         {
                             float d = PolylineDistance(p.Chains[c], q);
@@ -1693,10 +1728,12 @@ namespace Hoi4.Units
                     int f = c < plan.ChainFront.Count ? plan.ChainFront[c] : -1;
                     bool held = f < 0 || f >= counts.Length || counts[f] > 0;
                     bool hot = plan == hoverPlan && f == hoverFront;
-                    AddRibbon(plan.Chains[c], hot ? HotColor : color, held ? 1f : 5f);
+                    if (plan.IsFallback) AddFallbackRibbon(plan.Chains[c], hot ? HotColor : color, held);
+                    else AddRibbon(plan.Chains[c], hot ? HotColor : color, held ? 1f : 5f);
                 }
             }
             RebuildOffensives();
+            AddFallbackDragPreview();
 
             mesh.Clear();
             if (verts.Count == 0) return;
@@ -2351,8 +2388,8 @@ namespace Hoi4.Units
         }
 
         /// <summary>Ribbon along a chain: uv.x = distance in ribbon widths, uv.y = 0 own side .. 1 enemy side (left of travel).
-        /// widthPx > 0 overrides the style's width.</summary>
-        void AddRibbon(List<Vector3> pts, Color color, float style, float widthPx = -1f)
+        /// widthPx > 0 overrides the style's width. tile > 0 (world units): uv.x counts tiles of that length instead.</summary>
+        void AddRibbon(List<Vector3> pts, Color color, float style, float widthPx = -1f, float tile = -1f)
         {
             if (pts.Count < 2) return;
             float width = widthPx > 0f ? widthPx * worldPerPxX
@@ -2375,7 +2412,7 @@ namespace Hoi4.Units
                 {
                     verts.Add(p + left * (side == 0 ? -half : half));
                     colors.Add(color);
-                    uvs.Add(new Vector2(dist / width, side));
+                    uvs.Add(new Vector2(dist / (tile > 0f ? tile : width), side));
                     styles.Add(new Vector2(style, 0f));
                     centers.Add(center);
                 }

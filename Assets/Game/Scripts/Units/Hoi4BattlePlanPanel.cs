@@ -9,10 +9,12 @@ namespace Hoi4.Units
     /// <summary>
     /// GAME: the Battle Plans window (HOI4's battleplantools_window). It shows while a division of an army is
     /// selected; the front-line button turns the front line tool of Hoi4BattlePlans on, the offence button
-    /// (enabled once the army has a front line) the offensive tool, the bin the delete tool (click a line or an
+    /// (enabled once the army has a front line) the offensive tool, the fallback button the fallback line tool
+    /// (drag a line across own or allied land for the divisions to hold), the bin the delete tool (click a line or an
     /// offensive to remove it; shift + right click removes every order of the selected divisions' armies at once). Also writes the text on each placed line and objective line: "N Divs, army name", bent
-    /// along the line like HOI4 (one element per letter), scaled and hidden with zoom by the unit counters'
-    /// rules (Hoi4UnitCounters.ZoomRules).
+    /// along the line like HOI4 (one element per letter). Like HOI4's, the text is sized in map units, so it
+    /// grows and shrinks with the line it is on (labelMapPx, within labelMinPx..labelMaxPx on screen); it hides
+    /// with zoom by the unit counters' rules (Hoi4UnitCounters.ZoomRules).
     /// View of the UI Presenter pattern: structure BattlePlanPanel.uxml, look BattlePlanStyle.uss + Hoi4Theme.uss.
     /// </summary>
     public sealed class Hoi4BattlePlanPanel : MonoBehaviour
@@ -20,14 +22,17 @@ namespace Hoi4.Units
         const string Dir = "gfx/interface/battleplans/";
 
         UIDocument document;
-        VisualElement window, labels, front, offence, delete, assign, unassign;
+        VisualElement window, labels, front, offence, fallback, delete, assign, unassign;
         readonly List<Label> labelPool = new List<Label>();   // one per letter
         readonly Dictionary<char, float> charWidth = new Dictionary<char, float>(); // at BaseFontPx, panel px
         Label probe;                                            // measures letters
-        const float BaseFontPx = 15f;                           // BattlePlanStyle.uss .bp-line-label at full size
+        const float BaseFontPx = 15f;                           // BattlePlanStyle.uss .bp-line-label: letters are measured at this size
+        [Tooltip("Line text height in map pixels (HOI4: about 1.3, a little over half a fallback line's X)")] public float labelMapPx = 1.3f;
+        [Tooltip("Line text height on screen, smallest and largest (panel px)")] public float labelMinPx = 13f, labelMaxPx = 34f;
+        [Tooltip("Dark outline around the letters, of the text height")] public float labelOutline = 0.09f;
         readonly List<Vector2> linePts = new List<Vector2>();
         readonly List<float> lineRun = new List<float>();
-        bool frontActive, offenceActive, deleteActive, assignActive, offenceEnabled = true, ownEnabled = true;
+        bool frontActive, offenceActive, fallbackActive, deleteActive, assignActive, offenceEnabled = true, ownEnabled = true;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Spawn()
@@ -95,6 +100,15 @@ namespace Hoi4.Units
                 if (plans.Active) plans.Cancel(); else plans.BeginDrawing();
                 e.StopPropagation();
             });
+            fallback = window.Q("bp-fallback");
+            Hoi4Sprites.Apply(fallback, Dir + "fallback_0.png");
+            fallback.RegisterCallback<PointerDownEvent>(e =>
+            {
+                if (e.button != 0) return;
+                var plans = Hoi4BattlePlans.Instance;
+                if (plans.FallbackActive) plans.CancelFallback(); else plans.BeginFallback();
+                e.StopPropagation();
+            });
             delete.RegisterCallback<PointerDownEvent>(e =>
             {
                 var plans = Hoi4BattlePlans.Instance;
@@ -141,13 +155,18 @@ namespace Hoi4.Units
             if (window == null) return;
             var plans = Hoi4BattlePlans.Instance;
             bool own = plans.HasOwnSelection;
-            bool show = plans.Active || plans.OffensiveActive || plans.DeleteActive || plans.AssignActive || plans.HasArmyMemberSelected;
+            bool show = plans.Active || plans.OffensiveActive || plans.FallbackActive || plans.DeleteActive || plans.AssignActive || plans.HasArmyMemberSelected;
             window.style.display = show ? DisplayStyle.Flex : DisplayStyle.None;
             Hoi4UiHover.Report(this, window);
             if (show && frontActive != plans.Active)
             {
                 frontActive = plans.Active;
                 Hoi4Sprites.Apply(front, Dir + (frontActive ? "defence_1.png" : "defence_0.png"));
+            }
+            if (show && fallbackActive != plans.FallbackActive)
+            {
+                fallbackActive = plans.FallbackActive;
+                Hoi4Sprites.Apply(fallback, Dir + (fallbackActive ? "fallback_1.png" : "fallback_0.png"));
             }
             if (show && assignActive != plans.AssignActive)
             {
@@ -229,9 +248,15 @@ namespace Hoi4.Units
         {
             skip.Total++;
             if (path == null || path.Count < 2 || anchor < 0 || anchor >= path.Count) { skip.NoPath++; return; }
-            if (!counters.ZoomRules(path[anchor], cam, out float scale, out float alpha) || alpha <= 0.01f) { skip.Zoom++; return; }
+            if (!counters.ZoomRules(path[anchor], cam, out _, out float alpha) || alpha <= 0.01f) { skip.Zoom++; return; }
             var panel = labels.panel;
             if (panel == null) { skip.NoPanel++; return; }
+            // The text's height: labelMapPx of the map as it is on screen at the label (it scales with the line)
+            var at0 = cam.WorldToScreenPoint(path[anchor]);
+            float worldPerScreenPx = 2f * Mathf.Max(at0.z, 1e-3f) / (Mathf.Abs(cam.projectionMatrix[1, 1]) * Screen.height);
+            float panelPerScreenPx = RuntimePanelUtils.ScreenToPanel(panel, new Vector2(1f, 0f)).x - RuntimePanelUtils.ScreenToPanel(panel, Vector2.zero).x;
+            float font = Mathf.Clamp(labelMapPx * counters.WorldPerMapPixel / worldPerScreenPx * panelPerScreenPx, labelMinPx, labelMaxPx);
+            float scale = font / BaseFontPx;
 
             // The line on screen (panel px), cumulative length
             linePts.Clear(); lineRun.Clear();
@@ -254,7 +279,6 @@ namespace Hoi4.Units
             lineRun.Add(0f);
             for (int i = 1; i < linePts.Count; i++) { run += Vector2.Distance(linePts[i - 1], linePts[i]); lineRun.Add(run); }
 
-            float font = BaseFontPx * scale;
             float width = 0f;
             foreach (char c in text) width += CharWidth(c) * scale;
             float at = lineRun[anchorAt] - width * 0.5f;
@@ -269,6 +293,7 @@ namespace Hoi4.Units
                     var l = LabelAt(used++);
                     l.text = c.ToString();
                     l.style.fontSize = font;
+                    l.style.unityTextOutlineWidth = font * labelOutline;
                     l.style.color = color;
                     l.style.left = pos.x;
                     l.style.top = pos.y;

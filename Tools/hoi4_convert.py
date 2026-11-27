@@ -1933,6 +1933,10 @@ def convert_front_line(hoi4: Path, out: Path):
     # Dragging an offensive: the dotted line through the picked provinces (arrowType virtual_line)
     Image.open(src / "dot_mask.dds").convert("RGBA").save(dst / "dot_mask.png")
     Image.open(src / "dot_pattern.dds").convert("RGBA").save(dst / "dot_pattern.png")
+    # Fallback line (arrowType fallback_line): one X per tile; the alternative mask (broken X) when nobody holds it
+    Image.open(src / "fall_back_line_mask.dds").convert("RGBA").save(dst / "fallback_mask.png")
+    Image.open(src / "fall_back_line.dds").convert("RGBA").save(dst / "fallback_pattern.png")
+    Image.open(src / "fall_back_line_unassigned_mask.dds").convert("RGBA").save(dst / "fallback_unassigned_mask.png")
     print("Front line textures")
 
 
@@ -2565,14 +2569,15 @@ def convert_army_cards(hoi4: Path, out: Path):
 
 def convert_battleplan_gfx(hoi4: Path, out: Path):
     """Sprites of the Battle Plans window (interface/battleplantools.gui) under gfx/interface/battleplans/:
-    the window background and the draw offence / draw defence / assign / unassign / delete buttons (2 frames each:
+    the window background and the draw offence / draw defence / draw fallback / assign / unassign / delete buttons (2 frames each:
     idle, pressed)."""
     import hoi4_gui as gui
     dst = out / "gfx" / "interface" / "battleplans"
     dst.mkdir(parents=True, exist_ok=True)
     sprites = gui.load_sprites(hoi4)
     for name, spr in (("bg", "GFX_BPT_bg"), ("offence", "GFX_BPT_order_draw_offence_btn"),
-                      ("defence", "GFX_BPT_order_draw_defence_btn"), ("delete", "GFX_BPT_order_delete_btn"),
+                      ("defence", "GFX_BPT_order_draw_defence_btn"), ("fallback", "GFX_BPT_order_draw_fallback_btn"),
+                      ("delete", "GFX_BPT_order_delete_btn"),
                       ("assign", "GFX_BPT_order_assign_units_btn"), ("unassign", "GFX_BPT_order_unassign_units_btn")):
         frames = gui.sprite_frames(hoi4, sprites, spr)
         if not frames:

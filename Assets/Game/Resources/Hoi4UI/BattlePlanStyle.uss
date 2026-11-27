@@ -6,6 +6,7 @@
 .bp-btn { position: absolute; top: 33px; width: 35px; height: 34px; }
 .bp-front { left: 275px; }
 .bp-offence { left: 312px; }
+.bp-fallback { left: 391px; } /* btn_order_draw_fallback x 355 */
 .bp-disabled { opacity: 0.45; }
 .bp-assign { left: 473px; }   /* HOI4 battleplantools.gui btn_assign_units x 437, +36 like the others */
 .bp-unassign { left: 508px; }
@@ -13,4 +14,5 @@
 
 .bp-labels { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
 .bp-line-label { position: absolute; white-space: nowrap; font-size: 15px; color: rgb(255, 255, 255);
-    -unity-text-outline-width: 1.5px; -unity-text-outline-color: rgb(40, 28, 20); }
+    -unity-font-style: bold; -unity-text-outline-width: 1.5px; -unity-text-outline-color: rgb(30, 20, 14);
+    text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.8); }

@@ -280,6 +280,42 @@ namespace Hoi4.Units
         }
     }
 
+    /// <summary>The player's fallback line through these provinces (land the army can stand on, in the order they
+    /// were dragged over), held by these divisions of the army (those already on another plan stay there).</summary>
+    public sealed class PlaceFallbackLineCommand : BaseCommand
+    {
+        public ushort CountryId;
+        public int ArmyId;
+        public List<ushort> Provinces;
+        public List<ushort> UnitIds;
+
+        public override bool Validate(GameState gameState) =>
+            Hoi4BattlePlans.Instance != null && Hoi4Armies.Instance?.Get(ArmyId)?.Owner == CountryId
+            && Hoi4CommandIo.Owned(gameState, CountryId, UnitIds)
+            && Hoi4BattlePlans.Instance.AreFallbackProvinces(CountryId, Provinces);
+
+        public override void Execute(GameState gameState) =>
+            Hoi4BattlePlans.Instance.CreateFallbackLine(CountryId, ArmyId, Provinces, UnitIds);
+
+        public override void Undo(GameState gameState) { }
+
+        public override void Serialize(BinaryWriter w)
+        {
+            w.Write(CountryId);
+            w.Write(ArmyId);
+            Hoi4CommandIo.WriteIds(w, Provinces);
+            Hoi4CommandIo.WriteIds(w, UnitIds);
+        }
+
+        public override void Deserialize(BinaryReader r)
+        {
+            CountryId = r.ReadUInt16();
+            ArmyId = r.ReadInt32();
+            Provinces = Hoi4CommandIo.ReadIds(r);
+            UnitIds = Hoi4CommandIo.ReadIds(r);
+        }
+    }
+
     /// <summary>Divisions join a front line (and its army, leaving theirs).</summary>
     public sealed class AssignToPlanCommand : BaseCommand
     {

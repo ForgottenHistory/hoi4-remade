@@ -7,7 +7,8 @@
 //   offensive being dragged (HOI4 virtual_line: dot textures, one dot per width), 4 = plain soft line (the
 //   rings at the dotted line's ends), 5 = a front line nobody holds (defence_line's unassigned mask: the
 //   teeth without the band), 6 = the objective line of an offensive nobody is assigned to (offence_line's
-//   unassigned mask: hollow teeth).
+//   unassigned mask: hollow teeth), 7 = a fallback line (HOI4 fallback_line: one X per tile; uv.x counts tiles),
+//   8 = a fallback line nobody holds (its unassigned mask: broken X).
 Shader "Hoi4/PlanLine"
 {
     Properties
@@ -21,6 +22,9 @@ Shader "Hoi4/PlanLine"
         _OffencePatternTex ("Objective Line Pattern", 2D) = "white" {}
         _OffenceUnassignedMaskTex ("Objective Line Unassigned Mask", 2D) = "white" {}
         _OffenceTile ("Objective line tooth spacing (widths)", Float) = 0.8
+        _FallbackMaskTex ("Fallback Line Mask", 2D) = "white" {}
+        _FallbackPatternTex ("Fallback Line Pattern", 2D) = "white" {}
+        _FallbackUnassignedMaskTex ("Fallback Line Unassigned Mask", 2D) = "white" {}
         _DotMaskTex ("Dot Mask", 2D) = "white" {}
         _DotPatternTex ("Dot Pattern", 2D) = "white" {}
         _HeightmapTexture ("Heightmap", 2D) = "gray" {}
@@ -69,6 +73,9 @@ Shader "Hoi4/PlanLine"
             TEXTURE2D(_OffenceUnassignedMaskTex);
             SAMPLER(sampler_OffenceUnassignedMaskTex);
             SAMPLER(sampler_OffencePatternTex);
+            TEXTURE2D(_FallbackMaskTex);      // sampled with the front line mask's sampler (repeat, bilinear)
+            TEXTURE2D(_FallbackPatternTex);
+            TEXTURE2D(_FallbackUnassignedMaskTex);
             TEXTURE2D(_DotMaskTex);
             SAMPLER(sampler_DotMaskTex);
             TEXTURE2D(_DotPatternTex);
@@ -150,6 +157,21 @@ Shader "Hoi4/PlanLine"
                     float dc = saturate(dm.r + dm.g + dm.b) * dm.a;
                     clip(dc - 0.002);
                     return half4(saturate(dp.rgb * i.color.rgb * 1.4), dc * i.color.a);
+                }
+                if (s == 7 || s == 8)
+                {
+                    // fallback_line: one X per tile, the same on both sides of the line
+                    float2 fuv = float2(frac(i.uv.x), saturate(i.uv.y));
+                    half4 fm;
+                    if (s == 8) fm = SAMPLE_TEXTURE2D_LOD(_FallbackUnassignedMaskTex, sampler_MaskTex, fuv, 0);
+                    else fm = SAMPLE_TEXTURE2D_LOD(_FallbackMaskTex, sampler_MaskTex, fuv, 0);
+                    half4 fp = SAMPLE_TEXTURE2D_LOD(_FallbackPatternTex, sampler_MaskTex, fuv, 0);
+                    float fc = saturate(fm.r + fm.g + fm.b) * fm.a;
+                    clip(fc - 0.002);
+                    float3 col = i.color.rgb;
+                    float g = dot(col, float3(0.299, 0.587, 0.114));
+                    col = saturate(lerp(g.xxx, col, 1.5));
+                    return half4(saturate(fp.rgb * col * 1.25), fc);
                 }
                 bool preview = s == 0;
                 bool objective = s == 2 || objectiveUnassigned;

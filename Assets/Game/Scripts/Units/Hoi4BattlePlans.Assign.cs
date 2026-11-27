@@ -70,6 +70,7 @@ namespace Hoi4.Units
             if (!ready || !HasOwnSelection) return;
             if (Active) Cancel();
             if (OffensiveActive) CancelOffensive();
+            CancelFallback();
             CancelDelete();
             AssignActive = true;
             dirtyMesh = true;
@@ -111,7 +112,7 @@ namespace Hoi4.Units
             int bestScore = 0;
             foreach (var plan in plans)
             {
-                if (plan.IsAI || plan.ArmyId != o.ArmyId) continue;
+                if (plan.IsAI || plan.IsFallback || plan.ArmyId != o.ArmyId) continue;
                 int overlap = 0;
                 foreach (ushort p in o.FrontSet)
                     if (plan.FrontIndex.ContainsKey(p)) overlap++;
