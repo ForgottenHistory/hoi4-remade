@@ -144,34 +144,77 @@ namespace Hoi4.War
             int capitalState = Hoi4Regions.State(Hoi4Regions.Capital(tag));
             long capital = long.MaxValue, core = long.MaxValue, controlled = long.MaxValue;
             if (capitalState > 0) capital = Dist2(info, Hoi4StateData.Get(capitalState));
-            foreach (int s in Hoi4Regions.States)
+            // the states the negotiator owns or holds (Reach), then the ones it has demanded: a demanded state counts
+            // as controlled and never as an owned core, also when it is among the first
+            foreach (var r in ReachOf(negotiator, tag))
             {
-                if (s == state) continue;
-                bool mine = demanded != null && demanded.Contains(s);
-                bool owned = false, holds = false;
-                if (!mine)
-                {
-                    // ownership and control by the first land province (states are owned whole at the start;
-                    // close enough for distances)
-                    ushort first = 0;
-                    foreach (ushort p in Hoi4Regions.ProvincesOf(s)) if (!Hoi4Regions.IsWater(p)) { first = p; break; }
-                    if (first == 0) continue;
-                    owned = gameState.Provinces.GetProvinceOwner(first) == negotiator;
-                    holds = Hoi4Occupation.ControllerOf(gameState, first) == negotiator;
-                    if (!owned && !holds) continue;
-                }
-                var other = Hoi4StateData.Get(s);
-                if (other == null || !other.HasCenter) continue;
-                long d2 = Dist2(info, other);
-                if (mine || holds) controlled = System.Math.Min(controlled, d2);
-                if (owned && other.Cores.Contains(tag)) core = System.Math.Min(core, d2);
+                if (r.State == state) continue;
+                bool mine = r.InConference && demanded != null && demanded.Contains(r.State);
+                long d2 = Dist2(info, r.Info);
+                if (mine || r.Holds) controlled = System.Math.Min(controlled, d2);
+                if (!mine && r.OwnedCore) core = System.Math.Min(core, d2);
             }
+            if (demanded != null)
+                foreach (int s in demanded)
+                {
+                    if (s == state) continue;
+                    var other = Hoi4StateData.Get(s);
+                    if (other == null || !other.HasCenter) continue;
+                    controlled = System.Math.Min(controlled, Dist2(info, other));
+                }
             FP v = RatioCapital * Falloff(capital, NeutralCapital) + RatioCore * Falloff(core, NeutralCore)
                    + RatioControlled * Falloff(controlled, NeutralControlled);
             int adjacent = 0;
             if (demanded != null)
                 foreach (int n in Neighbours(state)) if (demanded.Contains(n)) adjacent++;
             return FP.Max(FP.Zero, v - PerAdjacent * adjacent);
+        }
+
+        /// <summary>A state the negotiator owns or holds, for the influence distances.</summary>
+        sealed class Reach
+        {
+            public int State;
+            public Hoi4StateData.StateInfo Info;
+            public bool Holds;          // it controls the state
+            public bool OwnedCore;      // it owns the state and has a core on it
+            public bool InConference;   // one of the loser's states (it may be demanded)
+        }
+
+        // per negotiator, as of the ownership and control versions below. Influence used to walk every state of the
+        // map and look its owner up for each price: the AI prices every state it holds again after each demand, so
+        // a large country's conference took a second and more.
+        readonly Dictionary<ushort, List<Reach>> reach = new Dictionary<ushort, List<Reach>>();
+        HashSet<int> stateSet;
+        int reachOwnership = -1, reachControl = -1;
+
+        /// <summary>The states (with a centre) the negotiator owns or holds, in state order. Ownership and control
+        /// by the first land province (states are owned whole at the start; close enough for distances).</summary>
+        List<Reach> ReachOf(ushort negotiator, string tag)
+        {
+            var provinces = gameState.Provinces;
+            if (reachOwnership != provinces.OwnershipVersion || reachControl != provinces.ControlVersion)
+            {
+                reach.Clear();
+                reachOwnership = provinces.OwnershipVersion;
+                reachControl = provinces.ControlVersion;
+            }
+            if (reach.TryGetValue(negotiator, out var list)) return list;
+            reach[negotiator] = list = new List<Reach>();
+            stateSet ??= new HashSet<int>(States);
+            Hoi4Occupation.Snapshot(gameState, 0, out var ctrl, out var owner);
+            foreach (int s in Hoi4Regions.States)
+            {
+                ushort first = 0;
+                foreach (ushort p in Hoi4Regions.ProvincesOf(s)) if (!Hoi4Regions.IsWater(p)) { first = p; break; }
+                if (first == 0 || first >= owner.Length) continue;
+                bool owned = owner[first] == negotiator, holds = ctrl[first] == negotiator;
+                if (!owned && !holds) continue;
+                var info = Hoi4StateData.Get(s);
+                if (info == null || !info.HasCenter) continue;
+                list.Add(new Reach { State = s, Info = info, Holds = holds, OwnedCore = owned && info.Cores.Contains(tag),
+                                     InConference = stateSet.Contains(s) });
+            }
+            return list;
         }
 
         static long Dist2(Hoi4StateData.StateInfo a, Hoi4StateData.StateInfo b)
@@ -256,12 +299,13 @@ namespace Hoi4.War
         {
             var mine = new List<int>();
             FP left = w.Score;
-            while (true)
+            var open = new List<int>();     // the states it could still demand, in state order
+            foreach (int s in States) if (!taken.Contains(s) && Controller(s) == w.Country) open.Add(s);
+            while (open.Count > 0)
             {
                 int best = -1; FP bestRatio = FP.Zero, bestCost = FP.Zero;
-                foreach (int s in States)
+                foreach (int s in open)
                 {
-                    if (taken.Contains(s) || mine.Contains(s) || Controller(s) != w.Country) continue;
                     FP cost = Cost(s, w.Country, mine);
                     if (cost > left || cost <= FP.Zero) continue;
                     FP ratio = Value(s) / cost;
@@ -269,6 +313,7 @@ namespace Hoi4.War
                 }
                 if (best < 0) break;
                 mine.Add(best);
+                open.Remove(best);
                 left -= bestCost;
             }
             return mine;
