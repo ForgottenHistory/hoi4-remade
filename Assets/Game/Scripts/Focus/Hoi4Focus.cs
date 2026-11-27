@@ -134,6 +134,7 @@ namespace Hoi4.Focus
             engine.SetFunction("focus", (ref ScriptCall call) => AddFocus(call.Table(0), loadingTree));
             engine.SetFunction("shared_focus", (ref ScriptCall call) => AddFocus(call.Table(0), null));
             engine.SetFunction("joint_focus", (ref ScriptCall call) => AddFocus(call.Table(0), null));
+            ScriptMethods(Hoi4Script.CountryType);
 
             string dir = DataFileResolver.Resolve(FocusDir);
             var files = Directory.Exists(dir) ? Directory.GetFiles(dir, "*.lua") : System.Array.Empty<string>();
@@ -155,6 +156,52 @@ namespace Hoi4.Focus
             ArchonLogger.Log($"Hoi4Focus: {trees.Count} trees, {focuses.Count} focuses from {files.Length} files"
                              + (failed > 0 ? $" ({failed} failed)" : "") + $", {countries.Count} countries, "
                              + $"{watch.ElapsedMilliseconds} ms of loading", Channel);
+        }
+
+        // ---- what scripts can ask about focuses ----------------------------------------------------------------
+
+        /// <summary>Country methods about focuses: has_completed_focus(id); focus_progress { focus = id, progress =
+        /// { op, share } } (the share of its days done: 1 when completed, 0 when not running); and the effect
+        /// complete_national_focus(id), which marks it done and runs its reward.</summary>
+        void ScriptMethods(ScriptType country)
+        {
+            country.SetMethod("has_completed_focus", (ref ScriptCall call) =>
+            {
+                ushort id = call.Self<CountryScope>().Id;
+                call.Return(Of(id).Done.Contains(Find(id, call.String(1))));
+            });
+            country.SetMethod("focus_progress", (ref ScriptCall call) =>
+            {
+                ushort id = call.Self<CountryScope>().Id;
+                var t = call.Table(1);
+                var c = Of(id);
+                int focus = Find(id, t.String("focus"));
+                double share = focus < 0 ? 0 : c.Done.Contains(focus) ? 1
+                               : c.Current == focus ? (double)c.Progress / focuses[focus].Days : 0;
+                var progress = t.Table("progress");
+                double value = progress.IsValid ? progress[2].Number() : t.Number("progress");
+                string op = progress.IsValid ? progress[1].String : null;
+                call.Return(op == "<" ? share < value : op == ">" ? share > value : share >= value);
+            });
+            country.SetMethod("complete_national_focus", (ref ScriptCall call) =>
+            {
+                ushort id = call.Self<CountryScope>().Id;
+                int focus = Find(id, call.String(1));
+                if (focus < 0 || !countries.TryGetValue(id, out var c) || !c.Done.Add(focus)) return;
+                if (c.Current == focus) { c.Current = -1; c.Progress = 0; }
+                Core.Recording.SessionRecorder.Note("focus", "done", id, 0, 0, 0, focuses[focus].Id + " (by script)");
+                var reward = focuses[focus].Reward;
+                if (reward.IsValid) call.Engine.Call(reward, Hoi4Script.Country(id), out _);
+                Completed?.Invoke(id, focus);
+                Changed?.Invoke(id);
+            });
+        }
+
+        /// <summary>A focus of the country's tree by id, -1 when the tree has none.</summary>
+        int Find(ushort country, string id)
+        {
+            int tree = Of(country).Tree;
+            return tree >= 0 && id != null && trees[tree].ById.TryGetValue(id, out int f) ? f : -1;
         }
 
         // ---- loading -------------------------------------------------------------------------------------

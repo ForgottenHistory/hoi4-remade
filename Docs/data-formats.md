@@ -39,6 +39,7 @@ Data, never logic. Comments allowed, so every generated file starts with a line 
 | `common/hoi4_technologies.json5` | Tech tree: costs, positions, links, modifiers, AI weights |
 | `common/hoi4_ideas.json5` | Ideas and laws with their modifiers (the starting ones, every law, every idea a focus names) |
 | `common/hoi4_country_economy.json5`, `hoi4_country_stats.json5` | Per country: research slots, laws, starting ideas; stability, war support, population, ideology |
+| `common/hoi4_politics.json5` | Per country: the ruling ideology and each ideology's popularity (shares adding up to 1) |
 | `common/hoi4_equipment.json5`, `hoi4_tank_designs.json5` | Equipment catalogue and tank designs |
 | `common/hoi4_static_modifiers.json5`, `hoi4_landmarks.json5` | Stability modifiers, landmark buildings |
 | `units/*.json5`, `history/units/*.json5` | Sub-unit types; the 1936 armies |

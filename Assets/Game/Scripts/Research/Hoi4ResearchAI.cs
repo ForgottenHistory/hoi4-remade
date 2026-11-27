@@ -137,6 +137,18 @@ namespace Hoi4.Research
             return Eval(ctx, (Node)t.Root);
         }
 
+        /// <summary>Whether the country is a major as the AI counts them (CountFactories: the top countries by
+        /// factories, recounted weekly).</summary>
+        public static bool IsMajor(ushort country)
+        {
+            var research = Hoi4Research.Instance;
+            if (research == null || !research.IsReady) return false;
+            var gameState = Engine.ArchonEngine.Instance.GameState;
+            int day = (int)(gameState.Time.CurrentTick / 24);
+            if (countedDay < 0 || day - countedDay >= 7) CountFactories(gameState, research, day);
+            return majors.Contains(country);
+        }
+
         /// <summary>A weight block ({base, modifiers: [{factor | add, if}]}, the converter's tech_ai) for a country:
         /// the base, then each modifier whose trigger holds.</summary>
         public static double Weight(JObject block, ushort country, int day, Dictionary<JToken, Trigger> cache)

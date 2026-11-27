@@ -7,7 +7,9 @@ namespace Hoi4.Scripts
     /// <summary>
     /// GAME: what scripts can ask of and do to a state (the methods of `s`). See Hoi4Script for the conventions.
     /// Triggers: is_state (its id), is_coastal, is_impassable, is_owned_by, is_controlled_by, is_fully_controlled_by
-    /// (owner and controller), is_core_of (a core at the start), building_level(building, op, value),
+    /// and is_owned_and_controlled_by (owner and controller), is_capital (of its owner), is_in_home_area (joined to
+    /// its owner's capital by land the owner owns), has_state_category, is_core_of (a core at the start);
+    /// is_demilitarized_zone and is_claimed_by say no (the game has neither), building_level(building, op, value),
     /// free_building_slots(building, op, value, include_locked): the levels of the building the state can still
     /// take, counting what is built and queued (include_locked is not told apart: slots are not locked behind
     /// technologies here), has_flag.
@@ -68,6 +70,32 @@ namespace Hoi4.Scripts
                 string flag = call.String(1) ?? call.Table(1).String("flag");
                 call.Return(flag != null && stateFlags.TryGetValue(call.Self<StateScope>().Id, out var set) && set.Contains(flag));
             });
+
+            t.SetMethod("is_owned_and_controlled_by", (ref ScriptCall call) =>
+            {
+                ushort who = CountryArg(ref call, 1).Id;
+                int id = call.Self<StateScope>().Id;
+                call.Return(who != 0 && StateOwner(id) == who && StateController(id) == who);
+            });
+            t.SetMethod("is_capital", (ref ScriptCall call) =>
+            {
+                // the capital of the country that owns it
+                int id = call.Self<StateScope>().Id;
+                ushort capital = Hoi4Regions.Capital(Country(StateOwner(id)).Tag);
+                call.Return((capital != 0 && Hoi4Regions.State(capital) == id) == call.Bool(1));
+            });
+            t.SetMethod("is_in_home_area", (ref ScriptCall call) =>
+            {
+                int id = call.Self<StateScope>().Id;
+                call.Return(InHomeArea(StateOwner(id), id) == call.Bool(1));
+            });
+            t.SetMethod("has_state_category", (ref ScriptCall call) =>
+            {
+                var info = Hoi4StateData.Get(call.Self<StateScope>().Id);
+                call.Return(info != null && info.Category == call.String(1));
+            });
+            t.SetMethod("is_demilitarized_zone", (ref ScriptCall call) => call.Return(!call.Bool(1)));    // none in the game
+            t.SetMethod("is_claimed_by", (ref ScriptCall call) => call.Return(false));                    // no claims in the game
 
             t.SetMethod("owner", (ref ScriptCall call) => call.Return(Country(StateOwner(call.Self<StateScope>().Id))));
             t.SetMethod("controller", (ref ScriptCall call) => call.Return(Country(StateController(call.Self<StateScope>().Id))));

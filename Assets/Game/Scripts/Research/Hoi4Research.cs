@@ -30,6 +30,7 @@ namespace Hoi4.Research
         public readonly List<FP> ParentCoeff = new List<FP>();    // the path's research_cost_coeff, per parent
         public readonly List<int> Requires = new List<int>();    // dependencies: every one needed
         public readonly List<int> Excludes = new List<int>();    // xor
+        public readonly List<string> Categories = new List<string>();   // infantry_weapons, industry...: what research bonuses name
         public readonly List<string> Equipment = new List<string>();
         public readonly List<string> SubUnits = new List<string>();
         public readonly Dictionary<string, int> Buildings = new Dictionary<string, int>();
@@ -75,6 +76,12 @@ namespace Hoi4.Research
     ///   a day only finishes the slots booked for it. Progress is summed on demand (the UI's one country), saved days
     ///   are the days since the slot emptied. Same sums, same order: the same results as adding the rate every day.
     ///   A speed change counts from the next day.
+    /// - Research bonuses (add_tech_bonus, from focuses): a bonus names categories and/or technologies and has uses.
+    ///   When a tech goes into a slot it takes the best bonus that fits it (and the best ahead_reduction, which may
+    ///   be another bonus's), using one use of each, and keeps them until it is researched, also while out of a
+    ///   slot. With them a day gives max(0.1, 1 + research speed + bonus) / (1 + 2 x max(0, years ahead -
+    ///   ahead_reduction)). A bonus gained while a fitting tech is already in a slot waits for the next one.
+    ///   (HOI4's rule for a tech already in research, and the exact formula, are not checked against a real game.)
     /// - Not modelled yet: what a technology unlocks (equipment, sub-units, buildings) and its other modifiers, limited
     ///   bonuses, design teams, research AI, doctrines, experimental facilities, technology sharing.
     /// Changes come only through the commands (Hoi4ResearchCommands).
@@ -104,6 +111,26 @@ namespace Hoi4.Research
             public FP Speed;
             public bool[] Known;
             public readonly Dictionary<int, FP> Progress = new Dictionary<int, FP>(); // started, not finished
+            public readonly List<ResearchBonus> Bonuses = new List<ResearchBonus>();  // unused ones, oldest first
+            public readonly Dictionary<int, (FP bonus, FP ahead)> Applied = new Dictionary<int, (FP, FP)>(); // tech -> what it took
+        }
+
+        /// <summary>A research bonus a country holds (add_tech_bonus).</summary>
+        public sealed class ResearchBonus
+        {
+            public string Name;
+            public FP Bonus;             // + research speed on the tech (1 = +100%)
+            public FP AheadReduction;    // years taken off the ahead-of-time penalty
+            public int Uses;
+            public readonly HashSet<string> Categories = new HashSet<string>();
+            public readonly HashSet<int> Technologies = new HashSet<int>();
+
+            public bool Fits(TechDef t)
+            {
+                if (Technologies.Contains(t.Index)) return true;
+                foreach (string c in t.Categories) if (Categories.Contains(c)) return true;
+                return false;
+            }
         }
 
         GameState gameState;
@@ -211,6 +238,7 @@ namespace Hoi4.Research
                         }
                 Names(o["requires"], t.Requires);
                 Names(o["xor"], t.Excludes);
+                if (o["categories"] is JArray cats) foreach (var c in cats) t.Categories.Add((string)c);
                 if (o["equipment"] is JArray eq) foreach (var e in eq) t.Equipment.Add((string)e);
                 if (o["subunits"] is JArray su) foreach (var s in su) t.SubUnits.Add((string)s);
                 if (o["buildings"] is JObject b) foreach (var x in b.Properties()) t.Buildings[x.Name] = (int)x.Value;
@@ -389,11 +417,61 @@ namespace Hoi4.Research
         /// <summary>Years before 1 January of the tech's start_year, from today (0 once there).</summary>
         public FP YearsAhead(int tech) => Tech(tech) is TechDef t ? YearsAhead(t, today) : FP.Zero;
 
-        static FP Rate(FP speed, TechDef t, int day) =>
-            FP.Max(MinSpeed, FP.One + speed) / (FP.One + YearAheadFactor * YearsAhead(t, day));
+        /// <summary>Research points a day on a tech: the country's speed and the bonus the tech took (Applied).</summary>
+        static FP Rate(CountryResearch c, TechDef t, int day)
+        {
+            c.Applied.TryGetValue(t.Index, out var b);
+            FP ahead = FP.Max(FP.Zero, YearsAhead(t, day) - b.ahead);
+            return FP.Max(MinSpeed, FP.One + c.Speed + b.bonus) / (FP.One + YearAheadFactor * ahead);
+        }
 
         /// <summary>Research points a slot of the country gains a day on the tech today.</summary>
-        public FP DailyRate(ushort country, int tech) => Tech(tech) is TechDef t ? Rate(Speed(country), t, today) : FP.Zero;
+        public FP DailyRate(ushort country, int tech) => Tech(tech) is TechDef t ? Rate(Of(country), t, today) : FP.Zero;
+
+        // ---- research bonuses ---------------------------------------------------------------------------
+
+        /// <summary>The country's unused research bonuses, oldest first.</summary>
+        public IReadOnlyList<ResearchBonus> Bonuses(ushort country) => Of(country).Bonuses;
+
+        /// <summary>The bonus and ahead reduction a tech has taken (zeros when none).</summary>
+        public (FP bonus, FP ahead) AppliedBonus(ushort country, int tech) =>
+            Of(country).Applied.TryGetValue(tech, out var b) ? b : (FP.Zero, FP.Zero);
+
+        /// <summary>Give the country a research bonus (a focus reward). Part of the simulation: from a command or
+        /// the daily tick only. Technologies are ids; unknown ones are skipped.</summary>
+        public void AddBonus(ushort country, string name, FP bonus, FP aheadReduction, int uses,
+                             IEnumerable<string> categories, IEnumerable<string> technologies)
+        {
+            if (!countries.TryGetValue(country, out var c) || uses <= 0 || (bonus <= FP.Zero && aheadReduction <= FP.Zero)) return;
+            var b = new ResearchBonus { Name = name ?? "", Bonus = bonus, AheadReduction = aheadReduction, Uses = uses };
+            if (categories != null) foreach (string cat in categories) if (!string.IsNullOrEmpty(cat)) b.Categories.Add(cat);
+            if (technologies != null) foreach (string id in technologies) if (id != null && techIndex.TryGetValue(id, out int i)) b.Technologies.Add(i);
+            if (b.Categories.Count == 0 && b.Technologies.Count == 0) return;
+            c.Bonuses.Add(b);
+            Core.Recording.SessionRecorder.Note("research", "bonus", country, 0, 0, 0,
+                $"{b.Name}: +{bonus.ToDouble():0.##} speed, {aheadReduction.ToDouble():0.##} years ahead, {uses} use(s)");
+            Changed?.Invoke(country);
+        }
+
+        /// <summary>A tech entering a slot takes the best fitting bonus and the best fitting ahead reduction (the
+        /// oldest on a tie), one use of each. A tech that has taken its bonus before keeps that one.</summary>
+        void TakeBonus(ushort country, CountryResearch c, TechDef t)
+        {
+            if (c.Bonuses.Count == 0 || c.Applied.ContainsKey(t.Index)) return;
+            ResearchBonus speed = null, ahead = null;
+            foreach (var b in c.Bonuses)
+            {
+                if (!b.Fits(t)) continue;
+                if (b.Bonus > FP.Zero && (speed == null || b.Bonus > speed.Bonus)) speed = b;
+                if (b.AheadReduction > FP.Zero && (ahead == null || b.AheadReduction > ahead.AheadReduction)) ahead = b;
+            }
+            if (speed == null && ahead == null) return;
+            c.Applied[t.Index] = (speed != null ? speed.Bonus : FP.Zero, ahead != null ? ahead.AheadReduction : FP.Zero);
+            if (speed != null && --speed.Uses <= 0) c.Bonuses.Remove(speed);
+            if (ahead != null && ahead != speed && --ahead.Uses <= 0) c.Bonuses.Remove(ahead);
+            string names = speed != null && ahead != null && ahead != speed ? speed.Name + " + " + ahead.Name : (speed ?? ahead).Name;
+            Core.Recording.SessionRecorder.Note("research", "bonus_used", country, 0, 0, 0, t.Id + ": " + names);
+        }
 
         /// <summary>Days until the tech finishes: its booked day while in a slot, else at today's rate (an upper
         /// bound: the rate rises as the start year nears).</summary>
@@ -413,7 +491,7 @@ namespace Hoi4.Research
         {
             FP p = s.SyncProgress;
             var t = techs[s.Technology];
-            for (int d = s.SyncDay + 1; d <= today; d++) p += Rate(c.Speed, t, d);
+            for (int d = s.SyncDay + 1; d <= today; d++) p += Rate(c, t, d);
             return p;
         }
 
@@ -444,8 +522,9 @@ namespace Hoi4.Research
             }
             c.Progress.TryGetValue(tech, out var p);
             c.Progress.Remove(tech);
+            TakeBonus(country, c, techs[tech]); // before the first day's rate
             s.SyncDay = today;
-            s.SyncProgress = p + saved * Rate(c.Speed, techs[tech], today); // the saved days, at once
+            s.SyncProgress = p + saved * Rate(c, techs[tech], today); // the saved days, at once
             Core.Recording.SessionRecorder.Note("research", "start", country, 0, 0, 0, $"{techs[tech].Id} in slot {slot + 1}");
             if (s.SyncProgress >= Cost(country, tech)) Finish(country, c, slot); // the saved days may finish it
             else Book(country, c, slot);
@@ -461,7 +540,7 @@ namespace Hoi4.Research
             var t = techs[s.Technology];
             FP cost = Cost(country, s.Technology), p = s.SyncProgress;
             int d = s.SyncDay;
-            while (p < cost && d - s.SyncDay < MaxResearchDays) p += Rate(c.Speed, t, ++d);
+            while (p < cost && d - s.SyncDay < MaxResearchDays) p += Rate(c, t, ++d);
             s.FinishDay = d;
             if (!finishing.TryGetValue(d, out var list)) finishing[d] = list = new List<int>();
             list.Add(country << 8 | slot);
@@ -531,6 +610,7 @@ namespace Hoi4.Research
             var s = c.Slots[slot];
             int tech = s.Technology;
             c.Progress.Remove(tech);
+            c.Applied.Remove(tech);
             c.Known[tech] = true;
             s.Technology = -1;
             s.EmptySince = today;

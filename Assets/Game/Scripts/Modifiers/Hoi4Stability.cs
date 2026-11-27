@@ -21,8 +21,9 @@ namespace Hoi4.Modifiers
     /// - Landmarks (common/hoi4_landmarks.json5): a province building whose country modifiers go to the province's
     ///   controller while it is in the landmark's list (any controller when the list is empty). Rechecked when
     ///   province control changes.
-    /// - Not modelled: stability changes from events, focuses and decisions, war support's stability penalty in war,
-    ///   political power.
+    /// - Scripts change both: AddStability moves the country's own stability, AddWarSupport its war support (a
+    ///   stored value: nothing depends on war support yet).
+    /// - Not modelled: war support's effects and its stability penalty in war.
     /// </summary>
     public static class Hoi4Stability
     {
@@ -42,6 +43,7 @@ namespace Hoi4.Modifiers
         }
 
         static readonly Dictionary<ushort, FP> baseStability = new Dictionary<ushort, FP>();
+        static readonly Dictionary<ushort, FP> warSupport = new Dictionary<ushort, FP>();
         static readonly Dictionary<ushort, FP> appliedScale = new Dictionary<ushort, FP>();
         static readonly List<Landmark> landmarks = new List<Landmark>();
         static List<KeyValuePair<string, FP>> good = new List<KeyValuePair<string, FP>>();
@@ -57,6 +59,7 @@ namespace Hoi4.Modifiers
         {
             Hoi4Modifiers.Changed -= OnChanged;
             baseStability.Clear();
+            warSupport.Clear();
             appliedScale.Clear();
             landmarks.Clear();
             good = new List<KeyValuePair<string, FP>>();
@@ -81,6 +84,7 @@ namespace Hoi4.Modifiers
                 {
                     ushort c = countries.GetCountryIdFromTag(p.Name);
                     if (c != 0 && p.Value["stability"] != null) baseStability[c] = FP.FromDouble((double)p.Value["stability"]);
+                    if (c != 0 && p.Value["war_support"] != null) warSupport[c] = FP.FromDouble((double)p.Value["war_support"]);
                 }
             path = DataFileResolver.Resolve(StaticFile);
             if (File.Exists(path))
@@ -136,6 +140,29 @@ namespace Hoi4.Modifiers
         {
             FP b = baseStability.TryGetValue(country, out FP v) ? v : Neutral;
             return FP.Clamp(b + Hoi4Modifiers.Sum(country, Hoi4Modifiers.StabilityFactor), FP.Zero, FP.One);
+        }
+
+        /// <summary>Change the country's own stability (add_stability: a focus, an event), kept within 0..1; its
+        /// scaled modifier follows. Part of the simulation: from a command or the daily tick only.</summary>
+        public static void AddStability(ushort country, FP amount)
+        {
+            if (!IsReady || country == 0) return;
+            FP b = baseStability.TryGetValue(country, out FP v) ? v : Neutral;
+            baseStability[country] = FP.Clamp(b + amount, FP.Zero, FP.One);
+            Refresh(country, notify: true);
+        }
+
+        /// <summary>The country's war support, 0..1: its set_war_support plus what scripts added (50% for a country
+        /// without history), plus 0.4 x world tension (WAR_SUPPORT_TENSION_IMPACT). Nothing reads it yet but scripts and the top bar.</summary>
+        public static FP WarSupport(ushort country) =>
+            FP.Clamp((warSupport.TryGetValue(country, out FP v) ? v : Neutral)
+                     + Hoi4.War.Hoi4WorldTension.Share * Hoi4.War.Hoi4WorldTension.WarSupportImpact, FP.Zero, FP.One);
+
+        public static void AddWarSupport(ushort country, FP amount)
+        {
+            if (country == 0) return;
+            FP own = warSupport.TryGetValue(country, out FP v) ? v : Neutral;
+            warSupport[country] = FP.Clamp(own + amount, FP.Zero, FP.One);
         }
 
         /// <summary>Daily, from Hoi4Simulation: landmarks follow province control.</summary>

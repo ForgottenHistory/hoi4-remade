@@ -21,7 +21,7 @@ namespace Hoi4.Units
 
         // Timing, per day: [0] combat hourly, [1] plans hourly, [2] AI hourly (break-offs and that hour's
         // countries' attacks), [3] recorder, [4] combat daily, [5] equipment, [6] manpower, [7] plans daily,
-        // [8] war, [9] AI wars, [10] production, [11] AI production, [12] construction, [13] AI construction, [14] deployment, [15] AI deployment, [16] AI army, [17] railways, [18] supply, [19] weather, [20] research, [21] AI research, [22] AI tank designs, [23] focuses and political power, [24] AI focus picks; then the worst single hour of [0], [1], [2], and the plans' daily line refresh
+        // [8] war, [9] AI wars, [10] production, [11] AI production, [12] construction, [13] AI construction, [14] deployment, [15] AI deployment, [16] AI army, [17] railways, [18] supply, [19] weather, [20] research, [21] AI research, [22] AI tank designs, [23] focuses, political power, party popularity and world tension, [24] AI focus picks; then the worst single hour of [0], [1], [2], and the plans' daily line refresh
         static readonly string[] PerfNames =
             { "combat_h", "plans_h", "ai_h", "recorder", "combat_d", "equipment", "manpower", "plans_d", "war", "ai_wars", "production", "ai_production", "construction", "ai_construction", "deployment", "ai_deployment", "ai_army", "railways", "supply", "weather", "research", "ai_research", "ai_tanks", "focus", "ai_focus" };
         static readonly string[] MaxNames = { "combat_h_max", "plans_h_max", "ai_h_max", "plans_refresh", "plans_distribute", "plans_ai" };
@@ -225,7 +225,15 @@ namespace Hoi4.Units
             Measure(23, () =>
             {
                 var research = Hoi4.Research.Hoi4Research.Instance;
-                if (research != null && research.IsReady) Hoi4.Modifiers.Hoi4PoliticalPower.SimulateDay(research.Countries); // the day's political power
+                var gs = Engine.ArchonEngine.Instance.GameState;
+                Hoi4.War.Hoi4WorldTension.Initialize(gs); // listens for wars and peace from here on
+                Hoi4.War.Hoi4WorldTension.SimulateDay(); // tension from countries at peace decays
+                if (research != null && research.IsReady)
+                {
+                    Hoi4.Modifiers.Hoi4PoliticalPower.SimulateDay(research.Countries); // the day's political power
+                    Hoi4.Modifiers.Hoi4Politics.Initialize(gs);
+                    Hoi4.Modifiers.Hoi4Politics.SimulateDay(research.Countries); // party popularity drift
+                }
                 Hoi4.Focus.Hoi4Focus.Instance?.SimulateDay(); // a day on each country's focus; finished ones run their reward script
             });
             Measure(14, () => Hoi4.Deployment.Hoi4Deployment.Instance?.SimulateDay()); // training lines: men, the equipment the field left, training, deploying

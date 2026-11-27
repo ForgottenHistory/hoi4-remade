@@ -45,7 +45,9 @@ namespace Hoi4.Modifiers
         public const string PoliticalPowerFactor = "political_power_factor";                  // x (1 + value) of the day's gain
         static readonly string[] Keys = { ConsumerGoods, ConsumerGoodsFactor, ConstructionSpeed, ResearchSpeed,
                                           FactoryOutput, MaxEfficiency, StartEfficiency, EfficiencyGain, StabilityFactor,
-                                          LineChange, PoliticalPowerGain, PoliticalPowerFactor };
+                                          LineChange, PoliticalPowerGain, PoliticalPowerFactor,
+                                          // daily party popularity drift (Hoi4Politics)
+                                          "democratic_drift", "communism_drift", "fascism_drift", "neutrality_drift" };
 
         static readonly Dictionary<string, ushort> ids = new Dictionary<string, ushort>();
         static readonly List<string> ideaNames = new List<string>();

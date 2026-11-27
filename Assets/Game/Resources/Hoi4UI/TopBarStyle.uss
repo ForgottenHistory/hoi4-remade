@@ -58,7 +58,10 @@
 
 .tb-menu { --sprite: "gfx/interface/topbar/menu_button.png"; right: 15px; top: 6px; width: 24px; height: 24px; }
 .tb-help { --sprite: "gfx/interface/topbar/help_button.png"; right: 9px; top: 33px; width: 24px; height: 24px; }
-.tb-threat { --sprite: "gfx/interface/topbar/threat_button_0.png"; right: 51px; top: 19px; width: 49px; height: 49px; }
+/* the globe's image is one of ten stages, set from code (Hoi4TopBar.UpdateTension) */
+.tb-threat { right: 51px; top: 19px; width: 49px; height: 49px; }
+/* threat_icon_glow: 78x78 at x -111, y 5 from the top right; frames set from code */
+.tb-threat-glow { position: absolute; right: 33px; top: 5px; width: 78px; height: 78px; }
 .tb-threat-value { right: 47px; top: 73px; width: 55px; }
 
 /* menu buttons (topbar.gui): research, construction, production and deployment open their screens; frame 1 while open */

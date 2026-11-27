@@ -20,7 +20,7 @@ namespace Hoi4.UI
     ///
     /// Left: the player's shield flag, political power, stability, war support, recruitable
     /// manpower (population x mobilisation law, common/hoi4_country_stats.json5).
-    /// Right: the date pill (click or Space: pause), speed down/up (-/+) and five speed steps
+    /// Right: the world tension globe (Hoi4WorldTension: ten stages, percent, a glow when it rises), the date pill (click or Space: pause), speed down/up (-/+) and five speed steps
     /// (click to pick; green = up to the current speed, red while paused).
     /// Replaces StarterKit TimeUI.
     /// </summary>
@@ -45,7 +45,17 @@ namespace Hoi4.UI
         UIDocument document;
         VisualElement bar, flag, pill, productionButton, constructionButton, deploymentButton, researchButton;
         Label politicalPower, stability, warSupport, manpower, date;
-        int shownStability = -1;
+        int shownStability = -1, shownWarSupport = -1;
+        // world tension: the globe's ten stages, its percent, and the glow played once when tension rises
+        const string TensionDir = "gfx/interface/topbar/";
+        const int GlobeStages = 10, GlowFrames = 33;
+        const float GlowFps = 22f;
+        VisualElement globe, glow;
+        Label tension;
+        int shownTension = -1, shownStage = -1, shownGlow = -1;
+        int tensionVersion = -1;
+        double lastTension;
+        float glowStart = -1f;
         readonly VisualElement[] steps = new VisualElement[5];
         readonly Dictionary<string, JObject> stats = new Dictionary<string, JObject>();
         int shownPower = int.MinValue;
@@ -126,6 +136,9 @@ namespace Hoi4.UI
             warSupport = bar.Q<Label>("war-support");
             manpower = bar.Q<Label>("manpower");
             date = bar.Q<Label>("date");
+            globe = bar.Q("threat-globe");
+            glow = bar.Q("threat-glow");
+            tension = bar.Q<Label>("threat");
             pill = bar.Q("pill");
 
             pill.RegisterCallback<ClickEvent>(_ => { if (!InConference) time.TogglePause(); });
@@ -193,7 +206,11 @@ namespace Hoi4.UI
                 // live stability: history + ideas and landmarks (Hoi4Stability)
                 int st = Mathf.RoundToInt(Hoi4.Modifiers.Hoi4Stability.Stability(shownCountry).ToFloat() * 100f);
                 if (st != shownStability) { shownStability = st; stability.text = $"{st}%"; }
+                int ws = Mathf.RoundToInt(Hoi4.Modifiers.Hoi4Stability.WarSupport(shownCountry).ToFloat() * 100f);
+                if (ws != shownWarSupport) { shownWarSupport = ws; warSupport.text = $"{ws}%"; }
             }
+
+            UpdateTension();
 
             var t = time.GetCurrentGameTime();
             string d = $"{t.Hour}:00, {t.Day} {MonthNames[Mathf.Clamp(t.Month - 1, 0, 11)]} {t.Year}";
@@ -213,11 +230,36 @@ namespace Hoi4.UI
             }
         }
 
+        /// <summary>The globe burns more with tension (ten stages), the label shows the percent, and a rise plays
+        /// the glow once (33 frames at 22 a second, real time: it is presentation).</summary>
+        void UpdateTension()
+        {
+            if (globe == null || tension == null) return;
+            if (tensionVersion != Hoi4.War.Hoi4WorldTension.Version)
+            {
+                tensionVersion = Hoi4.War.Hoi4WorldTension.Version;
+                double now = Hoi4.War.Hoi4WorldTension.Percent.ToDouble();
+                if (now > lastTension + 0.05 && glow != null) glowStart = Time.unscaledTime;    // a real rise, not decay
+                lastTension = now;
+                int percent = Mathf.FloorToInt((float)now);
+                if (percent != shownTension) { shownTension = percent; tension.text = $"{percent}%"; }
+                int stage = Mathf.Clamp(Mathf.FloorToInt((float)now / 100f * GlobeStages), 0, GlobeStages - 1);
+                if (stage != shownStage) { shownStage = stage; Hoi4Sprites.Apply(globe, $"{TensionDir}threat_button_{stage}.png"); }
+            }
+            if (glow == null) return;
+            int frame = glowStart < 0f ? -1 : Mathf.FloorToInt((Time.unscaledTime - glowStart) * GlowFps);
+            if (frame >= GlowFrames) { frame = -1; glowStart = -1f; }
+            if (frame == shownGlow) return;
+            shownGlow = frame;
+            Hoi4Sprites.Apply(glow, frame < 0 ? null : $"{TensionDir}threat_glow_{frame:00}.png");
+        }
+
         void ShowCountry(ushort country)
         {
             shownCountry = country;
             shownManpower = -1;
             shownStability = -1;
+            shownWarSupport = -1;
             shownPower = int.MinValue;
             string tag = gameState.Countries.GetCountryTag(country);
             Hoi4Sprites.Apply(flag, string.IsNullOrEmpty(tag) ? null : $"{FlagDir}{tag}.png");

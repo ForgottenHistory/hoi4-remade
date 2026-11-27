@@ -28,7 +28,9 @@ namespace Hoi4.Scripts
     /// - Scopes: country and state objects whose methods are HOI4's triggers and effects (c:has_war(),
     ///   s:add_building("arms_factory", 1)): Hoi4Script.Country.cs and Hoi4Script.State.cs. Names are HOI4's, with
     ///   the translator's few renames (Tools/hoi4_focus.py).
-    /// - Globals: country("GER"), state(64), date("<", "1939.1.1"), random_state(filter), has_dlc (always true),
+    /// - Globals: has_start_date, global flags (has_global_flag, set_global_flag, clear_global_flag), has_game_rule
+    ///   (always false: there are none), country("GER"), state(64), date("<", "1939.1.1"), countries(), states() and their any_, all_ and
+    ///   random_ forms with a filter, country_exists, has_dlc (always true),
     ///   is_historical_focus_on (always true), and the combinators of shown triggers in Lua (Prelude): all, any,
     ///   none, when, tooltip, hidden, tooltip_only.
     /// - What the game doesn't have yet is simply not defined: the engine reports each such name once and it
@@ -86,6 +88,11 @@ end
 ";
 
         public static ScriptEngine Engine { get; private set; }
+
+        /// <summary>The country and state types, for content systems that add methods about their own state
+        /// (Hoi4Focus: has_completed_focus).</summary>
+        public static ScriptType CountryType => countryType;
+        public static ScriptType StateType => stateType;
         public static bool IsReady { get; private set; }
 
         static GameState gameState;
@@ -94,6 +101,8 @@ end
         static readonly Dictionary<string, CountryScope> countriesByTag = new Dictionary<string, CountryScope>();
         static readonly Dictionary<int, StateScope> states = new Dictionary<int, StateScope>();
         static readonly Dictionary<ushort, HashSet<string>> flags = new Dictionary<ushort, HashSet<string>>();
+        static readonly HashSet<string> globalFlags = new HashSet<string>();
+        const int StartDate = 19360101;
         static CountryScope noCountry;
         static StateScope noState;
 
@@ -121,9 +130,11 @@ end
             IsReady = false;
             gameState = null;
             countryType = stateType = null;
-            countries.Clear(); countriesByTag.Clear(); states.Clear(); flags.Clear();
+            countries.Clear(); countriesByTag.Clear(); states.Clear(); flags.Clear(); globalFlags.Clear();
+            homeArea.Clear(); homeAreaAt = -1;
             noCountry = null;
             noState = null;
+            allStates = null;
             stateOwner.Clear(); stateController.Clear(); ownedStates.Clear(); controlledStates.Clear();
             neighbours.Clear(); existing.Clear();
             ownedAt = controlledAt = -1;
@@ -136,6 +147,7 @@ end
         {
             if (IsReady) return true;
             if (state == null || !Hoi4Regions.Available || !Hoi4StateData.Available) return false;
+            Hoi4.Modifiers.Hoi4Politics.Initialize(state);   // has_government and the popularity triggers read it
             Reset();
             gameState = state;
             Engine = new ScriptEngine(stubMissingGlobals: true, logChannel: Channel);
@@ -170,12 +182,34 @@ end
             });
             Engine.SetFunction("has_dlc", (ref ScriptCall call) => call.Return(true));                  // every DLC is assumed owned, as in the converter
             Engine.SetFunction("is_historical_focus_on", (ref ScriptCall call) => call.Return(true));   // the AI plays historically
-            Engine.SetFunction("random_state", (ref ScriptCall call) =>
+            Engine.SetFunction("random_state", (ref ScriptCall call) => call.Return(Pick(ref call, AllStates(), call.Function(0))));
+            // every country that exists and every state: the lists every_country / every_state loop over, and
+            // their any_ / all_ / random_ forms
+            Engine.SetFunction("countries", (ref ScriptCall call) => call.ReturnList(Existing()));
+            Engine.SetFunction("states", (ref ScriptCall call) => call.ReturnList(AllStates()));
+            Engine.SetFunction("any_country", (ref ScriptCall call) => call.Return(Any(ref call, Existing(), call.Function(0))));
+            Engine.SetFunction("all_country", (ref ScriptCall call) => call.Return(Any(ref call, Existing(), call.Function(0), all: true)));
+            Engine.SetFunction("random_country", (ref ScriptCall call) => call.Return(Pick(ref call, Existing(), call.Function(0))));
+            Engine.SetFunction("any_state", (ref ScriptCall call) => call.Return(Any(ref call, AllStates(), call.Function(0))));
+            Engine.SetFunction("all_state", (ref ScriptCall call) => call.Return(Any(ref call, AllStates(), call.Function(0), all: true)));
+            Engine.SetFunction("country_exists", (ref ScriptCall call) => call.Return(Exists(CountryArg(ref call, 0).Id)));
+            // world tension: threat(">", 0.5) compares the share 0..1; add_threat and add_named_threat add percent
+            // points caused by nobody in particular (a country's own add_threat is in Hoi4Script.Country.cs)
+            Engine.SetFunction("threat", (ref ScriptCall call) => call.Return(Compare(ref call, 0, Hoi4.War.Hoi4WorldTension.Share.ToDouble())));
+            // the game starts on 1 January 1936, always
+            Engine.SetFunction("has_start_date", (ref ScriptCall call) => call.Return(Compare(call.String(0), StartDate, DateNumber(call.String(1)))));
+            Engine.SetFunction("has_game_rule", (ref ScriptCall call) => call.Return(false));   // no game rules: none is set to anything
+            Engine.SetFunction("has_global_flag", (ref ScriptCall call) =>
             {
-                var all = new List<StateScope>(states.Count);
-                foreach (int id in Hoi4Regions.States) all.Add(states[id]);
-                call.Return(Pick(ref call, all, call.Function(0)));
+                string flag = call.String(0) ?? call.Table(0).String("flag");
+                call.Return(flag != null && globalFlags.Contains(flag));
             });
+            Engine.SetFunction("set_global_flag", (ref ScriptCall call) =>
+            {
+                string flag = call.String(0) ?? call.Table(0).String("flag");
+                if (flag != null) globalFlags.Add(flag);
+            });
+            Engine.SetFunction("clear_global_flag", (ref ScriptCall call) => { if (call.String(0) != null) globalFlags.Remove(call.String(0)); });
             CountryBindings(countryType);
             StateBindings(stateType);
             if (!Engine.Run(Prelude, "prelude.lua"))
@@ -355,6 +389,74 @@ end
         static List<StateScope> OwnedStates(ushort country) { RefreshStates(); return ownedStates.TryGetValue(country, out var l) ? l : noStates; }
 
         static List<StateScope> ControlledStates(ushort country) { RefreshStates(); return controlledStates.TryGetValue(country, out var l) ? l : noStates; }
+
+        // per country the provinces joined to its capital by land it owns, as of homeAreaAt (ownership version)
+        static readonly Dictionary<ushort, HashSet<ushort>> homeArea = new Dictionary<ushort, HashSet<ushort>>();
+        static int homeAreaAt = -1;
+
+        /// <summary>Whether the state is in the country's home area: one of its provinces is joined to the country's
+        /// capital by land the country owns (HOI4's is_in_home_area, without its continent rule).</summary>
+        static bool InHomeArea(ushort country, int state)
+        {
+            if (country == 0) return false;
+            if (homeAreaAt != gameState.Provinces.OwnershipVersion) { homeArea.Clear(); homeAreaAt = gameState.Provinces.OwnershipVersion; }
+            if (!homeArea.TryGetValue(country, out var area))
+            {
+                homeArea[country] = area = new HashSet<ushort>();
+                ushort capital = Hoi4Regions.Capital(Country(country).Tag);
+                Hoi4.Units.Hoi4Occupation.Snapshot(gameState, 0, out _, out var owner);
+                gameState.Adjacencies.GetCompactGraph(out int[] offsets, out ushort[] links);
+                if (capital != 0 && capital < owner.Length && owner[capital] == country)
+                {
+                    var queue = new Queue<ushort>();
+                    area.Add(capital);
+                    queue.Enqueue(capital);
+                    while (queue.Count > 0)
+                    {
+                        ushort p = queue.Dequeue();
+                        if (p + 1 >= offsets.Length) continue;
+                        for (int i = offsets[p]; i < offsets[p + 1]; i++)
+                        {
+                            ushort q = links[i];
+                            if (q < owner.Length && owner[q] == country && !Hoi4Regions.IsWater(q) && area.Add(q)) queue.Enqueue(q);
+                        }
+                    }
+                }
+            }
+            foreach (ushort p in Hoi4Regions.ProvincesOf(state)) if (area.Contains(p)) return true;
+            return false;
+        }
+
+        /// <summary>Whether the country controls every province of the state.</summary>
+        static bool FullyControls(ushort country, int state)
+        {
+            var provs = Hoi4Regions.ProvincesOf(state);
+            if (country == 0 || provs.Count == 0) return false;
+            Hoi4.Units.Hoi4Occupation.Snapshot(gameState, 0, out var ctrl, out _);
+            foreach (ushort p in provs) if (p >= ctrl.Length || ctrl[p] != country) return false;
+            return true;
+        }
+
+        /// <summary>A state argument: a state object or a state id; -1 when it is neither.</summary>
+        static int StateArg(ref ScriptCall call, int index)
+        {
+            var value = call[index];
+            if (value.Kind == ScriptValueKind.Object) return value.Object<StateScope>()?.Id ?? -1;
+            return (int)value.Number(-1);
+        }
+
+        static List<StateScope> allStates;
+
+        /// <summary>Every state, by id.</summary>
+        static List<StateScope> AllStates()
+        {
+            if (allStates == null || allStates.Count != states.Count)
+            {
+                allStates = new List<StateScope>(states.Count);
+                foreach (int id in Hoi4Regions.States) allStates.Add(states[id]);
+            }
+            return allStates;
+        }
 
         /// <summary>Whether the country owns a state (most of one's provinces).</summary>
         public static bool Exists(ushort country) => OwnedStates(country).Count > 0;
