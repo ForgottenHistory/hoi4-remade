@@ -23,6 +23,10 @@ namespace Hoi4.Units
     ///   goes to the others on the landmass with room, the rest is reserve.
     /// - Reserve: daily, reserve divisions starving where they stand walk to the nearest of our provinces whose hub
     ///   supply has room for them, off the front (RestReserves).
+    /// - By sea: daily, a landmass whose theatres need more divisions than it has gets reserve divisions standing
+    ///   idle on landmasses with more than they need, shipped to its port nearest the theatre that needs most
+    ///   (ShipReserves; naval transfer between ports, Hoi4MovementRules). Landed, they are reserve there and the
+    ///   armies take them as usual. Budgets stay per landmass: the sea only moves what a landmass has spare.
     /// - Posture: the main effort attacks while its armies have AttackRatio times the enemy facing it; the rest hold.
     /// - Armies: ceil(budget / ArmySize) per theatre, each holding a contiguous section of its front. Sections
     ///   carry over from the day before by nearness (each front province takes the army of the nearest earlier
@@ -72,6 +76,7 @@ namespace Hoi4.Units
         const int MinPerProvinceForSupply = 1;
         static readonly FP RestBelow = FP.FromFraction(6, 10); // a reserve division getting less than this of its need moves
         const int RestHops = 30;                              // ... to a fed province this close (own land)
+        const int ShipTries = 3;                              // ShipReserves: divisions with no way to a port before it gives that port up for the day
         const int RestPerDay = 24;                            // ... at most this many orders a country a day
 
         sealed class Theatre
@@ -255,6 +260,118 @@ namespace Hoi4.Units
             if (reason != null) PlanCountry(country, reason);
             else FollowCountry(country, st, front, near);
             RestReserves(country);
+            ShipReserves(country);
+        }
+
+        /// <summary>
+        /// Reserve divisions by sea to the landmasses that are short. A landmass is short when its theatres' needs
+        /// add up to more than the divisions on it, those already on their way there counted. It gets idle reserve
+        /// divisions (no army, standing still, not fighting) from landmasses that have more than their theatres
+        /// need (all of them where there is no front), the ones nearest its port first: the port on the landmass
+        /// the country may use (its own or an ally's) nearest the middle of the theatre with the largest need. The
+        /// march and the crossing are one path (the pathfinder's naval transfer); a division with no way there is
+        /// passed over (after ShipTries of them the port is left for the day). At most max(2, a twentieth of the army)
+        /// orders a day. Most short landmass first; units,
+        /// ports and landmasses in id order.
+        /// </summary>
+        // Divisions ShipReserves has under way: no army takes them before they land (one taken on its march to
+        // the quay sailed on as an army's division, was released at sea and stopped there)
+        readonly HashSet<ushort> shipping = new HashSet<ushort>();
+
+        void ShipReserves(ushort country)
+        {
+            if (!Hoi4.Supply.Hoi4Ports.Available || !aiStates.TryGetValue(country, out var st) || st.Theatres == null || st.Theatres.Count == 0) return;
+            var armies = Hoi4Armies.Instance;
+            if (armies == null) return;
+            var units = gameState.Units;
+            var queue = units.MovementQueue;
+            var own = units.GetCountryUnits(country);
+            own.Sort();
+            var idle = new List<ushort>();
+            foreach (ushort u in own)
+            {
+                if (!units.HasUnit(u) || armies.ArmyOf(u) != null || queue.IsUnitMoving(u) || Hoi4Combat.IsFighting(u)
+                    || Hoi4Combat.IsRetreating(u) || borrowed.Contains(u) || Hoi4Regions.IsWater(units.GetUnit(u).provinceID)) continue;
+                idle.Add(u);
+            }
+            shipping.RemoveWhere(u => !units.HasUnit(u) || !queue.IsUnitMoving(u)); // landed, stopped or gone
+            if (idle.Count == 0) return;
+
+            int[] labels = Landmasses(country);
+            int Label(ushort p) => p < labels.Length ? labels[p] : -1;
+            var have = new Dictionary<int, int>();
+            foreach (ushort u in own)
+            {
+                if (!units.HasUnit(u)) continue;
+                int l = Label(queue.IsUnitMoving(u) ? HeadingTo(u) : units.GetUnit(u).provinceID);
+                if (l >= 0) have[l] = (have.TryGetValue(l, out int n) ? n : 0) + 1;
+            }
+            var need = new SortedDictionary<int, int>();
+            var biggest = new Dictionary<int, (int need, ushort at)>(); // per landmass: its theatre with the largest need
+            foreach (var th in st.Theatres)
+            {
+                if (th.Order == null || th.Order.Count == 0) continue;
+                int l = Label(th.Order[0]);
+                if (l < 0) continue;
+                need[l] = (need.TryGetValue(l, out int n) ? n : 0) + th.Need;
+                if (!biggest.TryGetValue(l, out var b) || th.Need > b.need) biggest[l] = (th.Need, th.Order[th.Order.Count / 2]);
+            }
+            var shortBy = new List<(int gap, int label)>();
+            foreach (var kv in need)
+            {
+                int gap = kv.Value - (have.TryGetValue(kv.Key, out int n) ? n : 0);
+                if (gap > 0) shortBy.Add((gap, kv.Key));
+            }
+            if (shortBy.Count == 0) return;
+            shortBy.Sort((a, b) => a.gap != b.gap ? b.gap.CompareTo(a.gap) : a.label.CompareTo(b.label));
+
+            movementRules ??= new Hoi4MovementRules(gameState);
+            int left = Math.Max(2, own.Count / 20);
+            foreach (var (gapStart, label) in shortBy)
+            {
+                if (left <= 0) break;
+                int gap = gapStart;
+                ushort toward = biggest[label].at, port = 0;
+                long bestKm = long.MaxValue;
+                foreach (ushort p in Hoi4.Supply.Hoi4Ports.Ports) // sorted
+                {
+                    if (Label(p) != label || !movementRules.CanUsePort(country, p)) continue;
+                    long km = Hoi4Movement.TryDistanceKm(p, toward, out FP d) ? d.RawValue : long.MaxValue - 1;
+                    if (km < bestKm) { bestKm = km; port = p; }
+                }
+                if (port == 0) continue; // no port of ours there: nothing can land
+                var donors = new List<(long km, ushort u)>();
+                foreach (ushort u in idle)
+                {
+                    ushort at = units.GetUnit(u).provinceID;
+                    int l = Label(at);
+                    if (l < 0 || l == label) continue;
+                    int spare = (have.TryGetValue(l, out int n) ? n : 0) - (need.TryGetValue(l, out int m) ? m : 0);
+                    if (spare <= 0) continue;
+                    donors.Add((Hoi4Movement.TryDistanceKm(at, port, out FP d) ? d.RawValue : long.MaxValue, u));
+                }
+                donors.Sort((a, b) => a.km != b.km ? a.km.CompareTo(b.km) : a.u.CompareTo(b.u));
+                var shipped = new List<ushort>();
+                int failed = 0;
+                foreach (var (_, u) in donors)
+                {
+                    if (gap <= 0 || left <= 0 || failed >= ShipTries) break; // a search with no way there looks over the whole sea
+                    var unit = units.GetUnit(u);
+                    int l = Label(unit.provinceID);
+                    if ((have.TryGetValue(l, out int n) ? n : 0) - (need.TryGetValue(l, out int m) ? m : 0) <= 0) continue; // its landmass has no more to spare
+                    if (!OrderMove(u, unit, port, log: false)) { failed++; continue; }
+                    have[l] = n - 1;
+                    have[label] = (have.TryGetValue(label, out int h) ? h : 0) + 1;
+                    idle.Remove(u);
+                    shipped.Add(u);
+                    shipping.Add(u);
+                    gap--;
+                    left--;
+                }
+                if (shipped.Count > 0)
+                    Core.Recording.SessionRecorder.Note("ai_country", "ship", country, 0, port, toward,
+                        $"{shipped.Count} reserve divisions by sea to the port in {port} (its landmass {gapStart} short): {string.Join(" ", shipped)}");
+            }
         }
 
         /// <summary>
@@ -608,8 +725,8 @@ namespace Hoi4.Units
             foreach (int a in new List<int>(mine.Keys)) if (!alive.Contains(a)) mine.Remove(a);
 
             // --- Main effort and budgets, per landmass ----------------------------------------------------
-            // The AI doesn't plan naval transfers (divisions can sail between ports, Hoi4MovementRules, but the
-            // budgets don't count on it), so each walkable landmass (walk label) shares
+            // Budgets are per landmass: the sea moves only what a landmass has spare (ShipReserves ships idle
+            // reserves to a landmass that is short), so each walkable landmass (walk label) shares
             // its own divisions among its own theatres, with its own main effort: land held across the sea is
             // budgeted from the divisions there, and an encircled pocket is a small landmass of its own
             var byLabel = new SortedDictionary<int, List<int>>();
@@ -872,7 +989,7 @@ namespace Hoi4.Units
         /// The country's landmasses: connected pieces of passable land it may walk on (its own, allies', access)
         /// that no enemy controls and that hold some of its own land, by province id; -1 elsewhere. Unlike WalkLabels an enemy division standing in our
         /// land doesn't split it (that flickered fronts between "landmasses" hour to hour). Its divisions can reach
-        /// each other's landmass only by sea, which isn't modelled: budgets are per landmass.
+        /// each other's landmass only by sea (ShipReserves): budgets are per landmass.
         /// </summary>
         int[] Landmasses(ushort country)
         {
@@ -1108,7 +1225,7 @@ namespace Hoi4.Units
             int reserveCount = 0;
             foreach (ushort u in own)
             {
-                if (!units.HasUnit(u) || armies.ArmyOf(u) != null || Busy(u)) continue;
+                if (!units.HasUnit(u) || armies.ArmyOf(u) != null || Busy(u) || shipping.Contains(u)) continue; // not one being shipped overseas
                 ushort p = units.GetUnit(u).provinceID;
                 if (!reserveAt.TryGetValue(p, out var l)) reserveAt[p] = l = new List<ushort>();
                 l.Add(u);

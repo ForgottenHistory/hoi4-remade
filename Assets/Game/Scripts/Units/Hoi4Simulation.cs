@@ -193,6 +193,7 @@ namespace Hoi4.Units
             Measure(17, () => Hoi4.Supply.Hoi4Railways.SimulateDay(Engine.ArchonEngine.Instance.GameState)); // rail conversion, hub connections to the capital
             Hoi4Occupation.SettleStanding(Engine.ArchonEngine.Instance.GameState); // a division left standing on enemy land takes it
             Hoi4ReturnHome.SimulateDay(Engine.ArchonEngine.Instance.GameState); // divisions on a non-enemy's land go home (cheap: no column)
+            HaltUnitsCommand.RescueStranded(Engine.ArchonEngine.Instance.GameState); // divisions left standing at sea sail to the nearest port
             Measure(18, () => Hoi4.Supply.Hoi4Supply.SimulateDay(Engine.ArchonEngine.Instance.GameState, Hoi4Divisions.Instance)); // province supply, division supply ratios
             Hoi4UnitCounters.Instance?.MarkDirtyNextFrame(); // the low supply crates follow the day's ratios (drawn a frame later)
             Hoi4.Supply.Hoi4SupplyMapMode.Refresh(); // and the supply map mode, at once
