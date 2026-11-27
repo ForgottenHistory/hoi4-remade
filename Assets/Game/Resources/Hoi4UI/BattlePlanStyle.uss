@@ -7,6 +7,12 @@
 .bp-front { left: 275px; }
 .bp-offence { left: 312px; }
 .bp-fallback { left: 391px; } /* btn_order_draw_fallback x 355 */
+/* btn_exercise at -25, 37 (28x27: the rifles on their cog). While the selected divisions exercise it is
+   btn_exercise_anim at -24, 38 instead (26x26, 20 frames: the cog turning); icn_exercise_stop_at_max at -27, 35 */
+.bp-exercise { position: absolute; left: 11px; top: 37px; width: 28px; height: 27px; }
+.bp-exercise-icon { position: absolute; left: 0; top: 0; width: 28px; height: 27px; }
+.bp-exercise-anim { position: absolute; left: 1px; top: 1px; width: 26px; height: 26px; }
+.bp-exercise-max { position: absolute; left: -2px; top: -2px; width: 14px; height: 14px; }
 .bp-area { left: 427px; }     /* btn_area_defense x 391 */
 /* The Defense window (battleplantools_area_defense_config_window at 250, -50; its background 15 to the left).
    Its guard toggles are 40x36, 40 apart from x 0, y 31 (set in code). */

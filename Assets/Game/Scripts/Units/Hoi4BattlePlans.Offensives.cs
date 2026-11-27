@@ -486,7 +486,8 @@ namespace Hoi4.Units
         /// It keeps its slot on the front line and attacks from there (Advance).</summary>
         public bool IsAdvancing(ushort unitId) =>
             offensiveOf.TryGetValue(unitId, out var o) && executing.Contains(o.ArmyId)
-            && planOf.TryGetValue(unitId, out var plan) && !manualOrders.ContainsKey(unitId);
+            && planOf.TryGetValue(unitId, out var plan) && !manualOrders.ContainsKey(unitId)
+            && !Hoi4Training.IsTraining(unitId); // on exercise: it doesn't attack
 
         /// <summary>An advancing division marching into enemy land: an attack the line must not call back (Hold).</summary>
         bool IsPlanAttack(ushort unitId, Core.Units.UnitState unit)

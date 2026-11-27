@@ -649,7 +649,9 @@ namespace Hoi4.Supply
                 lowDays[s.Unit] = now < LowSupply ? System.Math.Min(MaxOutOfSupplyDays, low + 1) : System.Math.Max(0, low - 1);
                 if (!atWar.TryGetValue(s.Country, out bool war))
                     atWar[s.Country] = war = gameState.Diplomacy != null && gameState.Diplomacy.GetEnemies(s.Country).Count > 0;
-                Attrition(divisions.All[s.Unit], now, war ? Hoi4.Weather.Hoi4Weather.Attrition(s.Province) : FP.Zero);
+                // weather attrition at war only; an exercise's (TRAINING_ATTRITION) always, on the same scale
+                Attrition(divisions.All[s.Unit], now, (war ? Hoi4.Weather.Hoi4Weather.Attrition(s.Province) : FP.Zero)
+                                                      + Hoi4.Units.Hoi4Training.Attrition(s.Unit));
                 byCountry.TryGetValue(s.Country, out var cs);
                 cs.Divisions++;
                 cs.Need += s.Need;

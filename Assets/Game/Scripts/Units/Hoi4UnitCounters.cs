@@ -139,6 +139,7 @@ namespace Hoi4.Units
 
         Sprite actionMove, actionDefend, actionAttack; // optional: the arrow, shield and double chevron on a counter's right edge
         Sprite noOrders; // optional: GFX_mapicon_unit_no_orders
+        Sprite trainingIcon; // optional: GFX_onmap_training_icon, the yellow cog of a division on exercise
         readonly Sprite[] supplyCrates = new Sprite[3]; // optional: GFX_unitcounter_supply_status_strip (yellow, orange, red)
         Sprite plate, selectedFrame, ideologyStrip, barOrg, barStr, digits;
         List<Stack> stacks = new List<Stack>();
@@ -388,6 +389,7 @@ namespace Hoi4.Units
             actionDefend = LoadSprite("gfx/counters/action_defend.png");
             actionAttack = LoadSprite("gfx/counters/action_attack.png");
             noOrders = LoadSprite("gfx/counters/no_orders.png");
+            trainingIcon = LoadSprite("gfx/counters/training.png");
             for (int i = 0; i < supplyCrates.Length; i++) supplyCrates[i] = LoadSprite($"gfx/counters/supply_{i + 1}.png");
             if (plate == null || ideologyStrip == null || barOrg == null || barStr == null || digits == null)
             {
@@ -496,6 +498,7 @@ namespace Hoi4.Units
                 int action = Hoi4Combat.Instance != null && Hoi4Combat.Instance.IsAttacking(id) ? 3
                     : defended.Contains(u.provinceID) ? 2
                     : queue != null && queue.IsUnitMoving(id) ? 1 : 0;
+                if (action < 3 && Hoi4Training.IsTraining(id)) action = 4; // on exercise: the cog
                 if (action > s.Action) s.Action = action;
                 var armyOf = Hoi4Armies.Instance?.ArmyOf(id);
                 if (armyOf != null && armyOf.Owner != Hoi4Armies.Player && !Hoi4BattlePlans.ShowAIPlans) armyOf = null; // the AI's armies: not shown
@@ -728,6 +731,8 @@ namespace Hoi4.Units
             }
             var action = s.Action == 3 ? actionAttack : s.Action == 2 ? actionDefend : s.Action == 1 ? actionMove : null;
             if (action != null) BlitScaled(action, 9, ox + 57, oy + 9); // fits the strip right of the count box
+            // mapicons.gui onmap_training_icon (x 54, y 8): the cog, where the action icon goes
+            if (s.Action == 4 && trainingIcon != null) Blit(trainingIcon, 0, 0, trainingIcon.Width, trainingIcon.Height, ox + 54, oy + 8);
 
             // mapicons.gui low_supply: a crate over the top edge (x 24, y -4, scale 0.75), into the slot's top strip
             var crate = s.Supply > 0 ? supplyCrates[s.Supply - 1] : null;

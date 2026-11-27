@@ -25,6 +25,8 @@ namespace Hoi4.Units
         bool dirty = true;
         readonly List<VisualElement> anims = new List<VisualElement>(); // play-button chevrons of running armies
         int animFrame = -1;
+        readonly List<VisualElement> cogs = new List<VisualElement>();  // turning cogs of armies on exercise
+        int cogFrame = -1, trainingVersion = -1;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Spawn()
@@ -123,6 +125,14 @@ namespace Hoi4.Units
                 dirty = false;
                 Refresh(player);
             }
+            if (trainingVersion != Hoi4Training.Version) { trainingVersion = Hoi4Training.Version; dirty = true; }
+            // HOI4 GFX_exercise_icon_anim_strip: 20 frames at 7 fps
+            int cog = Mathf.FloorToInt(Time.unscaledTime * 7f) % 20;
+            if (cog != cogFrame && cogs.Count > 0)
+            {
+                cogFrame = cog;
+                foreach (var c in cogs) Hoi4Sprites.Apply(c, Dir + $"exercise_{cog}.png");
+            }
             // HOI4 GFX_active_battleplan_anim: 12 frames at 24 fps
             int frame = Mathf.FloorToInt(Time.unscaledTime * 24f) % 12;
             if (frame != animFrame && anims.Count > 0)
@@ -140,6 +150,8 @@ namespace Hoi4.Units
             list.Clear();
             anims.Clear();
             animFrame = -1;
+            cogs.Clear();
+            cogFrame = -1;
             foreach (var army in armies.All)
             {
                 if (army.Owner != player) continue; // the AI's armies aren't the player's cards
@@ -161,7 +173,10 @@ namespace Hoi4.Units
             var outer = new VisualElement { pickingMode = PickingMode.Ignore };
             outer.AddToClassList("army-card");
             var plans = Hoi4BattlePlans.Instance;
-            if (plans != null && plans.HasFrontLine(army.Id)) AddExecuteButtons(outer, army, plans.IsExecuting(army.Id));
+            bool exercising = false, untilTrained = false;
+            foreach (ushort u in army.Units) { exercising |= Hoi4Training.IsTraining(u); untilTrained |= Hoi4Training.StopsWhenTrained(u); }
+            if (exercising) AddExerciseButtons(outer, army, untilTrained); // instead of the plan's play / stop, like HOI4
+            else if (plans != null && plans.HasFrontLine(army.Id)) AddExecuteButtons(outer, army, plans.IsExecuting(army.Id));
 
             var card = new VisualElement { pickingMode = PickingMode.Position };
             card.AddToClassList("ac-body");
@@ -247,6 +262,40 @@ namespace Hoi4.Units
             grade.AddToClassList("ac-plan-value");
             Hoi4Sprites.Apply(grade, Dir + "plan_value_3.png");
             outer.Add(grade);
+        }
+
+        /// <summary>leadergroups.gui btn_stop_training, training_marker and icn_exercise_stop_at_max: while a
+        /// division of the army exercises, the stop button (ends the army's exercise), the turning cog and, when
+        /// the exercise ends by itself, the mark on it.</summary>
+        void AddExerciseButtons(VisualElement outer, Hoi4Army army, bool untilTrained)
+        {
+            var bg = new VisualElement { pickingMode = PickingMode.Ignore };
+            bg.AddToClassList("ac-exec-bg");
+            Hoi4Sprites.Apply(bg, Dir + "exec_bg.png");
+            outer.Add(bg);
+
+            var stop = new VisualElement { pickingMode = PickingMode.Position };
+            stop.AddToClassList("ac-stop");
+            stop.AddToClassList("hoi4-button");
+            Hoi4Sprites.Apply(stop, Dir + "exec_stop_1.png");
+            stop.RegisterCallback<PointerDownEvent>(e =>
+            {
+                if (e.button == 0)
+                    Engine.ArchonEngine.Instance.GameState.TryExecuteCommand(
+                        new SetTrainingCommand { CountryId = Player, UnitIds = new List<ushort>(army.Units), On = false }, out _);
+                e.StopPropagation();
+            });
+            outer.Add(stop);
+
+            var cog = new VisualElement { pickingMode = PickingMode.Ignore };
+            cog.AddToClassList("ac-exercise");
+            outer.Add(cog);
+            cogs.Add(cog);
+            if (!untilTrained) return;
+            var mark = new VisualElement { pickingMode = PickingMode.Ignore };
+            mark.AddToClassList("ac-exercise-max");
+            Hoi4Sprites.Apply(mark, Dir + "exercise_stop_at_max_0.png");
+            outer.Add(mark);
         }
 
         static void Run(Hoi4Army army, bool run) =>

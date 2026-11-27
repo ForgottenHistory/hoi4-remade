@@ -9,7 +9,9 @@ namespace Hoi4.Units
     /// <summary>
     /// GAME: the Battle Plans window (HOI4's battleplantools_window). It shows while a division of an army is
     /// selected; the front-line button turns the front line tool of Hoi4BattlePlans on, the offence button
-    /// (enabled once the army has a front line) the offensive tool, the fallback button the fallback line tool
+    /// (enabled once the army has a front line) the offensive tool, the exercise button at the far left starts or
+    /// stops the exercise of the selected divisions' whole armies (Hoi4Training; shift + click: until they are trained; K and shift + K;
+    /// its cog turns while any of them exercises), the fallback button the fallback line tool
     /// (drag a line across own or allied land for the divisions to hold), the area defence button its tool and
     /// the Defense window above the bar (what to guard in the clicked states; the kinds without data are
     /// disabled), the bin the delete tool (click a line or an
@@ -26,6 +28,8 @@ namespace Hoi4.Units
         UIDocument document;
         VisualElement window, labels, front, offence, fallback, area, defense, delete, assign, unassign;
         Label defenseTitle;
+        VisualElement exercise, exerciseIcon, exerciseAnim, exerciseMax;
+        int exerciseFrame = -2; // the animation frame shown, -1 the still icon
         // The Defense window's toggles in HOI4's order: sprite name, guard flag
         static readonly (string name, int flag)[] Guards =
         {
@@ -122,6 +126,18 @@ namespace Hoi4.Units
                 if (plans.FallbackActive) plans.CancelFallback(); else plans.BeginFallback();
                 e.StopPropagation();
             });
+            exercise = window.Q("bp-exercise");
+            exerciseIcon = exercise.Q("bp-exercise-icon");
+            exerciseAnim = exercise.Q("bp-exercise-anim");
+            exerciseMax = exercise.Q("bp-exercise-max");
+            Hoi4Sprites.Apply(exerciseIcon, Dir + "exercise_icon.png");
+            Hoi4Sprites.Apply(exerciseMax, Dir + "exercise_stop_at_max.png");
+            exerciseMax.style.display = DisplayStyle.None;
+            exercise.RegisterCallback<PointerDownEvent>(e =>
+            {
+                if (e.button == 0) ToggleExercise(e.shiftKey); // the right button does nothing
+                e.StopPropagation();
+            });
             area = window.Q("bp-area");
             Hoi4Sprites.Apply(area, Dir + "area_0.png");
             area.RegisterCallback<PointerDownEvent>(e =>
@@ -181,6 +197,36 @@ namespace Hoi4.Units
             root.Add(window);
         }
 
+        /// <summary>An exercise is the whole army's, like HOI4: every division of the armies the selected own
+        /// divisions belong to, sorted.</summary>
+        static List<ushort> ExerciseUnits(Hoi4BattlePlans plans)
+        {
+            var result = new List<ushort>();
+            var armies = Hoi4Armies.Instance;
+            if (armies == null) return result;
+            var seen = new HashSet<int>();
+            foreach (ushort u in plans.OwnSelection())
+            {
+                var army = armies.ArmyOf(u);
+                if (army != null && seen.Add(army.Id)) result.AddRange(army.Units);
+            }
+            result.Sort();
+            return result;
+        }
+
+        /// <summary>The selected divisions' armies start an exercise (untilTrained: it ends by itself once they are
+        /// trained), or stop when any of their divisions is on one (with shift, already trained ones don't start).</summary>
+        void ToggleExercise(bool untilTrained)
+        {
+            var plans = Hoi4BattlePlans.Instance;
+            var gs = Engine.ArchonEngine.Instance?.GameState;
+            var selected = ExerciseUnits(plans);
+            if (gs == null || selected.Count == 0) return;
+            bool any = false;
+            foreach (ushort u in selected) any |= Hoi4Training.IsTraining(u);
+            gs.TryExecuteCommand(new SetTrainingCommand { CountryId = selectedCountry(selected), UnitIds = selected, On = !any, UntilTrained = untilTrained }, out _);
+        }
+
         void OnDestroy() { Hoi4UiHover.Remove(this); Hoi4UiHover.Remove(Guards); }
 
         static ushort selectedCountry(List<ushort> units)
@@ -208,6 +254,25 @@ namespace Hoi4.Units
             {
                 fallbackActive = plans.FallbackActive;
                 Hoi4Sprites.Apply(fallback, Dir + (fallbackActive ? "fallback_1.png" : "fallback_0.png"));
+            }
+            if (show)
+            {
+                // The exercise button: while a selected division exercises, HOI4's turning cog
+                // (GFX_exercise_icon_anim_strip_big: 20 frames at 7 fps, real seconds: presentation); the mark
+                // shows when one stops by itself once trained
+                bool any = false, untilTrained = false;
+                foreach (ushort u in ExerciseUnits(plans)) { any |= Hoi4Training.IsTraining(u); untilTrained |= Hoi4Training.StopsWhenTrained(u); }
+                int frame = any ? Mathf.FloorToInt(Time.unscaledTime * 7f) % 20 : -1;
+                if (frame != exerciseFrame)
+                {
+                    exerciseFrame = frame;
+                    exerciseIcon.style.display = any ? DisplayStyle.None : DisplayStyle.Flex;
+                    exerciseAnim.style.display = any ? DisplayStyle.Flex : DisplayStyle.None;
+                    if (any) Hoi4Sprites.Apply(exerciseAnim, Dir + $"exercise_anim_{frame}.png");
+                }
+                exerciseMax.style.display = untilTrained ? DisplayStyle.Flex : DisplayStyle.None;
+                if (global::Utils.KeyboardFocus.KeyDown(KeyCode.K))
+                    ToggleExercise(Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift));
             }
             if (show && areaActive != plans.AreaActive)
             {

@@ -212,8 +212,8 @@ namespace Hoi4.Units
                 if (fighting.Contains(d.UnitId)) continue;
                 bool moving = units.MovementQueue.IsUnitMoving(d.UnitId) && !units.MovementQueue.IsBlocked(d.UnitId);
                 // low supply caps organisation (down to 35% of max) and slows its recovery (Hoi4Supply); above the cap
-                // it drains at the recovery rate
-                FP orgCap = d.MaxOrganisation * Hoi4.Supply.Hoi4Supply.OrganisationCap(d.UnitId);
+                // it drains at the recovery rate. An exercise holds it at 20% (Hoi4Training)
+                FP orgCap = d.MaxOrganisation * FP.Min(Hoi4.Supply.Hoi4Supply.OrganisationCap(d.UnitId), Hoi4Training.OrganisationCap(d.UnitId));
                 if (d.Organisation > orgCap)
                     d.Organisation = FP.Max(orgCap, d.Organisation - d.MaxOrganisation * RecoveryPerHour);
                 else if (!retreating.Contains(d.UnitId) && d.Organisation < orgCap)

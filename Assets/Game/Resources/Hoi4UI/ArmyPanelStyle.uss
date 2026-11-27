@@ -13,6 +13,10 @@
 .ac-play { position: absolute; left: 37px; top: 2px; width: 43px; height: 23px; }
 .ac-play-anim { position: absolute; left: 37px; top: 3px; width: 44px; height: 20px; }
 .ac-plan-value { position: absolute; left: 38px; top: 3px; width: 15px; height: 21px; }
+/* While the army exercises: btn_stop_training where the plan's stop button is, training_marker (26x26, 29 right
+   of it, 1 up) and icn_exercise_stop_at_max on it (14x14 at 0.8) */
+.ac-exercise { position: absolute; left: 36px; top: 0; width: 26px; height: 26px; }
+.ac-exercise-max { position: absolute; left: 36px; top: 1px; width: 11px; height: 11px; }
 .ac-portrait { position: absolute; left: 9px; top: 7px; width: 61px; height: 82px; background-size: 61px 82px; }
 .ac-frame { position: absolute; left: 0; top: 0; width: 84px; height: 117px; }
 .ac-count { position: absolute; left: 0; top: 86px; width: 84px; height: 16px; font-size: 15px; -unity-text-align: middle-center; color: rgb(235, 235, 225); }

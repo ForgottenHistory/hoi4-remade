@@ -215,6 +215,7 @@ namespace Hoi4.Units
             Hoi4UnitCounters.Instance?.MarkDirtyNextFrame(); // the low supply crates follow the day's ratios (drawn a frame later)
             Hoi4.Supply.Hoi4SupplyMapMode.Refresh(); // and the supply map mode, at once
             Measure(4, () => Hoi4Combat.Instance?.SimulateDay()); // entrenchment
+            Hoi4Training.SimulateDay(Engine.ArchonEngine.Instance.GameState, Hoi4Divisions.Instance); // exercises: experience (cheap: only the divisions on one)
             Hoi4.Modifiers.Hoi4Stability.SimulateDay(); // landmarks to their province's controller (cheap: only on control changes)
             Measure(12, () => Hoi4.Construction.Hoi4Construction.Instance?.SimulateDay()); // civilian factories build; new factories count from here
             Measure(10, () => Hoi4.Production.Hoi4Production.Instance?.SimulateDay()); // factories to lines, output into the stockpiles

@@ -2558,6 +2558,8 @@ def convert_army_cards(hoi4: Path, out: Path):
     # execute button while the plan runs (12 frames, 24 fps)
     for name, spr in (("exec_play", "GFX_execute_button_play_small"), ("exec_stop", "GFX_execute_button_stop_small"),
                       ("exec_anim", "GFX_active_battleplan_anim"),
+                      # an army on exercise: the turning cog (20 frames, 7 fps) and the stop-when-trained mark
+                      ("exercise", "GFX_exercise_icon_anim_strip"), ("exercise_stop_at_max", "GFX_exercise_stop_at_max"),
                       ("plan_value", "GFX_plan_value_strip")):   # plan grade over the play button: -, !, :, tick
         for i, fr in enumerate(gui.sprite_frames(hoi4, sprites, spr)):
             save(f"{name}_{i}", fr)
@@ -2582,6 +2584,10 @@ def convert_battleplan_gfx(hoi4: Path, out: Path):
                       ("garr_vp", "GFX_garr_vp"), ("garr_port", "GFX_garr_port"), ("garr_coastline", "GFX_garr_coastline"),
                       ("garr_airbase", "GFX_garr_airbase"), ("garr_borders", "GFX_garr_borders"), ("garr_fort", "GFX_garr_fort"),
                       ("garr_rail", "GFX_garr_rail"), ("garr_facility", "GFX_garr_facility"),
+                      # the exercise button: the rifles on their cog, the cog turning while the divisions
+                      # exercise (20 frames, 7 fps), the stop-when-trained mark
+                      ("exercise_icon", "GFX_exercise_icon"), ("exercise_anim", "GFX_exercise_icon_anim_strip_big"),
+                      ("exercise_stop_at_max", "GFX_exercise_stop_at_max"),
                       ("delete", "GFX_BPT_order_delete_btn"),
                       ("assign", "GFX_BPT_order_assign_units_btn"), ("unassign", "GFX_BPT_order_unassign_units_btn")):
         frames = gui.sprite_frames(hoi4, sprites, spr)
@@ -3397,6 +3403,8 @@ def convert_counter_gfx(hoi4: Path, out: Path, tag_ideology, main_types):
         frame(act, i, 14).save(dst / f"action_{name}.png")
     # GFX_mapicon_unit_no_orders: the red exclamation mark left of a division without orders
     Image.open(gi / "mapicons" / "mapicon_unit_no_orders.dds").convert("RGBA").save(dst / "no_orders.png")
+    # GFX_onmap_training_icon: the yellow cog of a division on exercise
+    Image.open(gi / "onmap_in_training_icon.dds").convert("RGBA").save(dst / "training.png")
     convert_supply_strip(hoi4, out)
     for kind in ("org", "str"):
         bar = Image.open(gi / "mapicons" / f"mapicon_bar_{kind}_sprite.dds").convert("RGBA")

@@ -265,6 +265,7 @@ namespace Hoi4.Units
             {
                 var unit = gameState.Units.GetUnit(id);
                 if (unit.unitCount == 0 || unit.countryID != country) continue;
+                if (Hoi4Training.IsTraining(id)) continue; // a division on exercise cannot move (HOI4)
                 own.Add(id);
                 if (unit.provinceID == target) stay.Add(id);
             }

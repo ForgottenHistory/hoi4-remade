@@ -285,6 +285,38 @@ namespace Hoi4.Units
         }
     }
 
+    /// <summary>Divisions start an exercise (UntilTrained: it ends by itself at the experience an exercise can
+    /// give) or stop theirs (Hoi4Training).</summary>
+    public sealed class SetTrainingCommand : BaseCommand
+    {
+        public ushort CountryId;
+        public List<ushort> UnitIds;
+        public bool On;
+        public bool UntilTrained;
+
+        public override bool Validate(GameState gameState) => Hoi4CommandIo.Owned(gameState, CountryId, UnitIds);
+
+        public override void Execute(GameState gameState) => Hoi4Training.Set(gameState, UnitIds, On, UntilTrained);
+
+        public override void Undo(GameState gameState) { }
+
+        public override void Serialize(BinaryWriter w)
+        {
+            w.Write(CountryId);
+            Hoi4CommandIo.WriteIds(w, UnitIds);
+            w.Write(On);
+            w.Write(UntilTrained);
+        }
+
+        public override void Deserialize(BinaryReader r)
+        {
+            CountryId = r.ReadUInt16();
+            UnitIds = Hoi4CommandIo.ReadIds(r);
+            On = r.ReadBoolean();
+            UntilTrained = r.ReadBoolean();
+        }
+    }
+
     /// <summary>The player's fallback line through these provinces (land the army can stand on, in the order they
     /// were dragged over), held by these divisions of the army (those already on another plan stay there).</summary>
     public sealed class PlaceFallbackLineCommand : BaseCommand

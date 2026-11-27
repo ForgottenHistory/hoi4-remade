@@ -3,6 +3,11 @@
     <ui:VisualElement name="bp-window" class="bp-window" picking-mode="Position">
         <ui:VisualElement name="bp-bg" class="bp-bg" picking-mode="Ignore" />
         <ui:Label name="bp-title" class="bp-title" text="Battle Plans" picking-mode="Ignore" />
+        <ui:VisualElement name="bp-exercise" class="bp-exercise" picking-mode="Position">
+            <ui:VisualElement name="bp-exercise-icon" class="bp-exercise-icon" picking-mode="Ignore" />
+            <ui:VisualElement name="bp-exercise-anim" class="bp-exercise-anim" picking-mode="Ignore" />
+            <ui:VisualElement name="bp-exercise-max" class="bp-exercise-max" picking-mode="Ignore" />
+        </ui:VisualElement>
         <ui:VisualElement name="bp-offence" class="bp-btn bp-offence hoi4-button" picking-mode="Position" />
         <ui:VisualElement name="bp-front" class="bp-btn bp-front hoi4-button" picking-mode="Position" />
         <ui:VisualElement name="bp-fallback" class="bp-btn bp-fallback hoi4-button" picking-mode="Position" />
