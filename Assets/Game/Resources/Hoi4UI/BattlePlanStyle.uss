@@ -7,6 +7,13 @@
 .bp-front { left: 275px; }
 .bp-offence { left: 312px; }
 .bp-fallback { left: 391px; } /* btn_order_draw_fallback x 355 */
+.bp-area { left: 427px; }     /* btn_area_defense x 391 */
+/* The Defense window (battleplantools_area_defense_config_window at 250, -50; its background 15 to the left).
+   Its guard toggles are 40x36, 40 apart from x 0, y 31 (set in code). */
+.bp-defense { position: absolute; left: 286px; top: -50px; width: 332px; height: 79px; }
+.bp-defense-bg { position: absolute; left: -15px; top: 0; width: 347px; height: 79px; }
+.bp-defense-title { position: absolute; left: 5px; top: 4px; height: 23px; font-size: 16px; color: rgb(255, 255, 255); -unity-text-align: middle-left; }
+.bp-guard { position: absolute; top: 31px; width: 40px; height: 36px; }
 .bp-disabled { opacity: 0.45; }
 .bp-assign { left: 473px; }   /* HOI4 battleplantools.gui btn_assign_units x 437, +36 like the others */
 .bp-unassign { left: 508px; }

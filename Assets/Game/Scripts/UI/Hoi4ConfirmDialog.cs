@@ -18,7 +18,7 @@ namespace Hoi4.UI
         /// <summary>The dialog is up, or closed this frame (its Escape / Enter shouldn't also reach other screens).</summary>
         public static bool IsOpen => Instance != null && (Instance.open || Instance.closedFrame == Time.frameCount);
 
-        VisualElement dialog;
+        VisualElement dialog, cancel, okButton;
         Label title, text;
         ScrollView scroll;
         Action onOk;
@@ -71,8 +71,10 @@ namespace Hoi4.UI
             scroll = dialog.Q<ScrollView>("cd-scroll");
             Hoi4Scrollbar.ApplyAll(dialog); // HOI4's scrollbars
             text = dialog.Q<Label>("cd-text");
-            dialog.Q("cd-cancel").RegisterCallback<ClickEvent>(_ => Close());
-            dialog.Q("cd-ok").RegisterCallback<ClickEvent>(_ => Accept());
+            cancel = dialog.Q("cd-cancel");
+            okButton = dialog.Q("cd-ok");
+            cancel.RegisterCallback<ClickEvent>(_ => Close());
+            okButton.RegisterCallback<ClickEvent>(_ => Accept());
             dialog.style.display = DisplayStyle.None;
         }
 
@@ -80,12 +82,23 @@ namespace Hoi4.UI
         public void Show(string titleText, string body, Action ok)
         {
             if (dialog == null) return;
+            cancel.style.display = DisplayStyle.Flex;
+            okButton.style.left = StyleKeyword.Null;
             title.text = titleText.ToUpperInvariant();
             text.text = body;
             scroll.scrollOffset = Vector2.zero;
             onOk = ok;
             open = true;
             dialog.style.display = DisplayStyle.Flex;
+        }
+
+        /// <summary>Tell: the title and the text with OK alone, centred (HOI4's warnings).</summary>
+        public void Notice(string titleText, string body)
+        {
+            if (dialog == null) return;
+            Show(titleText, body, null);
+            cancel.style.display = DisplayStyle.None;
+            okButton.style.left = 175f; // the two buttons' middle (ConfirmDialogStyle.uss: 90 and 260)
         }
 
         public void Close()

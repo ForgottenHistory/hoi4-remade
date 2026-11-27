@@ -171,7 +171,7 @@ namespace Hoi4.Units
             get
             {
                 if (!ready || ArmySelection(out var army) == null) return false;
-                foreach (var p in plans) if (!p.IsAI && !p.IsFallback && p.ArmyId == army.Id) return true;
+                foreach (var p in plans) if (!p.IsAI && p.IsFront && p.ArmyId == army.Id) return true;
                 return false;
             }
         }
@@ -183,6 +183,7 @@ namespace Hoi4.Units
             CancelDelete();
             CancelAssign();
             CancelFallback();
+            CancelArea();
             OffensiveActive = true;
             hoverProvince = 0;
             previewStart = 0;
@@ -230,7 +231,8 @@ namespace Hoi4.Units
 
         void UpdateOffensiveTool()
         {
-            if (global::Utils.KeyboardFocus.KeyDown(KeyCode.Escape) || !CanPlanOffensive) { CancelOffensive(); return; }
+            if (global::Utils.KeyboardFocus.KeyDown(KeyCode.Escape)) { EscapeTool(); return; }
+            if (!CanPlanOffensive) { CancelOffensive(); return; }
             ushort province = 0;
             var cam = Camera.main;
             var selector = Engine.ArchonEngine.Instance.ProvinceSelector;
@@ -411,7 +413,7 @@ namespace Hoi4.Units
                 var d = divisions.Get(u);
                 if (d == null || !units.HasUnit(u)) continue;
                 bool planning = !queue.IsUnitMoving(u) && !Hoi4Combat.IsFighting(u)
-                    && planOf.TryGetValue(u, out var plan) && !plan.IsFallback && plan.FrontProvinces != null
+                    && planOf.TryGetValue(u, out var plan) && plan.IsFront && plan.FrontProvinces != null
                     && ArmyHasOffensive(plan.ArmyId)
                     && plan.FrontProvinces.Contains(units.GetUnit(u).provinceID);
                 d.Planning = planning
@@ -433,10 +435,10 @@ namespace Hoi4.Units
         /// <summary>The army's plans run (its play button is on).</summary>
         public bool IsExecuting(int armyId) => executing.Contains(armyId);
 
-        /// <summary>The army has a front line: its play / stop buttons show. A fallback line isn't one (nothing to run).</summary>
+        /// <summary>The army has a front line: its play / stop buttons show. A fallback line or area defence isn't one (nothing to run).</summary>
         public bool HasFrontLine(int armyId)
         {
-            foreach (var p in plans) if (p.ArmyId == armyId && !p.IsFallback) return true;
+            foreach (var p in plans) if (p.ArmyId == armyId && p.IsFront) return true;
             return false;
         }
 

@@ -242,7 +242,8 @@ float4 ArchonOcean(ArchonMapContext ctx)
 
 // Battle plan tool (Hoi4BattlePlans): province-indexed RGBA, rgb = colour, a = 0 none / 0.25 offensive
 // target (yellow, broad "/" bands, a glow along the region's edge) / 0.375 a target picked by the drag
-// (green, the same bands stronger) / 0.5 striped (front line tool) / 1 the province under the cursor. Prototype: Tools/prototypes/battleplan/offensive.py
+// (green, the same bands stronger) / 0.5 striped (front line tool) / 0.625 an area defence order's state
+// (broad dim bands in the given colour) / 1 the province under the cursor. Prototype: Tools/prototypes/battleplan/offensive.py
 TEXTURE2D(_Hoi4PlanTex);
 float _Hoi4PlanActive;
 
@@ -255,7 +256,7 @@ float3 Hoi4PlanOverlay(float3 rgb, ArchonMapContext ctx)
 
     // The province id texture is hard-edged and pixelated; blur the coverage over a small disc so the
     // striped region has soft edges like HOI4's
-    float cover = 0.0, hot = 0.0, offensive = 0.0, picked = 0.0;
+    float cover = 0.0, hot = 0.0, offensive = 0.0, picked = 0.0, area = 0.0;
     float3 tint = 0.0;
     const float radius = 1.0; // map px: a European province is ~9 px across
     [unroll] for (int i = 0; i < 13; i++)
@@ -270,6 +271,7 @@ float3 Hoi4PlanOverlay(float3 rgb, ArchonMapContext ctx)
         hot += plan.a > 0.75 ? 1.0 : 0.0;
         float isPicked = (plan.a > 0.33 && plan.a < 0.42) ? 1.0 : 0.0;
         picked += isPicked;
+        area += (plan.a > 0.56 && plan.a < 0.69) ? 1.0 : 0.0;
         offensive += ((plan.a > 0.15 && plan.a < 0.33) ? 1.0 : 0.0) + isPicked;
         tint += plan.rgb * m;
     }
@@ -279,8 +281,16 @@ float3 Hoi4PlanOverlay(float3 rgb, ArchonMapContext ctx)
     hot /= 13.0;
     offensive /= 13.0;
     picked /= 13.0;
+    area /= 13.0;
 
     float2 mapPx = float2(ctx.uv.x * w, (1.0 - ctx.uv.y) * h);
+    if (area > cover * 0.5)
+    {
+        // An area defence order's states: broad bands like the picked targets', dim, no edge glow
+        float acrossA = -0.4226 * mapPx.x - 0.9063 * mapPx.y;
+        float bandA = smoothstep(-0.35, 0.35, sin(acrossA * 6.2832 / 4.5) + 0.1);
+        return lerp(rgb, tint, cover * (0.04 + 0.5 * bandA));
+    }
     if (offensive > 0.5)
     {
         // HOI4's offensive tool: the enemy's provinces in broad translucent bands rising to the right at

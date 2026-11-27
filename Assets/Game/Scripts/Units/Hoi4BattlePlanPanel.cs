@@ -10,7 +10,9 @@ namespace Hoi4.Units
     /// GAME: the Battle Plans window (HOI4's battleplantools_window). It shows while a division of an army is
     /// selected; the front-line button turns the front line tool of Hoi4BattlePlans on, the offence button
     /// (enabled once the army has a front line) the offensive tool, the fallback button the fallback line tool
-    /// (drag a line across own or allied land for the divisions to hold), the bin the delete tool (click a line or an
+    /// (drag a line across own or allied land for the divisions to hold), the area defence button its tool and
+    /// the Defense window above the bar (what to guard in the clicked states; the kinds without data are
+    /// disabled), the bin the delete tool (click a line or an
     /// offensive to remove it; shift + right click removes every order of the selected divisions' armies at once). Also writes the text on each placed line and objective line: "N Divs, army name", bent
     /// along the line like HOI4 (one element per letter). Like HOI4's, the text is sized in map units, so it
     /// grows and shrinks with the line it is on (labelMapPx, within labelMinPx..labelMaxPx on screen); it hides
@@ -22,7 +24,18 @@ namespace Hoi4.Units
         const string Dir = "gfx/interface/battleplans/";
 
         UIDocument document;
-        VisualElement window, labels, front, offence, fallback, delete, assign, unassign;
+        VisualElement window, labels, front, offence, fallback, area, defense, delete, assign, unassign;
+        Label defenseTitle;
+        // The Defense window's toggles in HOI4's order: sprite name, guard flag
+        static readonly (string name, int flag)[] Guards =
+        {
+            ("vp", Hoi4BattlePlans.GuardVictoryPoints), ("port", Hoi4BattlePlans.GuardPorts), ("coastline", Hoi4BattlePlans.GuardCoast),
+            ("airbase", Hoi4BattlePlans.GuardAirbases), ("borders", Hoi4BattlePlans.GuardBorders), ("fort", Hoi4BattlePlans.GuardForts),
+            ("rail", Hoi4BattlePlans.GuardHubs), ("facility", Hoi4BattlePlans.GuardFacilities),
+        };
+        readonly VisualElement[] guardButtons = new VisualElement[Guards.Length];
+        int shownGuard = -1, shownMin = -1;
+        bool areaActive;
         readonly List<Label> labelPool = new List<Label>();   // one per letter
         readonly Dictionary<char, float> charWidth = new Dictionary<char, float>(); // at BaseFontPx, panel px
         Label probe;                                            // measures letters
@@ -109,6 +122,32 @@ namespace Hoi4.Units
                 if (plans.FallbackActive) plans.CancelFallback(); else plans.BeginFallback();
                 e.StopPropagation();
             });
+            area = window.Q("bp-area");
+            Hoi4Sprites.Apply(area, Dir + "area_0.png");
+            area.RegisterCallback<PointerDownEvent>(e =>
+            {
+                if (e.button != 0) return;
+                var plans = Hoi4BattlePlans.Instance;
+                if (plans.AreaActive) plans.CancelArea(); else plans.BeginArea();
+                e.StopPropagation();
+            });
+            defense = window.Q("bp-defense");
+            defense.style.display = DisplayStyle.None;
+            Hoi4Sprites.Apply(defense.Q("bp-defense-bg"), Dir + "areadef_bg.png");
+            defenseTitle = defense.Q<Label>("bp-defense-title");
+            for (int i = 0; i < Guards.Length; i++)
+            {
+                int flag = Guards[i].flag;
+                var b = guardButtons[i] = defense.Q("bp-guard-" + Guards[i].name);
+                b.style.left = i * 40;
+                if ((flag & Hoi4BattlePlans.GuardAvailable) == 0) { b.AddToClassList("bp-disabled"); b.pickingMode = PickingMode.Ignore; }
+                b.RegisterCallback<PointerDownEvent>(e =>
+                {
+                    if (e.button != 0) return;
+                    Hoi4BattlePlans.Instance.ToggleAreaGuard(flag);
+                    e.StopPropagation();
+                });
+            }
             delete.RegisterCallback<PointerDownEvent>(e =>
             {
                 var plans = Hoi4BattlePlans.Instance;
@@ -133,7 +172,7 @@ namespace Hoi4.Units
                 if (e.button != 0) return;
                 var plans = Hoi4BattlePlans.Instance;
                 var selected = plans.OwnSelection();
-                if (selected.Count > 0 && Engine.ArchonEngine.Instance?.GameState != null)
+                if (selected.Count > 0 && !plans.SelectionAreaDefended && Engine.ArchonEngine.Instance?.GameState != null)
                     Engine.ArchonEngine.Instance.GameState.TryExecuteCommand(
                         new UnassignFromPlanCommand { CountryId = selectedCountry(selected), UnitIds = selected }, out _);
                 e.StopPropagation();
@@ -142,7 +181,7 @@ namespace Hoi4.Units
             root.Add(window);
         }
 
-        void OnDestroy() => Hoi4UiHover.Remove(this);
+        void OnDestroy() { Hoi4UiHover.Remove(this); Hoi4UiHover.Remove(Guards); }
 
         static ushort selectedCountry(List<ushort> units)
         {
@@ -155,9 +194,11 @@ namespace Hoi4.Units
             if (window == null) return;
             var plans = Hoi4BattlePlans.Instance;
             bool own = plans.HasOwnSelection;
-            bool show = plans.Active || plans.OffensiveActive || plans.FallbackActive || plans.DeleteActive || plans.AssignActive || plans.HasArmyMemberSelected;
+            bool show = plans.Active || plans.OffensiveActive || plans.FallbackActive || plans.AreaActive || plans.DeleteActive || plans.AssignActive || plans.HasArmyMemberSelected;
             window.style.display = show ? DisplayStyle.Flex : DisplayStyle.None;
             Hoi4UiHover.Report(this, window);
+            // The Defense window sticks out above the bar: reported on its own, so a click on it isn't a click on the map
+            Hoi4UiHover.Report(Guards, show && plans.AreaActive ? defense : null);
             if (show && frontActive != plans.Active)
             {
                 frontActive = plans.Active;
@@ -168,16 +209,41 @@ namespace Hoi4.Units
                 fallbackActive = plans.FallbackActive;
                 Hoi4Sprites.Apply(fallback, Dir + (fallbackActive ? "fallback_1.png" : "fallback_0.png"));
             }
+            if (show && areaActive != plans.AreaActive)
+            {
+                areaActive = plans.AreaActive;
+                Hoi4Sprites.Apply(area, Dir + (areaActive ? "area_1.png" : "area_0.png"));
+                defense.style.display = areaActive ? DisplayStyle.Flex : DisplayStyle.None;
+                shownGuard = shownMin = -1;
+            }
+            if (show && areaActive)
+            {
+                int guard = plans.AreaGuard, min = plans.AreaMinDivisions;
+                if (guard != shownGuard)
+                {
+                    shownGuard = guard;
+                    // the sprites' frame 0 is the chosen look (framed), frame 1 the plain one
+                    for (int i = 0; i < Guards.Length; i++)
+                        Hoi4Sprites.Apply(guardButtons[i], Dir + "garr_" + Guards[i].name + ((guard & Guards[i].flag) != 0 ? "_0.png" : "_1.png"));
+                }
+                if (min != shownMin)
+                {
+                    shownMin = min;
+                    defenseTitle.text = $"Defense (Min. divisions: <color=#FFD24A>{min}</color>)";
+                }
+            }
             if (show && assignActive != plans.AssignActive)
             {
                 assignActive = plans.AssignActive;
                 Hoi4Sprites.Apply(assign, Dir + (assignActive ? "assign_1.png" : "assign_0.png"));
             }
-            if (show && own != ownEnabled)
+            // Assign and unassign: greyed out without an own division selected, and for an army on area defence
+            bool canAssign = show && own && !plans.SelectionAreaDefended;
+            if (show && canAssign != ownEnabled)
             {
-                ownEnabled = own;
-                assign.EnableInClassList("bp-disabled", !own);
-                unassign.EnableInClassList("bp-disabled", !own);
+                ownEnabled = canAssign;
+                assign.EnableInClassList("bp-disabled", !canAssign);
+                unassign.EnableInClassList("bp-disabled", !canAssign);
             }
             if (show && deleteActive != plans.DeleteActive)
             {

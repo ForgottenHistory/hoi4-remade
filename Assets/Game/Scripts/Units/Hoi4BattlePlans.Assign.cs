@@ -67,10 +67,11 @@ namespace Hoi4.Units
 
         public void BeginAssign()
         {
-            if (!ready || !HasOwnSelection) return;
+            if (!ready || !HasOwnSelection || SelectionAreaDefended) return;
             if (Active) Cancel();
             if (OffensiveActive) CancelOffensive();
             CancelFallback();
+            CancelArea();
             CancelDelete();
             AssignActive = true;
             dirtyMesh = true;
@@ -112,7 +113,7 @@ namespace Hoi4.Units
             int bestScore = 0;
             foreach (var plan in plans)
             {
-                if (plan.IsAI || plan.IsFallback || plan.ArmyId != o.ArmyId) continue;
+                if (plan.IsAI || !plan.IsFront || plan.ArmyId != o.ArmyId) continue;
                 int overlap = 0;
                 foreach (ushort p in o.FrontSet)
                     if (plan.FrontIndex.ContainsKey(p)) overlap++;
@@ -134,7 +135,7 @@ namespace Hoi4.Units
             if (army == null) return;
             var joining = new List<ushort>();
             foreach (ushort u in unitIds)
-                if (gameState.Units.HasUnit(u)) joining.Add(u);
+                if (gameState.Units.HasUnit(u) && !IsAreaDefended(u)) joining.Add(u); // area defence keeps its whole army
             if (joining.Count == 0) return;
             armies.Add(army, joining); // leaves its old army (no-op for divisions already in it)
 
@@ -170,7 +171,7 @@ namespace Hoi4.Units
             int count = 0;
             foreach (ushort u in unitIds)
             {
-                if (!gameState.Units.HasUnit(u)) continue;
+                if (!gameState.Units.HasUnit(u) || IsAreaDefended(u)) continue; // area defence keeps its whole army
                 manualOrders.Remove(u);
                 unassigned.Add(u);
                 pinnedOffensive.Remove(u);

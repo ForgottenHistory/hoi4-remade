@@ -2577,6 +2577,11 @@ def convert_battleplan_gfx(hoi4: Path, out: Path):
     sprites = gui.load_sprites(hoi4)
     for name, spr in (("bg", "GFX_BPT_bg"), ("offence", "GFX_BPT_order_draw_offence_btn"),
                       ("defence", "GFX_BPT_order_draw_defence_btn"), ("fallback", "GFX_BPT_order_draw_fallback_btn"),
+                      # area defence: its button, the Defense window and its guard toggles (frame 0 off, 1 on)
+                      ("area", "GFX_BPT_order_area_defense_btn"), ("areadef_bg", "GFX_BPT_areadef_conf_bg"),
+                      ("garr_vp", "GFX_garr_vp"), ("garr_port", "GFX_garr_port"), ("garr_coastline", "GFX_garr_coastline"),
+                      ("garr_airbase", "GFX_garr_airbase"), ("garr_borders", "GFX_garr_borders"), ("garr_fort", "GFX_garr_fort"),
+                      ("garr_rail", "GFX_garr_rail"), ("garr_facility", "GFX_garr_facility"),
                       ("delete", "GFX_BPT_order_delete_btn"),
                       ("assign", "GFX_BPT_order_assign_units_btn"), ("unassign", "GFX_BPT_order_unassign_units_btn")):
         frames = gui.sprite_frames(hoi4, sprites, spr)

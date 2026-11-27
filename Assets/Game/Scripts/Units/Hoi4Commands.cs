@@ -254,8 +254,13 @@ namespace Hoi4.Units
             && Hoi4CommandIo.Owned(gameState, CountryId, UnitIds)
             && Hoi4BattlePlans.Instance.HasBorder(CountryId, TargetCountry);
 
-        public override void Execute(GameState gameState) =>
-            Hoi4BattlePlans.Instance.CreatePlan(CountryId, ArmyId, TargetCountry, UnitIds, Province, End);
+        public override void Execute(GameState gameState)
+        {
+            var plans = Hoi4BattlePlans.Instance;
+            plans.DeferMarch = true; // the marches are ordered on the next hour, not in the frame of the click
+            try { plans.CreatePlan(CountryId, ArmyId, TargetCountry, UnitIds, Province, End); }
+            finally { plans.DeferMarch = false; }
+        }
 
         public override void Undo(GameState gameState) { }
 
@@ -294,8 +299,13 @@ namespace Hoi4.Units
             && Hoi4CommandIo.Owned(gameState, CountryId, UnitIds)
             && Hoi4BattlePlans.Instance.AreFallbackProvinces(CountryId, Provinces);
 
-        public override void Execute(GameState gameState) =>
-            Hoi4BattlePlans.Instance.CreateFallbackLine(CountryId, ArmyId, Provinces, UnitIds);
+        public override void Execute(GameState gameState)
+        {
+            var plans = Hoi4BattlePlans.Instance;
+            plans.DeferMarch = true;
+            try { plans.CreateFallbackLine(CountryId, ArmyId, Provinces, UnitIds); }
+            finally { plans.DeferMarch = false; }
+        }
 
         public override void Undo(GameState gameState) { }
 
@@ -313,6 +323,46 @@ namespace Hoi4.Units
             ArmyId = r.ReadInt32();
             Provinces = Hoi4CommandIo.ReadIds(r);
             UnitIds = Hoi4CommandIo.ReadIds(r);
+        }
+    }
+
+    /// <summary>The army's area defence order: the states it guards (all of them; none removes the order) and
+    /// what in them (Hoi4BattlePlans.Guard* flags). A new order replaces the army's lines and offensives.</summary>
+    public sealed class SetAreaDefenseCommand : BaseCommand
+    {
+        public ushort CountryId;
+        public int ArmyId;
+        public List<ushort> States;
+        public int Guard;
+
+        public override bool Validate(GameState gameState) =>
+            Hoi4BattlePlans.Instance != null && Hoi4Armies.Instance?.Get(ArmyId)?.Owner == CountryId
+            && Hoi4BattlePlans.Instance.AreAreaStates(CountryId, ArmyId, States);
+
+        public override void Execute(GameState gameState)
+        {
+            var plans = Hoi4BattlePlans.Instance;
+            plans.DeferMarch = true;
+            try { plans.SetAreaDefense(CountryId, ArmyId, States, Guard); }
+            finally { plans.DeferMarch = false; }
+        }
+
+        public override void Undo(GameState gameState) { }
+
+        public override void Serialize(BinaryWriter w)
+        {
+            w.Write(CountryId);
+            w.Write(ArmyId);
+            Hoi4CommandIo.WriteIds(w, States);
+            w.Write(Guard);
+        }
+
+        public override void Deserialize(BinaryReader r)
+        {
+            CountryId = r.ReadUInt16();
+            ArmyId = r.ReadInt32();
+            States = Hoi4CommandIo.ReadIds(r);
+            Guard = r.ReadInt32();
         }
     }
 

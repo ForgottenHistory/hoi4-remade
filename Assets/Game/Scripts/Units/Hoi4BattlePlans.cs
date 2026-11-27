@@ -26,6 +26,12 @@ namespace Hoi4.Units
         // those (its one front: the ones no enemy has taken) and follows no border. Null: a front line.
         public List<ushort> Line;
         public bool IsFallback => Line != null;
+        // An area defence order (Hoi4BattlePlans.Area): the states the army guards and what in them. Its fronts
+        // are the guarded provinces, most important first. Null: a line.
+        public Hoi4AreaDefense Area;
+        public bool IsArea => Area != null;
+        /// <summary>A front line along a border (offensives start from these; they give the army its play buttons).</summary>
+        public bool IsFront => Line == null && Area == null;
         // Presentation only (the player's plans): the traced border the line is drawn along
         public List<BorderArc> Arcs;                // the border arcs the line follows
         public List<List<Vector3>> Chains;          // the arcs joined into continuous polylines, enemy side on the left of travel
@@ -69,7 +75,8 @@ namespace Hoi4.Units
 
     /// <summary>
     /// GAME: battle plans, HOI4's way of ordering a front: front lines here, offensives in
-    /// Hoi4BattlePlans.Offensives.cs, fallback lines in Hoi4BattlePlans.Fallback.cs. The front line tool (button in
+    /// Hoi4BattlePlans.Offensives.cs, fallback lines in Hoi4BattlePlans.Fallback.cs, area defence in
+    /// Hoi4BattlePlans.Area.cs. The front line tool (button in
     /// Hoi4BattlePlanPanel) follows the cursor: hovering a country shows its border with the player as a green
     /// dashed line and stripes the player's provinces along it; a left click places the line in the colour
     /// of the army of the selected divisions, which get assigned to it unless they already follow another
@@ -134,6 +141,11 @@ namespace Hoi4.Units
         readonly HashSet<ushort> dirtyCountries = new HashSet<ushort>();   // controllers that gained or lost land since the last refresh
         readonly HashSet<ushort> borrowed = new HashSet<ushort>();         // AI divisions off their line while they attack
         readonly HashSet<Hoi4BattlePlan> dirtyPlans = new HashSet<Hoi4BattlePlan>(); // lost a division: spread again this hour
+        // Orders the player just gave: the divisions have their places (the line shows its count at once), but
+        // the marches there, a path search each, are ordered on the next game hour, not in the frame of the click
+        readonly HashSet<Hoi4BattlePlan> pendingMarch = new HashSet<Hoi4BattlePlan>();
+        /// <summary>Set by the commands that give an order while they run: Distribute slots without marching.</summary>
+        public bool DeferMarch;
         bool simReady;                                                     // adjacency loaded: plans work even when drawing them fails
         ushort[] landProvinces;                                            // sorted
         ushort[][] landNeighbours;                                         // per province id: land neighbours, sorted
@@ -481,9 +493,21 @@ namespace Hoi4.Units
         public bool DeleteActive { get; private set; }
         int toolEscapeFrame = -1;
 
-        /// <summary>A plan tool is on, or one was closed with Escape this frame (so Escape does not also clear the
-        /// selection).</summary>
-        public bool ToolOn => Active || OffensiveActive || FallbackActive || DeleteActive || AssignActive || toolEscapeFrame == Time.frameCount;
+        /// <summary>Escape with a plan tool on, like HOI4: the tool goes off and the army is deselected, in one press.</summary>
+        void EscapeTool()
+        {
+            toolEscapeFrame = Time.frameCount;
+            if (Active) Cancel();
+            if (OffensiveActive) CancelOffensive();
+            CancelFallback();
+            CancelArea();
+            CancelDelete();
+            CancelAssign();
+            Hoi4UnitSelection.Instance?.Clear();
+        }
+
+        /// <summary>A plan tool is on, or one was closed with Escape this frame (that press is handled here: EscapeTool).</summary>
+        public bool ToolOn => Active || OffensiveActive || FallbackActive || AreaActive || DeleteActive || AssignActive || toolEscapeFrame == Time.frameCount;
 
         public void BeginDelete()
         {
@@ -491,6 +515,7 @@ namespace Hoi4.Units
             if (Active) Cancel();
             if (OffensiveActive) CancelOffensive();
             CancelFallback();
+            CancelArea();
             CancelAssign();
             DeleteActive = true;
             if (Hoi4UnitCounters.Instance != null) Hoi4UnitCounters.Instance.Hidden = true;
@@ -527,8 +552,10 @@ namespace Hoi4.Units
             CancelDelete();
             CancelAssign();
             CancelFallback();
+            CancelArea();
             if (OffensiveActive) CancelOffensive();
             Active = true;
+            WarnIfAreaDefended();
             lineDrag = false;
             hoverProvince = 0;
             SetPreview(0);
@@ -583,6 +610,7 @@ namespace Hoi4.Units
             Core.Recording.SessionRecorder.Note("plans", "removed", plan.Owner, 0, 0, plan.Country, $"plan {plan.Id}, {plan.Units.Count} divisions released");
             plans.Remove(plan);
             dirtyPlans.Remove(plan);
+            pendingMarch.Remove(plan);
             foreach (ushort u in plan.Units) planOf.Remove(u);
             plan.Units.Clear();
             plan.Slot.Clear();
@@ -591,8 +619,10 @@ namespace Hoi4.Units
         /// <summary>Selection click interceptor while the tool is on. Always consumes the click.</summary>
         public bool OnClick(int button, Vector2 screen)
         {
+            if (ToolOn && Hoi4.UI.Hoi4ConfirmDialog.IsOpen) return true; // a warning is up: it takes the click
             if (OffensiveActive) return OnOffensiveClick(button);
             if (FallbackActive) return OnFallbackClick(button);
+            if (AreaActive) return OnAreaClick(button);
             if (DeleteActive) return OnDeleteClick(button);
             if (AssignActive) return OnAssignClick(button);
             if (!Active) return false;
@@ -642,6 +672,7 @@ namespace Hoi4.Units
             plan.Section = end != 0 ? SectionBetween(all, province, end, out plan.Outside) : StretchAt(all, province);
             var fronts = FrontsOf(plan, all);
             if (fronts.Count == 0) return null;
+            ReplaceAreaDefence(armyId); // a line replaces the army's area defence order
             SetFronts(plan, fronts);
             foreach (ushort u in unitIds)
             {
@@ -665,17 +696,20 @@ namespace Hoi4.Units
         {
             if (!ready) return;
             UpdateHover();
+            UpdateShownArea();
             if (dirtyMesh) { dirtyMesh = false; Rebuild(); }
             if (OffensiveActive) { UpdateOffensiveTool(); return; }
             if (FallbackActive) { UpdateFallbackTool(); return; }
+            if (AreaActive) { UpdateAreaTool(); return; }
             if (DeleteActive || AssignActive)
             {
-                if (global::Utils.KeyboardFocus.KeyDown(KeyCode.Escape)) { toolEscapeFrame = Time.frameCount; CancelDelete(); CancelAssign(); }
+                if (global::Utils.KeyboardFocus.KeyDown(KeyCode.Escape)) EscapeTool();
                 else if (AssignActive && !HasOwnSelection) CancelAssign();
                 return;
             }
             if (!Active) return;
-            if (global::Utils.KeyboardFocus.KeyDown(KeyCode.Escape)) { toolEscapeFrame = Time.frameCount; Cancel(); return; }
+            if (Hoi4.UI.Hoi4ConfirmDialog.IsOpen) return; // the area defence warning is up: its Escape isn't the tool's
+            if (global::Utils.KeyboardFocus.KeyDown(KeyCode.Escape)) { EscapeTool(); return; }
             if (!HasArmySelection) { Cancel(); return; }
 
             ushort province = 0;
@@ -764,8 +798,9 @@ namespace Hoi4.Units
             using (HourHoldMarker.Auto())
                 foreach (var plan in plans)
                 {
+                    bool march = pendingMarch.Remove(plan);
                     if (touched.Contains(plan)) { Distribute(plan); playerTouched |= !plan.IsAI; }
-                    else Hold(plan);
+                    else Hold(plan, force: march); // a new order: everyone to their place, as Distribute would have
                 }
             using (HourOffensivesMarker.Auto())
             {
@@ -1463,6 +1498,7 @@ namespace Hoi4.Units
         {
             if (!ready) { plan.Arcs = new List<BorderArc>(); plan.Chains = new List<List<Vector3>>(); return; }
             if (plan.IsFallback) { TraceFallback(plan); return; }
+            if (plan.IsArea) { TraceArea(plan); return; }
             plan.Arcs = BorderWith(plan.Owner, plan.Country, new HashSet<ushort>(), plan.Section);
             plan.Chains = new List<List<Vector3>>();
             plan.ChainFront.Clear();
@@ -1529,6 +1565,19 @@ namespace Hoi4.Units
             bool any = false;
             foreach (var plan in new List<Hoi4BattlePlan>(plans))
             {
+                if (plan.IsArea)
+                {
+                    // The guarded provinces follow what is held and what borders whom
+                    var guarded = AreaFronts(plan);
+                    if (SameFronts(guarded, plan.Fronts)) continue;
+                    string had = FrontSizes(plan);
+                    SetFronts(plan, guarded);
+                    Core.Recording.SessionRecorder.Note("plans", "line_moved", plan.Owner, 0, 0, 0, $"plan {plan.Id} (area defence): provinces guarded {had} -> {FrontSizes(plan)}");
+                    moved++;
+                    areaStamp++;
+                    Distribute(plan);
+                    continue;
+                }
                 if (plan.IsFallback)
                 {
                     // It stays where it was drawn; only the provinces an enemy took (or lost again) change
@@ -1588,6 +1637,16 @@ namespace Hoi4.Units
             {
                 PaintOffensiveTargets();
                 show = offensiveTargets.Count > 0;
+            }
+            else if (AreaActive)
+            {
+                PaintAreaTool();
+                show = true;
+            }
+            else if (!show && shownArea != null && !ToolOn)
+            {
+                PaintShownArea();
+                show = true;
             }
             else if (show)
             {
@@ -1654,7 +1713,7 @@ namespace Hoi4.Units
             Hoi4Offensive offensive = null;
             var cam = Camera.main;
             var selector = Engine.ArchonEngine.Instance.ProvinceSelector;
-            if (!Active && !OffensiveActive && !FallbackActive && cam != null && selector != null
+            if (!Active && !OffensiveActive && !FallbackActive && !AreaActive && cam != null && selector != null
                 && !global::Map.CameraControllers.BaseCameraController.ScrollCaptured
                 && selector.TryGetMapPointAtScreenPosition(Input.mousePosition, cam, out var world, out _))
             {
@@ -1798,6 +1857,14 @@ namespace Hoi4.Units
             foreach (ushort u in plan.Units) if (units.HasUnit(u)) ids.Add(u);
             ids.Sort(); // deterministic order
             if (ids.Count == 0) return;
+            if (plan.IsArea)
+            {
+                // Guarding provinces isn't holding a line: its own slotting (one division per province first)
+                SlotArea(plan, previous, ids);
+                if (DeferMarch) pendingMarch.Add(plan);
+                else Hold(plan, force: true);
+                return;
+            }
 
             // Which fronts each division can reach by land (a colonial front across the sea can't be walked to)
             var reachCache = plan.Reach;
@@ -2056,7 +2123,8 @@ namespace Hoi4.Units
                     Core.Recording.SessionRecorder.Note("plans", "unreachable", plan.Owner, u, unit.provinceID, 0, $"plan {plan.Id}: can reach none of the {fronts.Count} fronts");
                 }
             var holdSw = System.Diagnostics.Stopwatch.StartNew(); // timing only (slow_distribute note)
-            Hold(plan, force: true);
+            if (DeferMarch) pendingMarch.Add(plan);
+            else Hold(plan, force: true);
             lastHoldMs = holdSw.Elapsed.TotalMilliseconds;
         }
 

@@ -39,7 +39,9 @@ namespace Hoi4.Units
             if (OffensiveActive) CancelOffensive();
             CancelDelete();
             CancelAssign();
+            CancelArea();
             FallbackActive = true;
+            WarnIfAreaDefended();
             hoverProvince = 0;
             EndDrag();
             // The tool's valid provinces (the drag picks among them, like the offensive tool's)
@@ -65,7 +67,8 @@ namespace Hoi4.Units
 
         void UpdateFallbackTool()
         {
-            if (global::Utils.KeyboardFocus.KeyDown(KeyCode.Escape)) { toolEscapeFrame = Time.frameCount; CancelFallback(); return; }
+            if (Hoi4.UI.Hoi4ConfirmDialog.IsOpen) return; // the area defence warning is up
+            if (global::Utils.KeyboardFocus.KeyDown(KeyCode.Escape)) { EscapeTool(); return; }
             if (!HasArmySelection) { CancelFallback(); return; }
             ushort province = 0;
             var cam = Camera.main;
@@ -150,6 +153,7 @@ namespace Hoi4.Units
         public Hoi4BattlePlan CreateFallbackLine(ushort owner, int armyId, List<ushort> provinces, List<ushort> unitIds)
         {
             if (!simReady || !AreFallbackProvinces(owner, provinces)) return null;
+            ReplaceAreaDefence(armyId); // a line replaces the army's area defence order
             var plan = new Hoi4BattlePlan { Id = nextId++, Owner = owner, ArmyId = armyId, Line = new List<ushort>(provinces) };
             SetFronts(plan, FallbackFronts(plan));
             foreach (ushort u in unitIds)
