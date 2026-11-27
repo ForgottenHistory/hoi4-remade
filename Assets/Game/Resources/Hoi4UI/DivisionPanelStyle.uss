@@ -47,6 +47,7 @@
 .dv-bar-dig-in .dv-bar-fill { background-color: rgb(81, 133, 156); }
 .dv-info { --sprite: "gfx/interface/unitpanel/unitinfo.png"; left: 22px; top: 1px; width: 76px; height: 31px; }
 .dv-icon { left: 21px; top: -6px; width: 76px; height: 42px; }
+.dv-attrition { left: 52px; top: 16px; width: 16px; height: 16px; } /* unitview.gui attrition */
 /* unitlist_priority_icon (80, -1): the division's template priority, frame 1 reserve, 2 normal (none), 3 elite */
 .dv-priority { left: 80px; top: -1px; width: 16px; height: 23px; display: none; }
 .dv-priority.reserve { --sprite: "gfx/interface/deployment/unit_priority_0.png"; display: flex; }

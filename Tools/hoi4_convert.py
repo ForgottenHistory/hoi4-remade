@@ -3403,6 +3403,8 @@ def convert_counter_gfx(hoi4: Path, out: Path, tag_ideology, main_types):
         frame(act, i, 14).save(dst / f"action_{name}.png")
     # GFX_mapicon_unit_no_orders: the red exclamation mark left of a division without orders
     Image.open(gi / "mapicons" / "mapicon_unit_no_orders.dds").convert("RGBA").save(dst / "no_orders.png")
+    # GFX_unit_attrition: the skull of a division suffering attrition (white; the map counter tints it red)
+    Image.open(gi / "onmap_attrition.dds").convert("RGBA").save(dst / "attrition.png")
     # GFX_onmap_training_icon: the yellow cog of a division on exercise
     Image.open(gi / "onmap_in_training_icon.dds").convert("RGBA").save(dst / "training.png")
     convert_supply_strip(hoi4, out)

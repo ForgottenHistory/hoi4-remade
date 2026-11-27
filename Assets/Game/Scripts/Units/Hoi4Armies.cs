@@ -120,6 +120,7 @@ namespace Hoi4.Units
                 armyOf[u] = army;
                 added++;
             }
+            StopExercise(new List<ushort>(army.Units)); // a new army isn't on its old armies' exercises
             if (added == 0 && !allowEmpty) return null;
             armies.Add(army);
             Prune();
@@ -131,11 +132,14 @@ namespace Hoi4.Units
         public void Release(IEnumerable<ushort> units)
         {
             bool player = false;
+            var left = new List<ushort>();
             foreach (ushort u in units)
             {
                 if (armyOf.TryGetValue(u, out var a) && a.Owner == Player) player = true;
                 Detach(u);
+                left.Add(u);
             }
+            StopExercise(left); // an exercise is the army's: out of the army, out of the exercise
             Prune();
             if (player) Changed?.Invoke();
         }
@@ -144,16 +148,22 @@ namespace Hoi4.Units
         public int Add(Hoi4Army army, IEnumerable<ushort> units)
         {
             int added = 0;
+            // An exercise is the whole army's (Hoi4Training): the divisions that join take up the army's, or end theirs
+            bool exercising = Hoi4Training.ArmyExercise(army, out bool untilTrained);
+            var joined = new List<ushort>();
             foreach (ushort u in units)
             {
                 if (armyOf.TryGetValue(u, out var current) && current == army) continue;
                 Detach(u);
                 army.Units.Add(u);
                 armyOf[u] = army;
+                joined.Add(u);
                 added++;
             }
             if (added > 0)
             {
+                var gs = Engine.ArchonEngine.Instance?.GameState;
+                if (gs != null) Hoi4Training.Set(gs, joined, exercising, untilTrained);
                 Prune();
                 Notify(army);
             }
@@ -164,6 +174,7 @@ namespace Hoi4.Units
         {
             if (!armies.Remove(army)) return;
             foreach (ushort u in army.Units) armyOf.Remove(u);
+            StopExercise(new List<ushort>(army.Units)); // the army is gone, and its exercise with it
             army.Units.Clear();
             Notify(army);
         }
@@ -174,6 +185,13 @@ namespace Hoi4.Units
             Detach(unitId);
             Prune();
             Notify(army);
+        }
+
+        /// <summary>The divisions' exercise ends (Hoi4Training): they left the army whose exercise it was.</summary>
+        static void StopExercise(List<ushort> units)
+        {
+            var gs = Engine.ArchonEngine.Instance?.GameState;
+            if (gs != null && units.Count > 0) Hoi4Training.Set(gs, units, false, false);
         }
 
         void Detach(ushort unitId)

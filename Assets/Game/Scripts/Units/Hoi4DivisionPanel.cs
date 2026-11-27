@@ -21,6 +21,7 @@ namespace Hoi4.Units
         UIDocument document;
         VisualElement panel;
         bool dirty;
+        int trainingVersion = -1, attritionVersion = -1; // the cards show exercises' and supply's attrition: redrawn when either changes
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Spawn()
@@ -150,6 +151,12 @@ namespace Hoi4.Units
         {
             if (panel == null) return;
             Hoi4UiHover.Report(this, panel); // the wheel scrolls the list, not the map zoom
+            if (trainingVersion != Hoi4Training.Version || attritionVersion != Hoi4.Supply.Hoi4Supply.AttritionVersion)
+            {
+                trainingVersion = Hoi4Training.Version;
+                attritionVersion = Hoi4.Supply.Hoi4Supply.AttritionVersion;
+                dirty = true;
+            }
             if (!dirty) return;
             dirty = false;
             var gameState = Engine.ArchonEngine.Instance != null ? Engine.ArchonEngine.Instance.GameState : null;

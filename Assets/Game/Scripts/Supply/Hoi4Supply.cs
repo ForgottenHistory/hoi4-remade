@@ -165,6 +165,7 @@ namespace Hoi4.Supply
             statePool.Clear(); capacity.Clear(); sourceOrder.Clear();
             prevCtrl = null; prevInfra = null; prevStart.Clear(); dirty.Clear();
             ratio.Clear(); target.Clear(); lowDays.Clear(); sourceDraw.Clear(); byCountry.Clear();
+            attritionOf.Clear();
             AttritionLosses = 0;
             best = null; hops = stamp = settled = null; currentStamp = 0;
             heap.Clear();
@@ -197,6 +198,18 @@ namespace Hoi4.Supply
             ushort c = Hoi4Occupation.ControllerOf(gameState, province);
             return statePool.TryGetValue(PoolKey(Hoi4Regions.State(province), c), out FP v) ? v : FP.Zero;
         }
+
+        // division -> the attrition from low supply and the weather in the last daily step (HOI4's scale: 0.2 =
+        // out of supply). An exercise's is not kept here: it is read live, so it shows and goes with the exercise
+        static readonly Dictionary<ushort, FP> attritionOf = new Dictionary<ushort, FP>();
+
+        /// <summary>Bumped when a division starts or stops suffering supply or weather attrition (presentation).</summary>
+        public static int AttritionVersion { get; private set; }
+
+        /// <summary>The division's attrition (HOI4's scale: 0.05 on exercise, 0.2 out of supply; weather adds): low
+        /// supply's and the weather's as of the last daily step, plus an exercise's while it lasts. 0: none.</summary>
+        public static FP AttritionOf(ushort unitId) =>
+            (attritionOf.TryGetValue(unitId, out FP a) ? a : FP.Zero) + Hoi4.Units.Hoi4Training.Attrition(unitId);
 
         /// <summary>The division's supply ratio (1: fully supplied). 1 for a division never allocated.</summary>
         public static FP Ratio(ushort unitId) => ratio.TryGetValue(unitId, out FP r) ? r : FP.One;
@@ -667,7 +680,7 @@ namespace Hoi4.Supply
             {
                 var gone = new List<ushort>();
                 foreach (ushort id in ratio.Keys) if (!divisions.All.ContainsKey(id)) gone.Add(id);
-                foreach (ushort id in gone) { ratio.Remove(id); target.Remove(id); lowDays.Remove(id); }
+                foreach (ushort id in gone) { ratio.Remove(id); target.Remove(id); lowDays.Remove(id); attritionOf.Remove(id); }
             }
         }
 
@@ -679,7 +692,7 @@ namespace Hoi4.Supply
         /// (0.2). Strength falls to what the equipment left allows.</summary>
         static void Attrition(Hoi4Division d, FP now, FP weather)
         {
-            if (d.Need == null || d.Have == null) return;
+            if (d.Need == null || d.Have == null) { attritionOf.Remove(d.UnitId); return; }
             FP severity = FP.Zero;
             if (now < AttritionThreshold)
             {
@@ -688,6 +701,14 @@ namespace Hoi4.Supply
                 severity = (AttritionThreshold - now) / AttritionThreshold * ramp; // 0..1 of the max attrition
             }
             severity += weather / OutOfSupplyAttrition; // the same scale: 0.2 attrition = 1
+            // what the counters and the division list show (the skull): without the exercise's share, read live
+            FP shown = severity * OutOfSupplyAttrition - Hoi4.Units.Hoi4Training.Attrition(d.UnitId);
+            if (shown > FP.Zero)
+            {
+                if (!attritionOf.ContainsKey(d.UnitId)) AttritionVersion++;
+                attritionOf[d.UnitId] = shown;
+            }
+            else if (attritionOf.Remove(d.UnitId)) AttritionVersion++;
             if (severity <= FP.Zero) return;
             // reliability scales it around an average division's (0.8): HOI4 scales attrition down by reliability
             FP loss = AttritionLossPerDay * severity * FP.Clamp(FP.One - d.Reliability, FP.Zero, FP.One) * 5;

@@ -91,6 +91,16 @@ namespace Hoi4.Units
             if (Hoi4UiAssets.Texture(iconPath) == null) iconPath = Dir + "icons/infantry.png";
             Hoi4Sprites.Apply(icon, iconPath);
             card.Add(icon);
+            // unitview.gui attrition (x 52, y 16): the skull on the unit icon while the division suffers attrition
+            var attrition = Hoi4.Supply.Hoi4Supply.AttritionOf(id);
+            if (attrition > Core.Data.FixedPoint64.Zero)
+            {
+                var skull = Hoi4Sprites.Make("dv-attrition");
+                Hoi4Sprites.Apply(skull, "gfx/counters/attrition.png");
+                skull.pickingMode = PickingMode.Position;
+                skull.tooltip = $"Attrition: {attrition.ToFloat() * 100f:0.#}%" + (Hoi4Training.IsTraining(id) ? " (exercise: 5%)" : "");
+                card.Add(skull);
+            }
             var level = Hoi4Sprites.Make("dv-level");
             int lv = d != null ? d.Level : 0;
             Hoi4Sprites.Apply(level, Dir + $"level_{lv}.png");

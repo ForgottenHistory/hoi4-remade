@@ -15,6 +15,8 @@ namespace Hoi4.Units
     /// pass it by and a march it was ordered on by hand stops. Its battle plan still moves it: a division first
     /// marches to its place on the plan (Hoi4BattlePlans.Hold) and exercises once there; the plan doesn't send it
     /// to attack. A battle ends its exercise.
+    /// An exercise is the whole army's: the button orders it for every division of an army, and a division that
+    /// joins an army takes up its exercise, or ends its own when the army has none (Hoi4Armies.Add).
     /// Started with "until trained" (shift + click), a division's exercise ends by itself at the experience cap;
     /// otherwise it goes on until stopped. Orders are SetTrainingCommand; the daily step is simulation
     /// (id-ordered, fixed point). Not here: the country's army experience from exercises (there is none yet) and
@@ -40,6 +42,16 @@ namespace Hoi4.Units
         public static bool IsTraining(ushort unitId) => training.ContainsKey(unitId);
         /// <summary>On exercise, to end by itself once trained.</summary>
         public static bool StopsWhenTrained(ushort unitId) => training.TryGetValue(unitId, out bool until) && until;
+
+        /// <summary>A division of the army is on exercise; untilTrained: one that ends by itself once trained.</summary>
+        public static bool ArmyExercise(Hoi4Army army, out bool untilTrained)
+        {
+            bool any = false;
+            untilTrained = false;
+            foreach (ushort u in army.Units)
+                if (training.TryGetValue(u, out bool until)) { any = true; untilTrained |= until; }
+            return any;
+        }
 
         /// <summary>The experience an exercise can take a division to: the start of level TRAINING_MAX_LEVEL.</summary>
         public static FP ExperienceCap => Hoi4Division.LevelStart(MaxLevel);

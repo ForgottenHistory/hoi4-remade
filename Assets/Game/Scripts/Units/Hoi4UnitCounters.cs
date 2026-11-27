@@ -84,6 +84,7 @@ namespace Hoi4.Units
             public int ArmyId; // the army of its first division, 0 when unassigned: colours the strip behind the action icon
             public int Action; // 0 idle, 1 moving, 2 defending a battle, 3 attacking
             public bool NoOrders; // a division of an army that follows no battle plan and no order: red exclamation mark
+            public bool Attrition; // one of the player's divisions in it suffers attrition (Hoi4Supply): the red skull
             public Color32 Color; // the country's map colour, the counter's background
             public int Row; // templates of one country stack upwards
             public bool IsBattle; // a battle marker on a border, not a division counter (Count = attacker %)
@@ -139,6 +140,7 @@ namespace Hoi4.Units
 
         Sprite actionMove, actionDefend, actionAttack; // optional: the arrow, shield and double chevron on a counter's right edge
         Sprite noOrders; // optional: GFX_mapicon_unit_no_orders
+        Sprite attritionIcon; // optional: GFX_unit_attrition, the skull
         Sprite trainingIcon; // optional: GFX_onmap_training_icon, the yellow cog of a division on exercise
         readonly Sprite[] supplyCrates = new Sprite[3]; // optional: GFX_unitcounter_supply_status_strip (yellow, orange, red)
         Sprite plate, selectedFrame, ideologyStrip, barOrg, barStr, digits;
@@ -390,6 +392,7 @@ namespace Hoi4.Units
             actionAttack = LoadSprite("gfx/counters/action_attack.png");
             noOrders = LoadSprite("gfx/counters/no_orders.png");
             trainingIcon = LoadSprite("gfx/counters/training.png");
+            attritionIcon = LoadSprite("gfx/counters/attrition.png");
             for (int i = 0; i < supplyCrates.Length; i++) supplyCrates[i] = LoadSprite($"gfx/counters/supply_{i + 1}.png");
             if (plate == null || ideologyStrip == null || barOrg == null || barStr == null || digits == null)
             {
@@ -504,6 +507,7 @@ namespace Hoi4.Units
                 if (armyOf != null && armyOf.Owner != Hoi4Armies.Player && !Hoi4BattlePlans.ShowAIPlans) armyOf = null; // the AI's armies: not shown
                 if (s.ArmyId == 0) s.ArmyId = armyOf?.Id ?? 0;
                 if (u.countryID == viewer) s.LowestSupply = Mathf.Min(s.LowestSupply, Hoi4.Supply.Hoi4Supply.Ratio(id).ToFloat());
+                if (u.countryID == viewer && Hoi4.Supply.Hoi4Supply.AttritionOf(id) > Core.Data.FixedPoint64.Zero) s.Attrition = true;
                 // Like HOI4: in an army but on no battle plan, and not following a manual order
                 var plans = Hoi4BattlePlans.Instance;
                 if (plans != null && armyOf != null && plans.PlanOf(id) == null && !plans.HasManualOrder(id))
@@ -659,7 +663,7 @@ namespace Hoi4.Units
             // nearly every counter was composed anew on every rebuild (10 ms for a thousand). The bars are drawn
             // onto the cached counter instead (ComposeCached)
             return new CounterKey(false, s.Tag, s.Color.r << 16 | s.Color.g << 8 | s.Color.b, type, s.Action, s.ArmyId,
-                                  s.Count, 0, 0, s.Selected, s.NoOrders, s.Supply);
+                                  s.Count, 0, 0, s.Selected, s.NoOrders, s.Supply | (s.Attrition ? 1 << 8 : 0)); // the skull rides in the supply key
         }
 
         void ComposeCached(Stack s, int ox, int oy)
@@ -751,6 +755,9 @@ namespace Hoi4.Units
                 x += advance;
             }
             if (crate != null) BlitScaled(crate, Mathf.RoundToInt(crate.Width * 0.75f), ox + 24, oy - 4);
+            // mapicons.gui attrition: the skull over the top left corner (x -4, y -1), red on the map; last, over the plate
+            if (s.Attrition && attritionIcon != null)
+                Blit(attritionIcon, 0, 0, attritionIcon.Width, attritionIcon.Height, ox - 4, oy - 1, new Color32(235, 40, 30, 255));
         }
 
         // HOI4's battle burst: a red disc with the attackers' chance in it, standing on the border
