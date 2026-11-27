@@ -139,8 +139,8 @@ namespace Hoi4.UI
         void OnLeftClicked(ushort province)
         {
             if (!open || panel == null) return; // in diplomacy mode a left click switches country
-            ushort owner = gameState.ProvinceQueries.GetOwner(province);
-            if (owner != 0) Open(owner);
+            ushort holder = Hoi4.Units.Hoi4Occupation.ControllerOf(gameState, province); // who holds it, like HOI4: not the owner of occupied land
+            if (holder != 0) Open(holder);
         }
 
         void OnRightClicked(ushort province)
@@ -148,9 +148,9 @@ namespace Hoi4.UI
             if (panel == null || !HasCountry()) return;
             // a right-click closes the left-side screens, then enters diplomacy
             Hoi4LeftPanels.CloseAll();
-            ushort owner = gameState.ProvinceQueries.GetOwner(province);
+            ushort holder = Hoi4.Units.Hoi4Occupation.ControllerOf(gameState, province); // the controller, not the owner of occupied land
             selector.ClearSelection(); // right-click always deselects the state, even on empty land
-            if (owner != 0) Open(owner);
+            if (holder != 0) Open(holder);
         }
 
         void Open(ushort country)

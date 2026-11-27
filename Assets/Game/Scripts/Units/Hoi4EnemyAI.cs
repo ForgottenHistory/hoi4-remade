@@ -383,8 +383,11 @@ namespace Hoi4.Units
                 // Short of good odds: now and then an uneven fight, never a hopeless one
                 bool bold = odds < GoodOdds;
                 // Holding fronts: only a bulge into our line (the target borders at least two of our provinces) at
-                // crushing odds (StrongOdds, or empty); a front that takes every good chance never settles
-                if (!onMain && !breakout && (odds < StrongOdds || OwnNeighbours(t, ctrl, country) < 2))
+                // crushing odds (StrongOdds); a front that takes every good chance never settles. A province nobody
+                // defends is walked into wherever it lies: the bulge rule left empty land untaken where it touched
+                // our line with one province only (the foot of Italy, the rest of Greece)
+                bool undefended = defendersOf[t].Count == 0;
+                if (!onMain && !breakout && !undefended && (odds < StrongOdds || OwnNeighbours(t, ctrl, country) < 2))
                 {
                     turnedDown++;
                     if (odds > bestRejected) bestRejected = odds;

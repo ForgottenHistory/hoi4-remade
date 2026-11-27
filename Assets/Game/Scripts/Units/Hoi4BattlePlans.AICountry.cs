@@ -27,7 +27,8 @@ namespace Hoi4.Units
     ///   idle on landmasses with more than they need, shipped to its port nearest the theatre that needs most
     ///   (ShipReserves; naval transfer between ports, Hoi4MovementRules). Landed, they are reserve there and the
     ///   armies take them as usual. Budgets stay per landmass: the sea only moves what a landmass has spare.
-    /// - Posture: the main effort attacks while its armies have AttackRatio times the enemy facing it; the rest hold.
+    /// - Posture: the main effort attacks while its armies have AttackRatio times the enemy facing it; another
+    ///   theatre attacks once it has OverwhelmRatio times them; the rest hold.
     /// - Armies: ceil(budget / ArmySize) per theatre, each holding a contiguous section of its front. Sections
     ///   carry over from the day before by nearness (each front province takes the army of the nearest earlier
     ///   front province within CarryHops), then the smallest army merges away or the largest splits until the
@@ -67,7 +68,8 @@ namespace Hoi4.Units
         static readonly FP HomeScale = FP.FromInt(10);     // danger 0.5 at a route home costing 10 (about 10 plains provinces)
         static readonly FP HoldMin = FP.FromFraction(1, 2); // a front's need: the enemy facing it times HoldMin (far from home) ...
         static readonly FP HoldMax = FP.FromFraction(3, 2); // ... up to HoldMax (at our core victory points)
-        static readonly FP AttackRatio = FP.FromFraction(3, 2); // the main effort wants this many per enemy division facing it, and attacks only with them
+        static readonly FP AttackRatio = FP.FromFraction(3, 2); // the main effort wants this many per enemy div
+        static readonly FP OverwhelmRatio = FP.FromInt(2);      // any other theatre attacks at this many per enemy division facing it, and attacks only with them
         static readonly FP ScoreToSwitch = FP.FromFraction(3, 2);
         static readonly FP ProgressBase = FP.FromFraction(1, 4);
         // supply: a theatre takes at most what its front provinces feed (HOI4 AI_FRONT_DIVISIONS_PER_SUPPLY_POINT 1.0,
@@ -157,8 +159,9 @@ namespace Hoi4.Units
         /// <summary>The enemy an AI country's main effort is against (0: none).</summary>
         public ushort MainEffort(ushort country) => aiStates.TryGetValue(country, out var s) ? s.MainEnemy : (ushort)0;
 
-        /// <summary>The province is next to a section of an army whose theatre attacks (the main effort, with
-        /// enough divisions for it): Hoi4EnemyAI attacks there; elsewhere the country holds.</summary>
+        /// <summary>The province is next to a section of an army whose theatre attacks (the main effort with
+        /// enough divisions for it, or another theatre that overwhelms what faces it): Hoi4EnemyAI attacks there;
+        /// elsewhere the country holds.</summary>
         public bool IsAttackFront(ushort country, ushort province)
         {
             if (!aiStates.TryGetValue(country, out var s) || s.AttackArmies.Count == 0) return false;
@@ -522,8 +525,10 @@ namespace Hoi4.Units
         }
 
         /// <summary>Posture: the main effort attacks while its armies have AttackRatio times the enemy divisions
-        /// facing it; every other theatre (and a main effort short of that) holds (Hoi4EnemyAI: only flattening
-        /// bulges at crushing odds).</summary>
+        /// facing it. Another theatre attacks too once it has OverwhelmRatio times them (none facing it counts): a
+        /// recording had Germany's main effort on a 2-province front with 9 divisions while 91 divisions on its two
+        /// other fronts against the same Italy stood still for months. A theatre short of its ratio holds
+        /// (Hoi4EnemyAI: only empty provinces and bulges at crushing odds).</summary>
         void UpdatePosture(AIState st, List<Theatre> theatres)
         {
             var armies = Hoi4Armies.Instance;
@@ -532,7 +537,7 @@ namespace Hoi4.Units
             {
                 int have = 0;
                 foreach (int a in th.Armies) have += armies.Get(a)?.Units.Count ?? 0;
-                th.Attacking = th.Main && FP.FromInt(have) >= FP.FromInt(th.Facing) * AttackRatio;
+                th.Attacking = have > 0 && FP.FromInt(have) >= FP.FromInt(th.Facing) * (th.Main ? AttackRatio : OverwhelmRatio);
                 if (th.Attacking) foreach (int a in th.Armies) st.AttackArmies.Add(a);
             }
         }
