@@ -1,9 +1,12 @@
 <ui:UXML xmlns:ui="UnityEngine.UIElements">
-    <!-- One production line (countryproductionlineview.gui production_military_line_entry, 500 x 111) -->
+    <!-- One production line (countryproductionlineview.gui production_military_line_entry, 500 x 111). With the
+         "collapsed" class it is production_military_line_entry_collapsed (500 x 63): ProductionPanelStyle.uss moves
+         and hides the parts. -->
     <ui:VisualElement class="pl-entry" picking-mode="Position">
         <ui:VisualElement class="spr pl-bg" picking-mode="Ignore" />
         <ui:VisualElement class="spr pl-priority-frame" picking-mode="Ignore" />
         <ui:Label name="pl-priority" class="hoi4-label center pl-priority" picking-mode="Ignore" />
+        <ui:VisualElement name="pl-expand" class="spr hoi4-button pl-expand" picking-mode="Position" />
         <ui:Label name="pl-name" class="hoi4-label pl-name" picking-mode="Ignore" />
 
         <ui:VisualElement class="spr pl-eff-icon" picking-mode="Ignore" />
@@ -23,7 +26,9 @@
         <ui:VisualElement name="pl-delete" class="spr hoi4-button pl-delete" picking-mode="Position" />
 
         <ui:VisualElement class="spr pl-equipment-bg" picking-mode="Ignore" />
+        <ui:VisualElement name="pl-outdated" class="spr pl-outdated" picking-mode="Ignore" />
         <ui:VisualElement name="pl-picture" class="spr pl-picture" picking-mode="Ignore" />
+        <ui:VisualElement name="pl-role" class="spr pl-role" picking-mode="Ignore" />
         <ui:Label name="pl-general" class="hoi4-label pl-general" picking-mode="Ignore" />
         <ui:VisualElement class="spr pl-progress-bg" picking-mode="Ignore" />
         <ui:VisualElement name="pl-progress" class="pl-progress-clip" picking-mode="Ignore">
@@ -38,7 +43,9 @@
 
         <ui:VisualElement name="pl-x10" class="spr hoi4-button pl-x10" picking-mode="Position" />
         <ui:VisualElement name="pl-x5" class="spr hoi4-button pl-x5" picking-mode="Position" />
-        <ui:VisualElement name="pl-grid" class="pl-grid" picking-mode="Ignore" />
+        <!-- factories_grid: hovered and clicked as a whole (Hoi4ProductionPanel), the slots do not pick -->
+        <ui:VisualElement name="pl-grid" class="pl-grid" picking-mode="Position" />
         <ui:VisualElement name="pl-glow" class="spr pl-glow" picking-mode="Ignore" />
+        <ui:VisualElement name="pl-resources" class="pl-resources" picking-mode="Ignore" />
     </ui:VisualElement>
 </ui:UXML>

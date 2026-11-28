@@ -69,6 +69,9 @@ namespace Hoi4.Production
     /// - Output: per active factory POWERED_FACTORY_SPEED_MIL 4.5 IC x its efficiency x (1 + industrial_capacity_factory)
     ///   a day. Whole units come out once the line's progress reaches the equipment's build_cost_ic; the rest carries
     ///   over.
+    /// - Assigning: a line keeps the factories it has. Asking for more takes only free factories, never those of the
+    ///   lines below; what it asks for beyond them waits (a placeholder for a future factory) and is filled in
+    ///   priority order as factories come free or are built. Factories the country loses come off the bottom line first.
     /// - First day: until the first game day has passed, factories move freely between the 1936 lines: one added to
     ///   such a line starts at the line's starting efficiency and one taken off costs nothing (HOI4 lets the player
     ///   rearrange the start lines). A line made that day starts at the base like any other new line.
@@ -78,7 +81,12 @@ namespace Hoi4.Production
     /// - Modifiers: the country's ideas and researched technologies (Hoi4Modifiers, ProductionRates), updated when they
     ///   change. Rules measured on a real game (Tools/reference/hoi4_production_modifiers.py).
     /// - Stability's factory output comes in as a modifier too (Hoi4Stability).
-    /// - Not modelled: strategic resources and trade, MIO bonuses, equipment variants
+    /// - Outdated equipment: a country knows what it builds now and the older versions of it (the parents; for tank
+    ///   designs its own older designs of the archetype). The older ones are marked outdated, as is what research
+    ///   replaces; the player can mark or unmark any of them (SetEquipmentObsoleteCommand). Outdated equipment can
+    ///   still get a line; the mark only says how the production screen shows it.
+    /// - Resources are shown only (the production screen's balance): lacking one costs nothing yet.
+    /// - Not modelled: strategic resources' penalty and trade, MIO bonuses, equipment variants
     ///   and switching a line's equipment (retention), licences, naval and air production.
     /// Changes come only through the commands (Hoi4ProductionCommands); the AI (Hoi4ProductionAI) uses the same ones.
     /// Countries, lines and states go in id or list order: the same on every machine.
@@ -100,13 +108,20 @@ namespace Hoi4.Production
         public static Hoi4Production Instance { get; private set; }
 
         /// <summary>What a country can build of an archetype: the equipment, its cost, and for the production screen
-        /// its design name (FRA "MAS-36"), general name ("Infantry Equipment I") and picture (a data-directory path).</summary>
-        public struct Buildable { public string Equipment; public FP Cost; public string Name, General, Picture; }
+        /// its design name (FRA "MAS-36"), general name ("Infantry Equipment I"), picture (a data-directory path) and
+        /// the resources each factory building it uses (shown only; null when unknown).</summary>
+        public struct Buildable
+        {
+            public string Equipment; public FP Cost; public string Name, General, Picture;
+            public IReadOnlyDictionary<string, int> Resources;
+        }
 
         sealed class CountryProduction
         {
             public readonly List<ProductionLine> Lines = new List<ProductionLine>();
             public readonly Dictionary<int, Buildable> Buildable = new Dictionary<int, Buildable>();
+            public readonly Dictionary<string, int> Known = new Dictionary<string, int>(); // equipment -> archetype index
+            public readonly HashSet<string> Obsolete = new HashSet<string>();              // marked outdated
             public int NextLineId = 1;
             public int Factories;
             public readonly ProductionRates Rates = new ProductionRates();
@@ -205,8 +220,78 @@ namespace Hoi4.Production
             {
                 Equipment = equipment, Cost = e?.Cost ?? FP.Zero, Name = Hoi4EquipmentCatalog.Name(tag, equipment),
                 General = e?.General ?? equipment, Picture = Hoi4EquipmentCatalog.Picture(tag, equipment),
+                Resources = e?.Resources,
             };
         }
+
+        // ---- known and outdated equipment ----------------------------------------------------------------
+
+        /// <summary>The country knows EQUIPMENT (it builds it now, or a line does) and with it the older versions:
+        /// its parents, for a tank design the owner's older designs of the archetype. The older ones are outdated.</summary>
+        void Learn(CountryProduction c, int archetype, string equipment)
+        {
+            if (string.IsNullOrEmpty(equipment)) return;
+            c.Known[equipment] = archetype;
+            var e = Hoi4EquipmentCatalog.Get(equipment);
+            if (e == null) return;
+            void Older(Hoi4EquipmentCatalog.Entry o)
+            {
+                if (o.Cost <= FP.Zero || o.Legacy || c.Known.ContainsKey(o.Name)) return;
+                c.Known[o.Name] = archetype;
+                c.Obsolete.Add(o.Name);
+            }
+            int guard = 0;
+            for (var p = Hoi4EquipmentCatalog.Get(e.Parent); p != null && p.Archetype == e.Archetype && guard++ < 16;
+                 p = Hoi4EquipmentCatalog.Get(p.Parent))
+                Older(p);
+            if (e.IsDesign && e.Owner != null)
+                foreach (var d in Hoi4EquipmentCatalog.All)
+                    if (d.IsDesign && d.Owner == e.Owner && d.Archetype == e.Archetype && Hoi4EquipmentCatalog.Compare(e, d) > 0)
+                        Older(d);
+        }
+
+        /// <summary>The equipment the country can put on a line: what it builds now and the older versions, by
+        /// archetype, the newest first.</summary>
+        public List<string> KnownEquipment(ushort country)
+        {
+            var list = new List<string>();
+            if (!countries.TryGetValue(country, out var c)) return list;
+            list.AddRange(c.Known.Keys);
+            list.Sort((x, y) =>
+            {
+                int ax = c.Known[x], ay = c.Known[y];
+                if (ax != ay) return ax.CompareTo(ay);
+                var ex = Hoi4EquipmentCatalog.Get(x);
+                var ey = Hoi4EquipmentCatalog.Get(y);
+                int age = ex != null && ey != null ? Hoi4EquipmentCatalog.Compare(ey, ex) : 0;
+                return age != 0 ? age : string.CompareOrdinal(x, y);
+            });
+            return list;
+        }
+
+        /// <summary>The archetype index of an equipment the country knows, -1 when it does not.</summary>
+        public int ArchetypeOf(ushort country, string equipment) =>
+            equipment != null && countries.TryGetValue(country, out var c) && c.Known.TryGetValue(equipment, out int a) ? a : -1;
+
+        /// <summary>The equipment is marked outdated (by research replacing it, or by the country).</summary>
+        public bool IsObsolete(ushort country, string equipment) =>
+            equipment != null && countries.TryGetValue(country, out var c) && c.Obsolete.Contains(equipment);
+
+        /// <summary>Mark an equipment the country knows outdated, or current again.</summary>
+        public bool SetObsolete(ushort country, string equipment, bool obsolete)
+        {
+            if (!countries.TryGetValue(country, out var c) || equipment == null || !c.Known.ContainsKey(equipment)) return false;
+            if (!(obsolete ? c.Obsolete.Add(equipment) : c.Obsolete.Remove(equipment))) return false;
+            Core.Recording.SessionRecorder.Note("production", "obsolete", country, 0, 0, 0,
+                $"{equipment} marked {(obsolete ? "outdated" : "current")}");
+            LinesChanged?.Invoke(country);
+            return true;
+        }
+
+        /// <summary>A line for this equipment can be added: the country knows it and has room for a line.</summary>
+        public bool CanAddLine(ushort country, string equipment) =>
+            IsReady && countries.TryGetValue(country, out var c) && equipment != null && c.Known.ContainsKey(equipment)
+            && c.Lines.Count < MaxLines && Describe(country, equipment).Cost > FP.Zero;
 
         // ---- research unlocks ---------------------------------------------------------------------------
 
@@ -224,6 +309,9 @@ namespace Hoi4.Production
                 if (a < 0) continue; // an archetype no sub-unit uses
                 if (c.Buildable.TryGetValue(a, out var now) && !Hoi4EquipmentCatalog.IsNewer(eq, now.Equipment)) continue;
                 c.Buildable[a] = Describe(country, eq);
+                if (now.Equipment != null) c.Obsolete.Add(now.Equipment); // replaced: outdated
+                Learn(c, a, eq);
+                c.Obsolete.Remove(eq);
                 any = true;
                 Core.Recording.SessionRecorder.Note("production", "unlock", country, 0, 0, 0,
                     $"{eq} ({def.Id}) replaces {(now.Equipment ?? "nothing")} for new lines");
@@ -238,6 +326,9 @@ namespace Hoi4.Production
             if (!countries.TryGetValue(country, out var c)) return;
             c.Buildable.TryGetValue(archetype, out var now);
             c.Buildable[archetype] = Describe(country, equipment);
+            if (now.Equipment != null && now.Equipment != equipment) c.Obsolete.Add(now.Equipment); // replaced: outdated
+            Learn(c, archetype, equipment);
+            c.Obsolete.Remove(equipment);
             Core.Recording.SessionRecorder.Note("production", "unlock", country, 0, 0, 0,
                 $"{equipment} ({why}) replaces {(now.Equipment ?? "nothing")} for new lines");
             LinesChanged?.Invoke(country);
@@ -361,6 +452,7 @@ namespace Hoi4.Production
                                 Equipment = (string)e.Value["equipment"], Cost = cost,
                                 Name = (string)e.Value["name"] ?? e.Name, General = (string)e.Value["general"] ?? e.Name,
                                 Picture = string.IsNullOrEmpty(sprite) ? null : $"gfx/interface/production/equipment/{sprite}.png",
+                                Resources = Hoi4EquipmentCatalog.Get((string)e.Value["equipment"])?.Resources,
                             };
                     }
                 if (p.Value["production"] is JArray list)
@@ -381,8 +473,19 @@ namespace Hoi4.Production
                         line.StartEfficiency = eff;
                         cp.Lines.Add(line);
                         if (!cp.Buildable.ContainsKey(a))
-                            cp.Buildable[a] = new Buildable { Equipment = line.Equipment, Cost = cost, Name = line.Equipment, General = line.Equipment };
+                            cp.Buildable[a] = new Buildable
+                            {
+                                Equipment = line.Equipment, Cost = cost, Name = line.Equipment, General = line.Equipment,
+                                Resources = Hoi4EquipmentCatalog.Get(line.Equipment)?.Resources,
+                            };
                         lineCount++;
+                    }
+                foreach (var kv in cp.Buildable) Learn(cp, kv.Key, kv.Value.Equipment);
+                foreach (var l in cp.Lines) // a 1936 line may build something older than what the country builds now
+                    if (!cp.Known.ContainsKey(l.Equipment))
+                    {
+                        Learn(cp, l.Archetype, l.Equipment);
+                        cp.Obsolete.Add(l.Equipment);
                     }
                 countries[country] = cp;
             }
@@ -416,7 +519,9 @@ namespace Hoi4.Production
             }
         }
 
-        /// <summary>Lines take factories top-down (Active). Each line keeps an efficiency slot per requested factory:
+        /// <summary>Lines keep the factories they have (Active, up to what they ask for); when the country has fewer,
+        /// the bottom lines lose theirs first; the free ones then go top-down to the lines asking for more. So a line
+        /// asking for more never takes a factory from a line below. Each line keeps an efficiency slot per requested factory:
         /// a slot that loses its factory (it was active, now the lines above took it or the country lost it) drops to
         /// the base efficiency, a newly requested slot starts there, a request lowered drops slots off the end. Slots
         /// waiting for a factory keep their value, so a line that has not had its factories yet (the 1936 lines before
@@ -427,12 +532,27 @@ namespace Hoi4.Production
             foreach (var kv in countries)
             {
                 factoryCount.TryGetValue(kv.Key, out int left);
-                foreach (var l in kv.Value.Lines)
+                var lines = kv.Value.Lines;
+                var keep = new int[lines.Count];
+                for (int i = 0; i < lines.Count; i++) // what each line holds on to
                 {
+                    keep[i] = System.Math.Min(lines[i].Active, System.Math.Min(lines[i].Requested, MaxFactoriesPerLine));
+                    left -= keep[i];
+                }
+                for (int i = lines.Count - 1; i >= 0 && left < 0; i--) // factories lost: off the bottom first
+                {
+                    int drop = System.Math.Min(keep[i], -left);
+                    keep[i] -= drop;
+                    left += drop;
+                }
+                for (int i = 0; i < lines.Count; i++)
+                {
+                    var l = lines[i];
                     int was = l.Active;
                     int slots = System.Math.Min(l.Requested, MaxFactoriesPerLine);
-                    l.Active = System.Math.Max(0, System.Math.Min(slots, left));
-                    left -= l.Active;
+                    int more = System.Math.Max(0, System.Math.Min(slots - keep[i], left)); // free ones, top-down
+                    l.Active = keep[i] + more;
+                    left -= more;
                     if (l.Efficiency.Count > slots) l.Efficiency.RemoveRange(slots, l.Efficiency.Count - slots);
                     // first day: a 1936 line's new or freed slots stay at its starting efficiency. Later a new
                     // slot starts at the country's start efficiency; a freed one keeps its efficiency and loses
@@ -440,7 +560,7 @@ namespace Hoi4.Production
                     bool firstDay = day == 0 && l.StartEfficiency > FP.Zero;
                     FP fresh = firstDay ? l.StartEfficiency : l.Rates.Start;
                     while (l.Efficiency.Count < slots) l.Efficiency.Add(fresh);
-                    if (firstDay) for (int i = l.Active; i < was && i < l.Efficiency.Count; i++) l.Efficiency[i] = fresh;
+                    if (firstDay) for (int s = l.Active; s < was && s < l.Efficiency.Count; s++) l.Efficiency[s] = fresh;
                 }
             }
         }
@@ -525,12 +645,14 @@ namespace Hoi4.Production
         public bool CanAddLine(ushort country, int archetype) =>
             IsReady && countries.TryGetValue(country, out var c) && c.Buildable.ContainsKey(archetype) && c.Lines.Count < MaxLines;
 
-        /// <summary>A new line at the bottom of the queue. Returns its id (0 when not possible).</summary>
-        public int AddLine(ushort country, int archetype, int factories)
+        /// <summary>A new line at the bottom of the queue, building what the country builds of the archetype now, or
+        /// EQUIPMENT when given (an outdated one it knows). Returns its id (0 when not possible).</summary>
+        public int AddLine(ushort country, int archetype, int factories, string equipment = null)
         {
-            if (!CanAddLine(country, archetype)) return 0;
+            if (equipment != null ? !CanAddLine(country, equipment) : !CanAddLine(country, archetype)) return 0;
             var c = countries[country];
-            var b = c.Buildable[archetype];
+            if (equipment != null) archetype = c.Known[equipment];
+            var b = equipment != null ? Describe(country, equipment) : c.Buildable[archetype];
             var line = new ProductionLine
             {
                 Id = c.NextLineId++, Archetype = archetype, Equipment = b.Equipment, Cost = b.Cost,

@@ -1230,8 +1230,9 @@ def terrain_modifiers(unit_items):
 
 
 def load_equipment_info(hoi4: Path):
-    """{equipment name: {"archetype", "cost"}} for every equipment in common/units/equipment: its archetype (itself
-    for an archetype) and build_cost_ic, inherited from `parent`, then the archetype, when it has none."""
+    """{equipment name: {"archetype", "cost", "resources"}} for every equipment in common/units/equipment: its
+    archetype (itself for an archetype), build_cost_ic and resources ({"steel": 2}: what each factory building it
+    uses), inherited from `parent`, then the archetype, when it has none."""
     entries = {}
     for f in sorted((hoi4 / "common" / "units" / "equipment").glob("*.txt")):
         for _, _, block in parse_pdx(read_text(f)):
@@ -1248,7 +1249,21 @@ def load_equipment_info(hoi4: Path):
                     year = 0
                 entries[name] = {"archetype": name if get(eq, "is_archetype") == "yes" else get(eq, "archetype"),
                                  "parent": get(eq, "parent"), "cost": cost, "year": year, "picture": get(eq, "picture"),
+                                 "resources": resources_of(get(eq, "resources")),
                                  "buildable": get(eq, "is_buildable") != "no" and get(eq, "is_archetype") != "yes"}
+
+    def inherited_resources(name, depth=0):
+        e = entries.get(name)
+        if e is None or depth > 8:
+            return None
+        if e["resources"] is not None:
+            return e["resources"]
+        for link in (e["parent"], e["archetype"]):
+            if link and link != name:
+                r = inherited_resources(link, depth + 1)
+                if r is not None:
+                    return r
+        return None
 
     def cost_of(name, depth=0):
         e = entries.get(name)
@@ -1277,8 +1292,21 @@ def load_equipment_info(hoi4: Path):
         return None
 
     return {n: {"archetype": e["archetype"], "cost": cost_of(n), "year": e["year"], "buildable": e["buildable"],
-                "picture": picture_of(n)}
+                "picture": picture_of(n), "resources": inherited_resources(n) or {}}
             for n, e in entries.items() if e["archetype"]}
+
+
+def resources_of(block):
+    """A `resources = { steel = 2 }` block as {"steel": 2}; None when the equipment has no such block."""
+    if not isinstance(block, list):
+        return None
+    out = {}
+    for k, _, v in block:
+        try:
+            out[k] = int(float(v))
+        except (TypeError, ValueError):
+            pass
+    return out
 
 
 def write_equipment_catalog(hoi4: Path, out: Path, tags, equipment, tech_equipment, loc, sprite_names, land_archetypes,
@@ -1307,6 +1335,7 @@ def write_equipment_catalog(hoi4: Path, out: Path, tags, equipment, tech_equipme
         describe_equipment("", {arch: b}, equipment, tech_equipment, loc, sprite_names)
         cat[name] = {"archetype": arch, "parent": parents.get(name), "year": info["year"], "cost": info["cost"],
                      "general": b["general"], "archetype_name": b["archetype_name"], "sprite": b["sprite"],
+                     "resources": b["resources"],
                      "stats": {k: round(v, 3) for k, v in sorted(stats.get(name, {}).items())}}
         if tanks and arch in tanks.tank_archetypes:
             cat[name]["legacy"] = True
@@ -1314,6 +1343,7 @@ def write_equipment_catalog(hoi4: Path, out: Path, tags, equipment, tech_equipme
         desc = describe_design(did)
         cat[did] = {"archetype": d["archetype"], "parent": None, "year": d["year"], "order": d["order"], "cost": d["cost"],
                     "general": desc["general"], "archetype_name": desc["archetype_name"], "sprite": desc["sprite"],
+                    "resources": desc["resources"],
                     "stats": d["stats"], "design": {"type": d["type"], "modules": d["modules"], "upgrades": d["upgrades"]},
                     "chassis": d["type"], "family": d["family"], "chassis_parent": d["chassis_parent"],
                     "obsolete": d["obsolete"], "legacy_of": desc["legacy"]}
@@ -1448,7 +1478,8 @@ def load_parent(hoi4: Path):
 def describe_equipment(tag, buildable, equipment, tech_equipment, loc, sprite_names):
     """Adds what the production screen shows to each of a country's buildable equipment (in place): `name` (the
     country's design name, FRA_infantry_equipment_1 "MAS-36", else the generic one), `general` (infantry_equipment_1
-    "Infantry Equipment I"), `archetype_name` and `sprite`, the picture HOI4 uses: the technology that unlocks it
+    "Infantry Equipment I"), `archetype_name`, `resources` (what a factory building it uses) and `sprite`, the
+    picture HOI4 uses: the technology that unlocks it
     (GFX_FRA_infantry_weapons1_medium, then GFX_infantry_weapons1_medium), then the equipment, then its `picture`."""
     tech_of = {}
     for tech, es in sorted(tech_equipment.items()):
@@ -1460,6 +1491,7 @@ def describe_equipment(tag, buildable, equipment, tech_equipment, loc, sprite_na
         b["name"] = loc.get(f"{tag}_{eq}") or general
         b["general"] = general
         b["archetype_name"] = loc.get(arch) or arch
+        b["resources"] = dict((equipment.get(eq) or {}).get("resources") or {})
         techs = [tech_of.get(eq), tech_of.get(eq.replace("_equipment_", "_chassis_"))]
         names = []
         for tech in [x for x in techs if x]:
@@ -1626,11 +1658,7 @@ def convert_oob(hoi4: Path, out: Path, existing_tags, ruling_party):
     designer_subs = designer_sub_units(subs)
     loc = load_localisation(hoi4 / "localisation" / "english")
     def has_texture(s):
-        tex = s.get("texture")
-        if not tex:
-            return False
-        f = hoi4 / tex
-        return any(f.with_suffix(ext).exists() for ext in (f.suffix, ".dds", ".tga", ".png"))
+        return gui.find_image(hoi4, s.get("texture"), s.get("root")) is not None
     sprite_names = {n for n, s in gui.load_sprites(hoi4).items() if has_texture(s)}  # pictures that exist
     land_archetypes = {a for n in designer_subs for a in subs[n]["need"]}
     import hoi4_tanks
@@ -1653,8 +1681,9 @@ def convert_oob(hoi4: Path, out: Path, existing_tags, ruling_party):
         describe_equipment(d["tag"], {d["archetype"]: b}, equipment, tech_equipment, loc, sprite_names)
         name = b["general"] if d["name"] == d["type"] else d["name"]
         sprite = d["icon"] if d.get("icon") in sprite_names else b["sprite"]
+        # resources: the chassis's own (what the modules add is not counted)
         described[did] = {"name": name, "general": name, "archetype_name": b["archetype_name"], "sprite": sprite,
-                          "legacy": legacy}
+                          "resources": dict((equipment.get(d["type"]) or {}).get("resources") or {}), "legacy": legacy}
         return described[did]
 
     countries = {}
@@ -2713,15 +2742,47 @@ PRODUCTION_SPRITES = {
     "show_upgrading": "GFX_upgrading_checkbox",
     "picker_item": "GFX_equipment_item_large_02", "picker_glow": "GFX_new_equipment_glow_large",
     "resource_item": "resource_item_background",
+    # collapsed lines (production_military_line_entry_collapsed) and the expand / collapse arrow (frames 2 and 8)
+    "item_collapsed": "GFX_production_item_collapsed", "equipment_collapsed": "GFX_equipment_item_collapsed",
+    "column_button": "GFX_division_list_column_button",
+    # the equipment window's top (production_equipment_window_military) and its entries' buttons
+    "checkbox": "GFX_generic_checkbox", "text_bg_203": "GFX_generic_text_bg_203", "generic_bg2": "GFX_generic_bg2",
+    "mini_bg": "GFX_mini_bg", "mio_icon": "GFX_industrial_manufacturer_icon", "list_bg": "GFX_tiled_bg_1_scrollbar",
+    "variants_button": "GFX_create_variants_button", "obsolete_button": "GFX_toggle_obsolete_button",
+    "role_icon": "GFX_land_equipment_role_icons", "cost_icon": "GFX_production_cost",
+    # outdated equipment: over a line's equipment (full and collapsed) and over an equipment window entry
+    "outdated_overlay": "GFX_outdated_equipment_overlay",
+    "outdated_overlay_collapsed": "GFX_outdated_equipment_overlay_collapsed",
+    "picker_outdated_overlay": "GFX_outdated_naval_equipment_overlay",
+    # a resource the lines use more of than the country has (frames in GFX_resources_strip's order)
+    "missing_resource": "GFX_missing_resources_strip",
 }
-# Progress bars (progressbartype): file name -> texture under the HOI4 install (fill, background)
+# Progress bars (progressbartype): file name -> texture under the HOI4 install (fill, background), or (texture,
+# rows): the fill textures stack three rows (empty, the fill, the shader's edge gradient) and only the fill row is
+# written, so that nothing of the other rows shows at the bar's edges when the UI is scaled.
 PRODUCTION_BARS = {
-    "efficiency_bar": "gfx/interface/efficiency_progressbar.dds",
+    "efficiency_bar": ("gfx/interface/efficiency_progressbar.dds", 3),
     "efficiency_bar_max": "gfx/interface/efficiency_progressbar_bg_max.dds",
     "efficiency_bar_bg": "gfx/interface/efficiency_progressbar_bg.dds",
-    "progress_bar": "gfx/interface/prod_progress_bar2.dds",
+    "progress_bar": ("gfx/interface/prod_progress_bar2.dds", 3),
+    "progress_bar_yellow": ("gfx/interface/prod_progress_bar2_yellow.dds", 3),  # the line lacks a resource
+    "progress_bar_red": ("gfx/interface/prod_progress_bar2_red.dds", 3),        # ... badly (penalty over 80%)
     "progress_bar_bg": "gfx/interface/prod_progress_bar2_bg.dds",
 }
+
+
+def bleed_alpha(img):
+    """The image with every fully transparent pixel given the colour of the nearest visible one (its alpha stays
+    0). HOI4's textures often have white there, which the GPU's bilinear filter mixes into the edge of a sprite
+    drawn scaled: a pale fringe."""
+    from scipy import ndimage
+    a = np.array(img.convert("RGBA"))
+    clear = a[..., 3] == 0
+    if not clear.any() or clear.all():
+        return img
+    idx = ndimage.distance_transform_edt(clear, return_distances=False, return_indices=True)
+    a[..., :3] = a[idx[0], idx[1], :3]
+    return Image.fromarray(a, "RGBA")
 
 
 # Construction screen (interface/countryconstructionsview.gui) sprites: file name -> GFX sprite (frames as name_N.png).
@@ -2903,13 +2964,16 @@ def convert_production_gfx(hoi4: Path, out: Path, oob_countries):
             print(f"  production: no sprite {spr}")
             continue
         for i, fr in enumerate(frames):
-            fr.save(dst / (f"{name}.png" if len(frames) == 1 else f"{name}_{i}.png"))
+            bleed_alpha(fr).save(dst / (f"{name}.png" if len(frames) == 1 else f"{name}_{i}.png"))
     for name, rel in PRODUCTION_BARS.items():
+        rel, rows = rel if isinstance(rel, tuple) else (rel, 1)
         img = gui.load_image(hoi4, rel)
         if img is None:
             print(f"  production: no texture {rel}")
             continue
-        img.save(dst / f"{name}.png")
+        if rows == 3:  # the fill row
+            img = img.crop((0, img.height // 3, img.width, 2 * img.height // 3))
+        bleed_alpha(img).save(dst / f"{name}.png")
     pictures = {b["sprite"] for c in oob_countries.values() for b in c.get("equipment", {}).values() if b.get("sprite")}
     cat_file = out / "common" / "hoi4_equipment.json5"  # what research can unlock (write_equipment_catalog)
     if cat_file.exists():

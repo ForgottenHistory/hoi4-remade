@@ -63,8 +63,20 @@
     <!-- production_equipment_window_military: the equipment to add a line for, right of the window -->
     <ui:VisualElement name="production-picker" class="pr-picker" picking-mode="Position">
         <ui:VisualElement class="spr pr-plain-bg" picking-mode="Ignore" />
-        <ui:Label name="pr-picker-title" class="hoi4-label pr-picker-title" picking-mode="Ignore" />
+        <!-- production_MIOs: no industrial organisations yet, so 0 -->
+        <ui:VisualElement class="spr pr-picker-mio-bg" picking-mode="Ignore" />
+        <ui:VisualElement class="spr pr-picker-mio-icon" picking-mode="Ignore" />
+        <ui:Label class="hoi4-label center pr-picker-mio" text="0" picking-mode="Ignore" />
+        <!-- show outdated equipment: also lists what the country marked or research made outdated -->
+        <ui:VisualElement name="pr-picker-outdated" class="spr hoi4-button pr-picker-outdated" picking-mode="Position" />
+        <ui:VisualElement class="spr pr-picker-outdated-bg" picking-mode="Ignore" />
+        <ui:Label class="hoi4-label pr-picker-outdated-text" text="Show &lt;color=#F7D45A&gt;outdated equipment&lt;/color&gt;" picking-mode="Ignore" />
+        <!-- resources: an icon and a checkbox each (filled by Hoi4ProductionPanel); unchecked hides what uses it -->
+        <ui:VisualElement name="pr-picker-resources" class="pr-picker-resources" picking-mode="Ignore">
+            <ui:VisualElement class="spr pr-picker-resources-bg" picking-mode="Ignore" />
+        </ui:VisualElement>
         <ui:VisualElement name="pr-picker-close" class="spr hoi4-button pr-picker-close" picking-mode="Position" />
+        <ui:VisualElement class="spr pr-picker-list-bg" picking-mode="Ignore" />
         <ui:ScrollView name="pr-picker-list" class="pr-picker-list" mode="Vertical" horizontal-scroller-visibility="Hidden" />
     </ui:VisualElement>
 </ui:UXML>

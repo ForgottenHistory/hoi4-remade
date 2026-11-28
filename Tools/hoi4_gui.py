@@ -26,9 +26,15 @@ def kv(items, key):
 
 
 def load_sprites(hoi4: Path):
-    """name -> dict(texture, frames, mask, overlay, kind) from every interface/*.gfx."""
+    """name -> dict(texture, frames, mask, overlay, kind, root) from every interface/*.gfx (subfolders after), then the DLCs'
+    (dlc/*/interface/*.gfx), which replace the base game's: an expansion's pictures (La Resistance's armoured cars)
+    are placeholders in the base game. `root` is the DLC directory its textures are looked up in first (None: the
+    base game)."""
     sprites = {}
-    for f in sorted((hoi4 / "interface").glob("*.gfx")):
+    files = [(f, None) for f in sorted((hoi4 / "interface").glob("*.gfx"))]
+    files += [(f, None) for f in sorted((hoi4 / "interface").glob("*/**/*.gfx"))]  # subfolders (MIO icons)
+    files += [(f, f.parent.parent) for f in sorted((hoi4 / "dlc").glob("*/interface/*.gfx"))]
+    for f, dlc in files:
         root = parse_pdx(read_text(f))
         for _, _, block in root:
             if not isinstance(block, list):
@@ -49,6 +55,7 @@ def load_sprites(hoi4: Path):
                     "mask": kv(s, "textureFile2"),
                     "overlay": kv(s, "textureFile1"),
                     "kind": k,
+                    "root": dlc,
                 }
     return sprites
 
@@ -56,23 +63,30 @@ def load_sprites(hoi4: Path):
 _image_cache = {}
 
 
-def load_image(hoi4: Path, rel):
-    """RGBA image of a file under the HOI4 install (tries .dds/.tga/.png when the named one is missing)."""
+def find_image(hoi4: Path, rel, root=None):
+    """The file of a texture: under `root` (a sprite's DLC directory) first, then the HOI4 install; tries
+    .dds/.tga/.png when the named one is missing. None when there is none."""
     if rel is None:
         return None
     rel = rel.replace("//", "/")
-    if rel in _image_cache:
-        return _image_cache[rel]
-    p = hoi4 / rel
-    if not p.exists():
+    for base in ([root] if root else []) + [hoi4]:
+        p = base / rel
+        if p.exists():
+            return p
         for ext in (".dds", ".tga", ".png"):
-            q = p.with_suffix(ext)
-            if q.exists():
-                p = q
-                break
-    img = Image.open(p).convert("RGBA") if p.exists() else None
-    _image_cache[rel] = img
-    return img
+            if p.with_suffix(ext).exists():
+                return p.with_suffix(ext)
+    return None
+
+
+def load_image(hoi4: Path, rel, root=None):
+    """RGBA image of a texture (find_image), None when it is missing."""
+    p = find_image(hoi4, rel, root)
+    if p is None:
+        return None
+    if p not in _image_cache:
+        _image_cache[p] = Image.open(p).convert("RGBA")
+    return _image_cache[p]
 
 
 def sprite_frames(hoi4: Path, sprites, name):
@@ -80,7 +94,7 @@ def sprite_frames(hoi4: Path, sprites, name):
     s = sprites.get(name)
     if s is None:
         return []
-    img = load_image(hoi4, s["texture"])
+    img = load_image(hoi4, s["texture"], s.get("root"))
     if img is None:
         return []
     n = max(1, s["frames"])
@@ -105,8 +119,8 @@ def masked_flag(hoi4: Path, sprites, name, tag, ideology):
     s = sprites.get(name)
     if s is None or not s["mask"]:
         return None
-    mask = load_image(hoi4, s["mask"])
-    overlay = load_image(hoi4, s["overlay"])
+    mask = load_image(hoi4, s["mask"], s.get("root"))
+    overlay = load_image(hoi4, s["overlay"], s.get("root"))
     fpath = flag_file(hoi4, tag, ideology)
     if mask is None or fpath is None:
         return None

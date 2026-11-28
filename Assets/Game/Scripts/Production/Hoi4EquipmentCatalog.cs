@@ -30,6 +30,8 @@ namespace Hoi4.Production
             public FP Cost;                // build_cost_ic
             public string General, ArchetypeName, Sprite;
             public readonly Dictionary<string, FP> Stats = new Dictionary<string, FP>();
+            /// <summary>What each factory building it uses (steel 2). Shown only: resources are not modelled.</summary>
+            public readonly Dictionary<string, int> Resources = new Dictionary<string, int>();
             public int Order;              // tank designs: creation order (a later design of the same chassis is newer)
             public string Chassis, Family, ChassisParent; // tank designs: light_tank_chassis_2, its base tier, its parent
             public bool Legacy, Obsolete;  // a fixed tank design (no longer built) / a history design marked obsolete
@@ -110,6 +112,7 @@ namespace Hoi4.Production
                         e.Design = Hoi4TankDesigns.Design.FromJson(d);
                         e.Owner = p.Name.Contains(":") ? p.Name.Substring(0, p.Name.IndexOf(':')) : null;
                     }
+                    if (o["resources"] is JObject res) foreach (var r in res.Properties()) e.Resources[r.Name] = (int)r.Value;
                     if (o["stats"] is JObject st) foreach (var s in st.Properties()) e.Stats[s.Name] = FP.FromDouble((double)s.Value);
                     entries[p.Name] = e.Resolve();
                 }
@@ -137,6 +140,9 @@ namespace Hoi4.Production
         }
 
         public static Entry Get(string equipment) => equipment != null && entries.TryGetValue(equipment, out var e) ? e : null;
+
+        /// <summary>Every entry (no fixed order: sort before anything that must be the same on every machine).</summary>
+        public static IEnumerable<Entry> All => entries.Values;
 
         static int registered = 100000; // runtime designs come after every file entry
 
