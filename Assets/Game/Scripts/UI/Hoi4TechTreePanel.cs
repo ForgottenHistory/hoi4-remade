@@ -23,6 +23,8 @@ namespace Hoi4.UI
     ///   picture is the country's own where it has one.
     /// - Background by state: researched, available, researching (9-frame chevron strip, 15 fps), unavailable.
     /// - Links run through slot centres: one slot along y, then along x, then along y; coloured by the child's state.
+    /// Holding the left button and dragging pans the folder both ways (the scrollbars follow: it sets the view's
+    /// scroll offset); a press that does not move stays a click on the tech under it.
     /// Folders are built once per country and folder; states refresh four times a real second and the strip animates
     /// on real time (presentation throttles, not game time).
     /// </summary>
@@ -73,6 +75,11 @@ namespace Hoi4.UI
         readonly Dictionary<string, VisualElement> tabButtons = new Dictionary<string, VisualElement>();
         readonly List<string> folderOrder = new List<string>();
         string folder = DefaultFolder;
+        // panning: the left button went down in the view at panStart (panel px) with the view scrolled to panOffset
+        const float PanThreshold = 4f;
+        bool panPressed, panning;
+        Vector2 panStart, panOffset;
+        int panEndFrame = -1; // the frame a pan ended: its release is not a click on a tech
         ushort builtFor;
         int targetSlot;
         bool open;
@@ -138,6 +145,33 @@ namespace Hoi4.UI
             });
             panel.Q("tt-close").RegisterCallback<ClickEvent>(_ => Close());
 
+            // pan with the left button held. Trickle down: a drag that starts on a tech pans too
+            var view = scroll.contentViewport;
+            view.RegisterCallback<PointerDownEvent>(evt =>
+            {
+                if (evt.button != 0) return;
+                panPressed = true;
+                panning = false;
+                panStart = evt.position;
+                panOffset = scroll.scrollOffset;
+            }, TrickleDown.TrickleDown);
+            view.RegisterCallback<PointerMoveEvent>(evt =>
+            {
+                if (!panPressed) return;
+                if ((evt.pressedButtons & 1) == 0) { EndPan(view, evt.pointerId); return; } // released outside the view
+                Vector2 delta = (Vector2)evt.position - panStart;
+                if (!panning)
+                {
+                    if (delta.magnitude < PanThreshold) return;
+                    panning = true;
+                    view.CapturePointer(evt.pointerId); // keeps panning when the pointer leaves the view
+                }
+                scroll.scrollOffset = panOffset - delta; // the view clamps it and moves its scrollbars
+                evt.StopPropagation();
+            }, TrickleDown.TrickleDown);
+            view.RegisterCallback<PointerUpEvent>(evt => { if (evt.button == 0) EndPan(view, evt.pointerId); }, TrickleDown.TrickleDown);
+            view.RegisterCallback<PointerCaptureOutEvent>(_ => { panPressed = panning = false; });
+
             if (layout["folders"] is JObject folders)
                 foreach (var f in folders.Properties())
                 {
@@ -159,6 +193,13 @@ namespace Hoi4.UI
         {
             if (Instance == this) Instance = null;
             Hoi4UiHover.Remove(this);
+        }
+
+        void EndPan(VisualElement view, int pointerId)
+        {
+            if (panning) panEndFrame = Time.frameCount;
+            panPressed = panning = false;
+            if (view.HasPointerCapture(pointerId)) view.ReleasePointer(pointerId);
         }
 
         static ushort Player
@@ -434,6 +475,7 @@ namespace Hoi4.UI
 
         void Pick(int tech)
         {
+            if (panning || Time.frameCount == panEndFrame) return; // the end of a pan, not a click
             var research = Hoi4Research.Instance;
             ushort player = Player;
             if (research == null || player == 0) return;
